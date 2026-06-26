@@ -1,0 +1,37 @@
+[package]
+name = "cp77-console"
+version = "0.1.0"
+edition = "2021"
+
+# .dylib carregada pelo jogo (LC_LOAD_DYLIB). Hooks via biblioteca de
+# instrumentação chamada de RUST — zero JavaScript, zero Lua.
+[lib]
+name = "cp77_console"
+crate-type = ["cdylib"]
+
+# `dev-gadget`: build da trilha de DEV — adiciona a checagem de injetor externo
+# (pra coexistir com a ferramenta de dev sem duplicar o hook). FORA do default:
+# o build PÚBLICO 0.1.0 carrega nativo e nem compila essa checagem/strings.
+[features]
+default = []
+dev-gadget = []
+# `capture`: módulo experimental de captura de frame/depth (uso interno). OFF por padrão
+# = não entra na dylib pública. Liga com `--features capture`.
+capture = []
+# `lua`: gateway OPCIONAL p/ rodar mods CET (Lua) antigos do Windows. OFF por padrão =
+# core 0% Lua, sem luajit no binário. Liga com `--features lua` só quem quiser compat CET.
+lua = ["dep:mlua"]
+
+[profile.release]
+opt-level = 2
+panic = "abort"   # uma .dylib carregada no jogo não deve unwind pro processo
+
+# overlay: render no frame do jogo via Metal (metal-rs) + bridge de ponteiros cru
+# (foreign-types) do nosso swizzle. O resto (engine RTTI) segue zero-dep.
+[dependencies]
+metal = "0.29"
+foreign-types = "0.5"
+imgui = "0.12"
+# Rota A (compat CET): runtime Lua OPCIONAL (feature `lua`). LuaJIT = o que os mods CET usam.
+# Fora do default → o build público não embute luajit (core 0% Lua).
+mlua = { version = "0.10", features = ["luajit", "vendored"], optional = true }

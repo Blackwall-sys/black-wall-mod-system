@@ -1,0 +1,24 @@
+# bwms-core — lógica COMPARTILHADA do Black Wall Mod System (zero-dep, só std).
+# Núcleo: classify (analisa um mod), theme (categoriza + estado/JSON), apply
+# (reconcilia a pasta de mods e sincroniza os .archive pro content do jogo).
+# Consumido por: bwms (CLI), mac-mod-manager (legado) e — futuro — o dylib
+# (aba LUT). Um lugar só = sem duplicar a "cola" entre as ferramentas.
+[package]
+name = "bwms-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Núcleo compartilhado do Black Wall Mod System: classificar/categorizar/instalar mods do Cyberpunk 2077 no macOS. Zero-dep."
+authors = ["blackwall"]
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "bwms_core"
+path = "src/lib.rs"
+
+# Crate isolado de qualquer workspace pai (mods-research tem vários repos clonados).
+[workspace]
+
+[profile.release]
+opt-level = 3
+lto = true

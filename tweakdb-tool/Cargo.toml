@@ -1,0 +1,28 @@
+# tweakdb-tool — CLI standalone para ler o tweakdb.bin do Cyberpunk 2077.
+# Zero dependências (só std). Os flats NÃO são comprimidos: não precisa de Kraken.
+[package]
+name = "tweakdb-tool"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Lê/mapeia o tweakdb.bin (records, flats, queries, group tags) do Cyberpunk 2077."
+authors = ["blackwall"]
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "tweakdb-tool"
+path = "src/main.rs"
+
+# Crate isolado de qualquer workspace pai (mods-research tem vários repos).
+[workspace]
+
+[features]
+# `kraken`: compila/linka o ooz (../ooz) via build.rs para descomprimir a
+# tweakdbstr.kark (lista de nomes). Default. `--no-default-features` = puro std
+# (lê o tweakdb.bin e listas .bin já descomprimidas, mas não .kark).
+default = ["kraken"]
+kraken = []
+
+[profile.release]
+opt-level = 3
+lto = true

@@ -1,0 +1,26 @@
+# bwms — CLI ÚNICA do Black Wall Mod System. Uma porta de entrada pras funções
+# de modding. Os comandos de mod (classify/suggest/list/apply) rodam IN-PROCESS
+# via `bwms-core` (mesma lógica do mod-manager, sem duplicar, sem shellar). As
+# ferramentas de dados pesadas (tweak/archive — têm C++/ooz e build.rs próprio)
+# ficam standalone e a `bwms` as front-enda como subcomando.
+[package]
+name = "bwms"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "CLI unificada do Black Wall Mod System (macOS): classifica/instala mods + front-end de tweak/archive."
+authors = ["blackwall"]
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "bwms"
+path = "src/main.rs"
+
+# Crate isolado de qualquer workspace pai (mods-research tem vários repos clonados).
+[workspace]
+
+[dependencies]
+bwms-core = { path = "../bwms-core" }
+
+[profile.release]
+opt-level = 3

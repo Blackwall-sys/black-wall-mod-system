@@ -1,0 +1,30 @@
+# archive-tool — CLI standalone para ler/extrair .archive (RDAR) do Cyberpunk 2077 no macOS.
+# Zero dependências: só `std`. Compila offline, em arm64-apple-darwin, sem rede.
+[package]
+name = "archive-tool"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Lê o índice de um .archive (RDAR) do Cyberpunk 2077, gera datamap.md e extrai conteúdo (Kraken pendente)."
+authors = ["blackwall"]
+license = "MIT OR Apache-2.0"
+
+[[bin]]
+name = "archive-tool"
+path = "src/main.rs"
+
+# Tabela [workspace] vazia: mantém o crate isolado de qualquer workspace pai
+# (mods-research contém vários repos clonados; não queremos ser absorvidos).
+[workspace]
+
+[features]
+# `kraken`: compila e linka o decodificador Kraken nativo (ooz, em ../ooz,
+# adaptado p/ arm64) via build.rs, destravando extração comprimida e leitura de
+# listas .kark. É default — o build precisa de `clang++` e da fonte do ooz.
+# Para um build puro-std (só datamap + extração crua), use --no-default-features.
+default = ["kraken"]
+kraken = []
+
+[profile.release]
+opt-level = 3
+lto = true

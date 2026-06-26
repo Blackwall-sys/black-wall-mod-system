@@ -1,0 +1,44 @@
+# ── Privado: nunca publicar ──────────────────────────────────────────────
+# Backups (contêm projeto secreto + dado derivado do jogo)
+_blackwall-backup*/
+*.dylib.working
+.blackwall_tweakdb.bin
+**/.blackwall_*
+
+# Projeto secreto CPVR (captura VR) — módulo opcional, não vai ao repo público
+cpvr/
+**/*.cpvr*
+cp77-console/src/capture.rs
+
+# Tooling pessoal de dev (caminhos da máquina / fluxo interno)
+deploy.sh
+bwms-fastboot.sh
+bwms-ai-agent.sh
+CLAUDE.md
+
+# ── Build artifacts (vazam paths de ~/.cargo) ────────────────────────────
+target/
+**/target/
+dist/test-builds/
+
+# ── Dado derivado do jogo (copyright) ────────────────────────────────────
+**/*.kark
+**/tweakdb*.bin
+**/usedhashes.kark
+
+# ── macOS ────────────────────────────────────────────────────────────────
+**/.DS_Store
+
+# ── Clones de terceiros (têm repo/licença próprios; o README diz como obter) ─
+RED4ext.SDK/
+RED4ext-macos/
+WolvenKit/
+ooz/
+redscript/
+cp2077-archive-xl/
+cp2077-tweak-xl/
+enablers/
+Kraken/
+luacheck/
+_competitor-ref/
+cp77-symbols/

@@ -1,0 +1,16 @@
+[package]
+name = "mac-mod-manager"
+version = "0.1.0"
+edition = "2021"
+description = "Instalador/validador SEGURO de mods Cyberpunk 2077 no macOS — classifica, detecta dependências, instala transacional (zero-dep, nunca executa comandos do autor)."
+
+[[bin]]
+name = "cp77-mods"
+path = "src/main.rs"
+
+[dependencies]
+# Núcleo compartilhado: classify/theme/apply (antes eram módulos locais).
+bwms-core = { path = "../bwms-core" }
+
+[profile.release]
+opt-level = 2

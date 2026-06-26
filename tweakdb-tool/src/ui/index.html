@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tweakdb — editor de mods (Cyberpunk 2077, macOS)</title>
+<style>
+  :root{--bg:#0e1116;--panel:#171c24;--line:#2a323e;--fg:#d7dde6;--mut:#8a94a3;
+        --acc:#ffd34d;--ok:#5fd28a;--bad:#ff6b6b;--inp:#0b0e13;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:12px 18px;border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:5}
+  header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.2px}
+  header h1 b{color:var(--acc)}
+  .pill{margin-left:auto;font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--line)}
+  .pill.van{color:var(--ok);border-color:#2c5a3f}
+  .pill.mod{color:var(--acc);border-color:#5a4f2c}
+  nav{display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+  nav button{background:transparent;border:1px solid transparent;color:var(--mut);padding:6px 12px;border-radius:7px;cursor:pointer;font-size:13px}
+  nav button.on{color:var(--fg);background:var(--inp);border-color:var(--line)}
+  main{padding:18px;max-width:1000px;margin:0 auto}
+  .tab{display:none}.tab.on{display:block}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);margin:0 0 10px}
+  input,textarea,select{background:var(--inp);border:1px solid var(--line);color:var(--fg);border-radius:7px;padding:7px 9px;font:13px ui-monospace,SFMono-Regular,Menlo,monospace}
+  input[type=text]{width:100%}
+  textarea{width:100%;min-height:240px;resize:vertical}
+  button.act{background:var(--acc);color:#1a1407;border:0;padding:8px 14px;border-radius:7px;font-weight:600;cursor:pointer}
+  button.gho{background:transparent;border:1px solid var(--line);color:var(--fg);padding:8px 14px;border-radius:7px;cursor:pointer}
+  button.danger{border-color:#5a2c2c;color:var(--bad)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .muted{color:var(--mut)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+  table{width:100%;border-collapse:collapse;font:12px ui-monospace,Menlo,monospace}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--mut);font-weight:500;position:sticky;top:0;background:var(--panel)}
+  td .ty{color:var(--mut);font-size:11px}
+  td input{width:100%}
+  tr.changed td input{border-color:var(--acc)}
+  .list{max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:8px}
+  .list .it{padding:5px 10px;border-bottom:1px solid var(--line);cursor:pointer;font:12px ui-monospace,Menlo,monospace}
+  .list .it:hover{background:var(--inp)}
+  .res{margin-top:10px;font:12px ui-monospace,Menlo,monospace;max-height:260px;overflow:auto}
+  .res .ok{color:var(--ok)}.res .bad{color:var(--bad)}
+  .note{font-size:12px;color:var(--mut);border-left:2px solid var(--line);padding-left:10px;margin:8px 0}
+  .warn{border-left-color:var(--acc);color:#cdb87a}
+  code{background:var(--inp);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1><b>tweakdb</b> — editor de mods · Cyberpunk 2077 (macOS)</h1>
+  <span id="pill" class="pill">…</span>
+</header>
+<nav>
+  <button data-t="navegar" class="on">Navegar</button>
+  <button data-t="editar">Editar record</button>
+  <button data-t="yaml">YAML (TweakXL)</button>
+  <button data-t="instalar">Instalar</button>
+</nav>
+<main>
+
+  <section class="tab on" id="t-navegar">
+    <div class="card">
+      <h2>Procurar record / flat</h2>
+      <div class="row">
+        <input type="text" id="q" placeholder="ex.: Lexington, HandgunAmmo, Vehicle.v_sport…" style="flex:1">
+        <button class="act" onclick="doFind()">Procurar</button>
+      </div>
+      <div class="list" id="hits" style="margin-top:10px;display:none"></div>
+      <p class="note">Clique num resultado pra abrir o record na aba <b>Editar</b>. Records de itens, armas, veículos, perks, vendors, loot — tudo está aqui.</p>
+    </div>
+    <div class="card">
+      <h2>Visão geral</h2>
+      <div class="row">
+        <button class="gho" onclick="loadAreas()">Áreas do jogo</button>
+        <button class="gho" onclick="loadClasses()">Classes de record</button>
+      </div>
+      <div class="res" id="overview"></div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-editar">
+    <div class="card">
+      <h2>Abrir record</h2>
+      <div class="row">
+        <input type="text" id="recname" placeholder="Items.Preset_Lexington_Default" style="flex:1">
+        <button class="act" onclick="loadRecord()">Abrir</button>
+      </div>
+      <p class="note">Edite os valores que quiser. Só os campos <b>alterados</b> entram no mod. Use <code>$Nome.Do.Record</code> para referências (TweakDBID) e <code>[a, b, c]</code> para listas.</p>
+    </div>
+    <div class="card" id="reccard" style="display:none">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="rectitle" style="margin:0"></h2>
+        <div class="row">
+          <button class="gho" onclick="applyEdits(true)">Validar</button>
+          <button class="act" onclick="applyEdits(false)">Aplicar mudanças</button>
+        </div>
+      </div>
+      <div style="max-height:430px;overflow:auto;margin-top:8px">
+        <table id="proptbl"><thead><tr><th>propriedade</th><th>tipo</th><th>valor</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="res" id="editres"></div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-yaml">
+    <div class="card">
+      <h2>Tweak declarativo (formato TweakXL .yaml)</h2>
+      <textarea id="yaml" spellcheck="false"># Exemplo: variante do Lexington com menos recuo
+Items.MyLexington:
+  $base: Items.Preset_Lexington_Default
+  IsIKEnabled: false
+</textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="gho" onclick="applyYaml(true)">Validar</button>
+        <button class="act" onclick="applyYaml(false)">Aplicar</button>
+      </div>
+      <p class="note">Suporta <code>$base</code> (herança), <code>$type</code> (criar do zero), arrays com <code>!append</code>/<code>!prepend</code>/<code>!remove</code> e structs <code>{x,y,z}</code>.</p>
+      <div class="res" id="yamlres"></div>
+    </div>
+  </section>
+
+  <section class="tab" id="t-instalar">
+    <div class="card">
+      <h2>Instalar no jogo</h2>
+      <p class="note warn">O <b>Aplicar</b> (abas Editar/YAML) gera o arquivo modificado. <b>Instalar</b> copia ele pro lugar que o jogo lê, guardando o original. <b>Desfazer</b> volta ao vanilla. Sempre valide no jogo depois de instalar.</p>
+      <div id="instinfo" class="res"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="act" onclick="doInstall()">Instalar</button>
+        <button class="gho" onclick="doBackup()">Backup do atual</button>
+        <button class="gho danger" onclick="doUninstall()">Desfazer (vanilla)</button>
+      </div>
+      <div class="res" id="instres"></div>
+    </div>
+  </section>
+
+</main>
+<script>
+const $=s=>document.querySelector(s);
+async function api(path,opts){const r=await fetch(path,opts);return r.json();}
+function esc(s){return (s+"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+
+// tabs
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id==='t-'+b.dataset.t));
+  if(b.dataset.t==='instalar') refreshStatus();
+});
+
+async function refreshStatus(){
+  const s=await api('/api/status');
+  const p=$('#pill');
+  if(s.state==='vanilla'){p.className='pill van';p.textContent='vanilla';}
+  else if(s.state==='modificado'){p.className='pill mod';p.textContent='modificado';}
+  else {p.className='pill';p.textContent=s.state;}
+  $('#instinfo').innerHTML='alvo: <code>'+esc(s.target)+'</code><br>estado: <b>'+esc(s.state)+'</b>'+
+    (s.pristine?' · pristino guardado ✓':' · sem pristino (ainda não instalado)');
+}
+
+async function doFind(){
+  const q=$('#q').value.trim(); if(!q)return;
+  const d=await api('/api/find?q='+encodeURIComponent(q));
+  const box=$('#hits');box.style.display='block';
+  if(!d.hits.length){box.innerHTML='<div class="it muted">nada encontrado</div>';return;}
+  box.innerHTML=d.hits.map(n=>'<div class="it" onclick="openRec(\''+n.replace(/'/g,"\\'")+'\')">'+esc(n)+'</div>').join('')
+    +(d.total>d.hits.length?'<div class="it muted">… +'+(d.total-d.hits.length)+' (refine a busca)</div>':'');
+}
+function openRec(n){
+  // tira o sufixo .prop pra abrir o record, se vier um flat
+  $('#recname').value=n;
+  document.querySelector('nav button[data-t=editar]').click();
+  loadRecord();
+}
+
+async function loadAreas(){
+  const d=await api('/api/areas');
+  $('#overview').innerHTML='<table><thead><tr><th>área</th><th>flats</th></tr></thead><tbody>'+
+    d.areas.slice(0,40).map(a=>'<tr><td>'+esc(a.area)+'</td><td>'+a.count+'</td></tr>').join('')+'</tbody></table>';
+}
+async function loadClasses(){
+  const d=await api('/api/records');
+  $('#overview').innerHTML='<table><thead><tr><th>type_key</th><th>#records</th><th>exemplo</th></tr></thead><tbody>'+
+    d.classes.slice(0,40).map(c=>'<tr><td>'+c.type_key+'</td><td>'+c.count+'</td><td>'+esc(c.example)+'</td></tr>').join('')+'</tbody></table>';
+}
+
+let LOADED={};
+async function loadRecord(){
+  const name=$('#recname').value.trim(); if(!name)return;
+  const d=await api('/api/record?name='+encodeURIComponent(name));
+  if(d.error||!d.props||!d.props.length){$('#reccard').style.display='block';$('#rectitle').textContent=name;
+    $('#proptbl').querySelector('tbody').innerHTML='<tr><td colspan=3 class="muted">nenhum flat (record inexistente ou criado por você — nomes não estão na lista).</td></tr>';return;}
+  LOADED={name:d.name,vals:{}};
+  $('#reccard').style.display='block';
+  $('#rectitle').textContent=d.name+'  ('+d.count+' props)';
+  const tb=$('#proptbl').querySelector('tbody');
+  tb.innerHTML=d.props.map((p,i)=>{LOADED.vals[p.prop]=p.value;
+    return '<tr><td>'+esc(p.prop)+'</td><td class="ty">'+esc(p.type)+'</td><td><input data-p="'+esc(p.prop)+'" value="'+esc(p.value)+'" oninput="markChg(this)"></td></tr>';}).join('');
+  $('#editres').innerHTML='';
+}
+function markChg(inp){const p=inp.dataset.p;inp.closest('tr').classList.toggle('changed',inp.value!==LOADED.vals[p]);}
+
+function buildChangeset(){
+  const lines=[];
+  $('#proptbl').querySelectorAll('input[data-p]').forEach(inp=>{
+    const p=inp.dataset.p; if(inp.value!==LOADED.vals[p]) lines.push(LOADED.name+'.'+p+' = '+inp.value);
+  });
+  return lines.join('\n');
+}
+async function applyEdits(check){
+  const cs=buildChangeset();
+  if(!cs){$('#editres').innerHTML='<span class="muted">nenhuma mudança.</span>';return;}
+  const d=await api('/api/'+(check?'check':'apply'),{method:'POST',body:cs});
+  renderRes('#editres',d,check);
+  if(!check && d.wrote) refreshStatus();
+}
+async function applyYaml(check){
+  const y=$('#yaml').value;
+  const d=await api('/api/'+(check?'check':'apply')+'?yaml=1',{method:'POST',body:y});
+  renderRes('#yamlres',d,check);
+  if(!check && d.wrote) refreshStatus();
+}
+function renderRes(sel,d,check){
+  if(d.error){$(sel).innerHTML='<span class="bad">erro: '+esc(d.error)+'</span>';return;}
+  let h=(d.results||[]).map(r=>'<div class="'+(r.ok?'ok':'bad')+'">'+(r.ok?'✓':'✗')+' '+esc(r.flat)+' — '+esc(r.detail)+'</div>').join('');
+  h+='<div style="margin-top:6px">'+d.ok+' ok, '+d.fail+' com erro'+
+     (d.wrote?' · <span class="ok">gravado</span> ('+d.bytes+' bytes) — vá em <b>Instalar</b>':
+      (check?' · <span class="muted">validação (nada gravado)</span>':' · <span class="bad">nada gravado</span>'))+'</div>';
+  $(sel).innerHTML=h;
+}
+
+async function doInstall(){const d=await api('/api/install',{method:'POST'});$('#instres').innerHTML=msg(d);refreshStatus();}
+async function doUninstall(){if(!confirm('Voltar ao tweakdb vanilla?'))return;const d=await api('/api/uninstall',{method:'POST'});$('#instres').innerHTML=msg(d);refreshStatus();}
+async function doBackup(){const d=await api('/api/backup',{method:'POST'});$('#instres').innerHTML=msg(d);}
+function msg(d){return d.ok?'<span class="ok">✓ '+esc(d.msg)+'</span>':'<span class="bad">✗ '+esc(d.error)+'</span>';}
+
+$('#q').addEventListener('keydown',e=>{if(e.key==='Enter')doFind();});
+$('#recname').addEventListener('keydown',e=>{if(e.key==='Enter')loadRecord();});
+refreshStatus();
+</script>
+</body>
+</html>
