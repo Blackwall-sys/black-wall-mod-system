@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 # Remapeia o caminho de fonte embutido em panics (deps em ~/.cargo usam file!() com path
 # absoluto) → não vaza /Users/<user> nem o caminho do projeto no binário público.
 # CARGO_ENCODED_RUSTFLAGS (separador \x1f) é OBRIGATÓRIO: o projeto tem espaço no caminho
-# ("Criacao Apps"/"CP Project") e RUSTFLAGS (separado por espaço) quebraria o flag.
+# (caminho com espaço) e RUSTFLAGS (separado por espaço) quebraria o flag.
 PROJ="$(cd .. && pwd)"
 SEP=$'\x1f'
 export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$HOME/.cargo=${SEP}--remap-path-prefix=$HOME=${SEP}--remap-path-prefix=$PROJ="

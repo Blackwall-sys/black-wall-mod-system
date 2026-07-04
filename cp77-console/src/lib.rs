@@ -115,7 +115,7 @@ pub(crate) fn log(msg: &str) {
 }
 
 /// Modo-dev: liga diagnósticos verbosos (trace.log volumoso, logs de registro de hook, o
-/// export `cp77-watch.txt` da era frida). Default OFF → jogo LIMPO, registro "debaixo dos
+/// export `cp77-watch.txt` da era antiga). Default OFF → jogo LIMPO, registro "debaixo dos
 /// panos". Liga com env `BWMS_DEV` ou tocando `/tmp/bwms-dev` (sem mexer no launch da Steam).
 /// Checado 1x e cacheado.
 pub(crate) fn dev_mode() -> bool {
@@ -371,7 +371,7 @@ pub extern "C" fn cp77_tick() {
     // F-B: GetFunction (vtbl+0x30) = vmaddr estático 0x102195024 (descoberto). PARQUEADO — não é
     // o resolvedor do binder do redscript. Resumir = achar/hookar o resolvedor real (~0x2192xxx).
     // Resolve o FromTDBID UMA vez e publica o endereço-alvo: o hook do executor então
-    // captura fn/ctx/ret nativamente quando o jogo o chama (substitui a sonda frida).
+    // captura fn/ctx/ret nativamente quando o jogo o chama (substitui a sonda antiga).
     if selfboot::active() && selfboot::FROMTD_TGT.load(Ordering::Relaxed).is_null() {
         let rf = unsafe { rtti::resolve_func(reg, "gameItemID", "FromTDBID") }
             .or_else(|| unsafe { rtti::resolve_func(reg, "ItemID", "FromTDBID") });
@@ -397,12 +397,12 @@ pub extern "C" fn cp77_tick() {
         let dir = mods_dir();
         if std::path::Path::new(&dir).is_dir() {
             log(&format!("[bwms] auto-load de mods: {dir}"));
-            load_mods_dir(&dir, true); // prod: pula testes/CPVR (carregáveis no manual)
+            load_mods_dir(&dir, true); // prod: pula testes/dev (carregáveis no manual)
         } else {
             log(&format!("[bwms] pasta de mods não achada p/ auto-load: {dir}"));
         }
     }
-    // Carregador de plugin Rust (frida-free, OPT-IN): só age se houver .dylib em
+    // Carregador de plugin Rust (nativo, OPT-IN): só age se houver .dylib em
     // red4ext/plugins/. Sem plugin = zero impacto (Lua/jogo do usuário intactos).
     if !PLUGINS_LOADED.swap(true, Ordering::Relaxed) {
         if let Some(red4) = std::path::Path::new(&mods_dir()).parent() {
@@ -490,7 +490,7 @@ pub extern "C" fn cp77_obs_before(
     frame: *mut c_void,
 ) -> u8 {
     // dispatch_before lê os args do frame e roda Observe/Override(wrapped); devolve suppress.
-    // Export FFI legado (sonda frida, morta): sem aOut aqui → res=null. Com res null o
+    // Export FFI legado (sonda antiga, morta): sem aOut aqui → res=null. Com res null o
     // override-total de retorno POD não grava nada (write_pod_ret=false) → cai no suppress
     // só-void de antes (seguro). O caminho vivo é o `exec_replacement` (passa o aOut real).
     u8::from(unsafe { hooks::dispatch_before(mcname, func, ctx, frame, std::ptr::null_mut()) })
@@ -507,13 +507,13 @@ pub extern "C" fn cp77_obs_after(mcname: u64, ctx: *mut c_void, res: *mut c_void
 
 /// Carrega os mods de `<dir>/<nome>/init.lua` (estado limpo + onInit de todos).
 /// `prod_only`=true (auto-load do primeiro uso) PULA mods de teste/experimentais
-/// (nome com "Test" ou começando com "CPVR") — eles continuam vivos via `loadmods`
+/// (nome com "Test" ou começando com "dev") — eles continuam vivos via `loadmods`
 /// manual, nada é removido. `prod_only`=false carrega tudo.
 fn load_mods_dir(dir: &str, prod_only: bool) -> usize {
     unsafe { lua::reset() };
     let mut count = 0usize;
     // Leitura ROBUSTA do diretório: o `entries.flatten()` antigo ENGOLIA em silêncio uma
-    // entrada com erro de leitura transiente (volume externo MKDeck) → o nativeSettings
+    // entrada com erro de leitura transiente (volume externo) → o nativeSettings
     // sumia sem aviso e o cheats achava "NativeSettings nao encontrado", quebrando o botão
     // Mods. Agora: coleta TODAS as entradas, LOGA qualquer erro, e tenta de novo (até 3x) se
     // alguma entrada falhar — assim um hiccup transiente não derruba mais um mod inteiro.
@@ -549,7 +549,7 @@ fn load_mods_dir(dir: &str, prod_only: bool) -> usize {
             .file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
-        if prod_only && (name.contains("Test") || name.starts_with("CPVR")) {
+        if prod_only && (name.contains("Test") || name.starts_with("dev")) {
             continue; // fora do default; carregável no `loadmods` manual
         }
         let init = path.join("init.lua");
@@ -603,7 +603,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
     // carrega TODOS (coexistindo num estado só), depois dispara onInit de todos.
     // Estrutura de pasta de mod do CET = mods/<NomeDoMod>/init.lua.
     if let Some(dir) = cmd.strip_prefix("loadmods ") {
-        // Manual = carrega TODOS (inclui CPVR/testes).
+        // Manual = carrega TODOS (inclui dev/testes).
         load_mods_dir(dir.trim(), false);
         return;
     }

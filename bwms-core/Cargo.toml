@@ -5,7 +5,7 @@
 # (aba LUT). Um lugar só = sem duplicar a "cola" entre as ferramentas.
 [package]
 name = "bwms-core"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.74"
 description = "Núcleo compartilhado do Black Wall Mod System: classificar/categorizar/instalar mods do Cyberpunk 2077 no macOS. Zero-dep."

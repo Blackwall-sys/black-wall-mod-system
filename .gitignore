@@ -1,22 +1,16 @@
 # ── Privado: nunca publicar ──────────────────────────────────────────────
-# Backups (contêm projeto secreto + dado derivado do jogo)
 _blackwall-backup*/
 *.dylib.working
 .blackwall_tweakdb.bin
 **/.blackwall_*
+_private/
+**/*.private
 
-# Projeto secreto CPVR (captura VR) — módulo opcional, não vai ao repo público
-cpvr/
-**/*.cpvr*
-cp77-console/src/capture.rs
-
-# Tooling pessoal de dev (caminhos da máquina / fluxo interno)
+# ── Tooling de dev (fluxo interno) ───────────────────────────────────────
 deploy.sh
 bwms-fastboot.sh
-bwms-ai-agent.sh
-CLAUDE.md
 
-# ── Build artifacts (vazam paths de ~/.cargo) ────────────────────────────
+# ── Build artifacts ──────────────────────────────────────────────────────
 target/
 **/target/
 dist/test-builds/

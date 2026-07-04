@@ -1,6 +1,6 @@
 [package]
 name = "mac-mod-manager"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "Instalador/validador SEGURO de mods Cyberpunk 2077 no macOS — classifica, detecta dependências, instala transacional (zero-dep, nunca executa comandos do autor)."
 

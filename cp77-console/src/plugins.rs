@@ -1,4 +1,4 @@
-//! Carregador de plugin NATIVO em Rust — frida-free, 100% nosso.
+//! Carregador de plugin NATIVO em Rust — nativo, 100% nosso.
 //!
 //! Escaneia `<jogo>/red4ext/plugins/*.dylib`, faz `dlopen` e chama o entry
 //! `bwms_plugin_main(api_version) -> i32`. Um "mod em Rust" = um cdylib com esse

@@ -5,7 +5,7 @@
 # ficam standalone e a `bwms` as front-enda como subcomando.
 [package]
 name = "bwms"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.74"
 description = "CLI unificada do Black Wall Mod System (macOS): classifica/instala mods + front-end de tweak/archive."

@@ -1342,9 +1342,9 @@ pub unsafe fn from_tdbid(reg: &Registry, name: &str) -> Option<[u8; 16]> {
 
 /// Lê o FromTDBID capturado pela sonda em /tmp/cp77-fromtd.txt (fn/ctx/ret).
 unsafe fn read_fromtd() -> Option<(*mut c_void, *mut c_void, *mut c_void)> {
-    // Captura NATIVA (sem frida): o hook do executor publica fn/ctx/ret do FromTDBID em
+    // Captura NATIVA (nativo): o hook do executor publica fn/ctx/ret do FromTDBID em
     // atomics quando o jogo o chama. Antes vinha de /tmp/cp77-fromtd.txt escrito pela
-    // sonda frida — endereço de OUTRA sessão (ASLR) = morto = crash.
+    // sonda antiga — endereço de OUTRA sessão (ASLR) = morto = crash.
     use std::sync::atomic::Ordering;
     let c = crate::selfboot::FROMTD_CTX.load(Ordering::Relaxed);
     if c.is_null() {

@@ -2,7 +2,7 @@
 # Zero dependências: só `std`. Compila offline, em arm64-apple-darwin, sem rede.
 [package]
 name = "archive-tool"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.74"
 description = "Lê o índice de um .archive (RDAR) do Cyberpunk 2077, gera datamap.md e extrai conteúdo (Kraken pendente)."

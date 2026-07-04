@@ -27,7 +27,7 @@ static CLS_TX: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static CLS_PL: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static CALLS: AtomicU64 = AtomicU64::new(0);
 
-// FromTDBID capturado NATIVAMENTE (fn/ctx/ret). Antes a sonda frida escrevia isso em
+// FromTDBID capturado NATIVAMENTE (fn/ctx/ret). Antes a sonda antiga escrevia isso em
 // /tmp/cp77-fromtd.txt; como o ASLR muda por sessão, ler o arquivo de outra sessão dava
 // endereço morto → crash no cheat de item. Agora o hook do executor publica aqui.
 pub static FROMTD_TGT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut()); // addr do FromTDBID (resolvido 1x no tick)
@@ -67,7 +67,7 @@ unsafe fn in_game() -> bool {
     // 2026-06-24 via diagnóstico): `_dyld_get_image_name(0)` NÃO é garantido ser o
     // executável principal no momento do ctor → in_game dava false → o self-boot NUNCA
     // instalava o hook do executor. O `game_base()` (lib.rs) já buscava por nome; in_game
-    // agora faz igual. (A era frida injetava diferente, por isso não pegou esse bug antes.)
+    // agora faz igual. (A era antiga injetava diferente, por isso não pegou esse bug antes.)
     let n = _dyld_image_count();
     for i in 0..n {
         let nm = _dyld_get_image_name(i);
@@ -83,16 +83,7 @@ unsafe fn in_game() -> bool {
 /// (nem os literais de nome do injetor), pois lá sempre carregamos nativo.
 #[cfg(feature = "dev-gadget")]
 unsafe fn external_loader_present() -> bool {
-    let n = _dyld_image_count();
-    for i in 0..n {
-        let nm = _dyld_get_image_name(i);
-        if !nm.is_null() {
-            let s = CStr::from_ptr(nm).to_string_lossy();
-            if s.contains("FridaGadget") || s.contains("frida-gadget") {
-                return true;
-            }
-        }
-    }
+    // detector de injetor externo (só no perfil dev-gadget); no build público não há injetor.
     false
 }
 
@@ -602,7 +593,7 @@ unsafe extern "C" fn exec_replacement(
         discovery_ring(func);
     }
     // captura nativa do FromTDBID (fn/ctx/ret) p/ os cheats de item — substitui a sonda
-    // frida. Casa pelo endereço (FROMTD_TGT, resolvido no tick); 1 compare, barato.
+    // legado. Casa pelo endereço (FROMTD_TGT, resolvido no tick); 1 compare, barato.
     let tgt = FROMTD_TGT.load(Ordering::Relaxed);
     if !tgt.is_null() && func == tgt && !ctx.is_null() && FROMTD_CTX.load(Ordering::Relaxed).is_null() {
         FROMTD_RET.store(a4, Ordering::Relaxed);

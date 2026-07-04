@@ -7,7 +7,7 @@
 100% Rust + redscript. Sem máquina virtual, sem Wine, sem streaming do Windows — os
 mods rodam diretamente dentro do build nativo macOS do jogo.
 
-> **Status: ALPHA 0.1.1** — cedo, mas real. Este README é honesto sobre o que
+> **Status: ALPHA 0.1.2** — cedo, mas real. Este README é honesto sobre o que
 > funciona hoje versus o que está no roadmap. Apenas single-player.
 
 ---
@@ -15,7 +15,7 @@ mods rodam diretamente dentro do build nativo macOS do jogo.
 ## O que faz
 
 O BWMS é um runtime nativo e um conjunto de ferramentas de dados para o build Apple Silicon
-do jogo. A partir da 0.1.1:
+do jogo. A partir da 0.1.2:
 
 - **Console in-game + overlay ImGui** — um console de desenvolvedor renderizado sobre o
   jogo via um overlay ImGui baseado em Metal.

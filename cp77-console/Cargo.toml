@@ -1,6 +1,6 @@
 [package]
 name = "cp77-console"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 
 # .dylib carregada pelo jogo (LC_LOAD_DYLIB). Hooks via biblioteca de
@@ -11,7 +11,7 @@ crate-type = ["cdylib"]
 
 # `dev-gadget`: build da trilha de DEV — adiciona a checagem de injetor externo
 # (pra coexistir com a ferramenta de dev sem duplicar o hook). FORA do default:
-# o build PÚBLICO 0.1.0 carrega nativo e nem compila essa checagem/strings.
+# o build PÚBLICO 0.1.2 carrega nativo e nem compila essa checagem/strings.
 [features]
 default = []
 dev-gadget = []
