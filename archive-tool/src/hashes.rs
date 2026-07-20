@@ -9,7 +9,7 @@ use std::path::Path;
 
 /// Devolve o texto de uma lista de paths: descomprime se vier `KARK`-comprimida
 /// (formato `usedhashes.kark`), senão decodifica os bytes como texto.
-fn decode_maybe_kark(bytes: &[u8]) -> std::io::Result<String> {
+pub fn decode_maybe_kark(bytes: &[u8]) -> std::io::Result<String> {
     use std::io::{Error, ErrorKind};
     if bytes.len() >= 8
         && u32::from_le_bytes(bytes[0..4].try_into().unwrap()) == crate::archive::KARK_MAGIC
@@ -23,15 +23,8 @@ fn decode_maybe_kark(bytes: &[u8]) -> std::io::Result<String> {
     }
 }
 
-/// FNV-1a 64-bit — a função de hash dos paths no RDAR.
-pub fn fnv1a64(bytes: &[u8]) -> u64 {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for &byte in bytes {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
-}
+/// FNV-1a 64-bit — a função de hash dos paths no RDAR. Fonte única: `bwms-hashes`.
+pub use bwms_hashes::fnv1a64;
 
 /// Normaliza um path para a forma canônica do depósito REDengine — minúsculas,
 /// separador barra-invertida — que é a forma que gera o hash do archive.

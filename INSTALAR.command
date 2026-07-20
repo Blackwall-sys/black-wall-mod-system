@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# INSTALAR.command — Black Wall Mod System (bwms) 0.1.2 — double-click in Finder.
+# INSTALAR.command — Black Wall Mod System (bwms) 0.1.3 — double-click in Finder.
 # Finds Cyberpunk 2077 (or you drag the game icon/folder), removes quarantine, installs.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -38,7 +38,7 @@ resolve_game(){
 }
 
 # --- language pick ---------------------------------------------------------
-printf '\n  Black Wall Mod System (bwms) 0.1.2\n\n'
+printf '\n  Black Wall Mod System (bwms) 0.1.3\n\n'
 printf '  Language — type a number, then press Enter:\n'
 printf '    1) English  (default)\n'
 printf '    2) Português\n'
@@ -53,7 +53,7 @@ esac
 
 case "$LC" in
   pt)
-    M_TITLE="Black Wall Mod System (bwms) 0.1.2 — alfa"
+    M_TITLE="Black Wall Mod System (bwms) 0.1.3 — beta"
     M_NOTFOUND="Não achei o Cyberpunk 2077 automaticamente."
     M_DRAG="ARRASTE para esta janela o ícone 'Cyberpunk2077' do jogo (ou a pasta 'Cyberpunk 2077') e tecle Enter:"
     M_INVALID="Não reconheci como Cyberpunk 2077:"
@@ -67,7 +67,7 @@ case "$LC" in
     M_CLOSEWIN="Tecle Enter para fechar esta janela."
     ;;
   zh)
-    M_TITLE="Black Wall Mod System (bwms) 0.1.2 — 测试版"
+    M_TITLE="Black Wall Mod System (bwms) 0.1.3 — 测试版"
     M_NOTFOUND="未能自动找到 Cyberpunk 2077。"
     M_DRAG="请把游戏的 'Cyberpunk2077' 图标（或 'Cyberpunk 2077' 文件夹）拖到此窗口，然后按回车："
     M_INVALID="无法识别为 Cyberpunk 2077："
@@ -81,7 +81,7 @@ case "$LC" in
     M_CLOSEWIN="按回车键关闭此窗口。"
     ;;
   *)
-    M_TITLE="Black Wall Mod System (bwms) 0.1.2 — alpha"
+    M_TITLE="Black Wall Mod System (bwms) 0.1.3 — beta"
     M_NOTFOUND="Couldn't find Cyberpunk 2077 automatically."
     M_DRAG="DRAG the game's 'Cyberpunk2077' icon (or the 'Cyberpunk 2077' folder) onto this window and press Enter:"
     M_INVALID="Didn't recognize that as Cyberpunk 2077:"

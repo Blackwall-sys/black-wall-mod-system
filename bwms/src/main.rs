@@ -88,6 +88,35 @@ fn cmd_xl(args: &[String]) -> ExitCode {
     };
     match bwms_core::xl::parse_xl(&text) {
         Ok(xl) => {
+            // `bwms xl <file> reslink [out]` — emite os pares link/copy que o runtime lê em
+            // <jogo>/red4ext/bwms-reslink.txt. Sem 'reslink' = só o summary.
+            if args.get(1).map(String::as_str) == Some("reslink") {
+                let plan = bwms_core::apply_xl::build_apply_plan(&xl);
+                let out = bwms_core::apply_xl::emit_reslink(&xl);
+                eprintln!(
+                    "[xl] {} link + {} copy → {} redirect(s); nao-suportado: {}",
+                    plan.links,
+                    plan.copies,
+                    plan.redirects.len(),
+                    if plan.unsupported.is_empty() { "nenhum".to_string() } else { plan.unsupported.join(", ") }
+                );
+                return match args.get(2) {
+                    Some(outp) => match std::fs::write(outp, &out) {
+                        Ok(_) => {
+                            eprintln!("[xl] escrito em {outp} (drope em <jogo>/red4ext/bwms-reslink.txt)");
+                            ExitCode::SUCCESS
+                        }
+                        Err(e) => {
+                            eprintln!("nao escreveu '{outp}': {e}");
+                            ExitCode::FAILURE
+                        }
+                    },
+                    None => {
+                        print!("{out}");
+                        ExitCode::SUCCESS
+                    }
+                };
+            }
             print!("{}", xl.summary());
             ExitCode::SUCCESS
         }

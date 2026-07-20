@@ -3,8 +3,9 @@
 //!
 //! Teclas: ↑/↓ seleciona mod · [i] instalar (pasta/.zip) · [r] remover · [c] classificar · [q] sair.
 
-use crate::{install, runtime, source};
+use crate::{apply, runtime, source};
 use bwms_core::classify;
+use bwms_core::theme::{self, ModState};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -98,7 +99,7 @@ fn tool_status(name: &str) -> String {
     }
 }
 
-fn render(game: &Path, mods: &[install::ModInfo], sel: usize, msg: &str) {
+fn render(game: &Path, mods: &[ModState], sel: usize, msg: &str) {
     let mut s = String::new();
     s.push_str(CLEAR);
     s.push_str(&format!("{BOLD}{CYAN} Cyberpunk 2077 — Mac Mod Runtime (Blackwall){RST}\n"));
@@ -115,15 +116,16 @@ fn render(game: &Path, mods: &[install::ModInfo], sel: usize, msg: &str) {
     let dylib = game.join("red4ext/libcp77_console.dylib").exists();
     s.push_str(&format!("{} CET(Blackwall.sys)\n\n", if dylib { format!("{GREEN}✓{RST}") } else { format!("{RED}✗{RST}") }));
     // modlist
-    s.push_str(&format!("{BOLD} Mods instalados ({}):{RST}\n", mods.len()));
+    s.push_str(&format!("{BOLD} Mods no staging ({}):{RST}\n", mods.len()));
     if mods.is_empty() {
         s.push_str(&format!("{DIM}   (nenhum — aperte [i] pra instalar){RST}\n"));
     } else {
         for (i, m) in mods.iter().enumerate() {
+            let line = format!("[{}] {} — {}", if m.active { "x" } else { " " }, m.name, theme::category_label(&m.category));
             if i == sel {
-                s.push_str(&format!("{INV} ▸ {} — {} arquivo(s) {RST}\n", m.name, m.files));
+                s.push_str(&format!("{INV} ▸ {} {RST}\n", line));
             } else {
-                s.push_str(&format!("   {} — {} arquivo(s)\n", m.name, m.files));
+                s.push_str(&format!("   {}\n", line));
             }
         }
     }
@@ -141,7 +143,7 @@ pub fn run(game: PathBuf) -> i32 {
     let mut sel = 0usize;
     let mut msg = String::new();
     loop {
-        let mods = install::list_installed(&game);
+        let mods = apply::reconcile(&game);
         if sel >= mods.len() {
             sel = mods.len().saturating_sub(1);
         }
@@ -158,10 +160,7 @@ pub fn run(game: PathBuf) -> i32 {
             Key::Char('i') => msg = install_flow(&orig, &game),
             Key::Char('r') => {
                 if let Some(m) = mods.get(sel) {
-                    msg = match install::remove_mod(&game, &m.name) {
-                        Ok(()) => format!("removido: {}", m.name),
-                        Err(e) => format!("erro: {e}"),
-                    };
+                    msg = crate::remove_staged(&game, &m.name);
                 }
             }
             Key::Char('c') => msg = classify_flow(&orig),
@@ -187,14 +186,10 @@ fn install_flow(orig: &Option<String>, game: &Path) -> String {
     if !report.risks.is_empty() {
         return format!("BLOQUEADO: {} risco(s) — use `classify` no terminal pra ver", report.risks.len());
     }
-    let plan = install::build_plan(&report, &dir, game, &report.name);
-    match install::install(&plan, game, &report.name) {
-        Ok(_) => {
-            let steps = runtime::activate(&report, game);
-            let ok = steps.iter().filter(|s| s.ok).count();
-            format!("instalado: {} ({} arquivo(s), {ok} passo(s) de ativação)", report.name, plan.actions.len())
-        }
-        Err(e) => format!("falhou (revertido): {e}"),
+    // pipeline UNIFICADO (o mesmo da CLI): stage → apply → activate
+    match crate::install_staged(&dir, game, &report.name) {
+        Ok(sumario) => format!("instalado {sumario}"),
+        Err(e) => format!("falhou: {e}"),
     }
 }
 

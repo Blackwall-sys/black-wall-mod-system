@@ -92,6 +92,25 @@ pub fn extract_all(
     Ok(report)
 }
 
+/// Extrai UM recurso por `name_hash` (FNV-1a64 do path), descomprimindo (Kraken se preciso), SEM
+/// materializar o resto do archive. Ideal p/ pegar um arquivo de um archive gigante — ex.: um factory
+/// `.csv` de 259B do `basegame_4_gamedata` (3.3GB) — sem extrair tudo. Devolve os bytes do recurso.
+pub fn extract_one(ar: &Archive, name_hash: u64) -> Result<Vec<u8>, String> {
+    let entry = ar
+        .entries
+        .iter()
+        .find(|e| e.name_hash == name_hash)
+        .ok_or_else(|| format!("recurso {name_hash:#018x} não está neste archive"))?;
+    let mut file = File::open(&ar.path).map_err(|e| e.to_string())?;
+    let file_len = file.metadata().map_err(|e| e.to_string())?.len();
+    let opts = ExtractOptions { decompress_buffers: true, keep_unresolved: true };
+    extract_entry(&mut file, ar, entry, &opts, file_len).map_err(|e| match e {
+        ExtractError::NeedsKraken => "recurso comprimido, mas o build está sem a feature `kraken`".to_string(),
+        ExtractError::Io(e) => e.to_string(),
+        ExtractError::Corrupt(m) => m,
+    })
+}
+
 enum ExtractError {
     NeedsKraken,
     Io(io::Error),

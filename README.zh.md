@@ -6,22 +6,25 @@
 
 100% Rust + redscript。没有虚拟机，没有 Wine，没有 Windows 串流——模组直接运行在游戏的原生 macOS 版本内部。
 
-> **状态：ALPHA 0.1.2** —— 早期但真实。本 README 如实说明今天哪些功能可用、哪些还在路线图上。仅限单人模式。
+> **状态：BETA 0.1.3** —— 早期但真实。本 README 如实说明今天哪些功能可用、哪些还在路线图上。仅限单人模式。
 
 ---
 
 ## 它能做什么
 
-BWMS 是一个原生运行时，外加一套针对 Apple Silicon 版游戏的数据工具。截至 0.1.2：
+BWMS 是一个原生运行时，外加一套针对 Apple Silicon 版游戏的数据工具。截至 0.1.3：
 
-- **游戏内控制台 + ImGui 覆盖层** —— 通过基于 Metal 的 ImGui 覆盖层在游戏之上渲染的开发者控制台。
-- **作弊功能（Cheats）** —— 无敌模式、负重容量、伤害与资源开关、欧元（eddies）、属性、专长、载具，以及类似的单人便利功能，作为原生 redscript 动作暴露出来。
+- **游戏内控制台 + ImGui 覆盖层** —— 通过基于 Metal 的 ImGui 覆盖层在游戏之上渲染的开发者控制台。它是一个**原生命令控制台，不是 Lua 解释器**：cargo 的 `lua` feature **默认关闭**，因此发布的 build 不内嵌 LuaJIT，`lua_stub.rs::run_code` 是一个空操作（no-op）—— 它**不**加载 CET 的 Lua mod。命令：`heal`、`level`、`money`、`give`、`remove`、`godmode`、`help`。它还会把两条粘贴的 CET 风格代码（`Game.AddMoney(N)`、`Game.AddToInventory(...)`）翻译成原生调用。
+- **作弊功能（Cheats）** —— 无敌模式、负重容量、伤害与资源开关、欧元（eddies）、属性、专长、载具，以及类似的单人便利功能（约 15 个），作为原生 redscript 动作暴露在内置的 **设置 > Mods** 面板里（BWMS 自己的 redscript UI —— **不是** PC 上的 NativeSettings 框架）。
+- **三档跳过启动** —— 一个选择器（关闭 / 到主菜单 / 直接进入游戏，零输入），带有启动加载画面和真实进度条；从下一次启动开始生效。
 - **实时 TweakDB 编辑** —— 在运行中的 TweakDB 中读取和编辑记录（伤害、属性、flats），无需重新打包归档文件。
 - **面向模组作者的反射（Reflection）** —— 通过引擎的 RTTI，按名称读写字段、调用方法，作用于游戏的实时对象。
-- **归档工具** —— 读取并提取 `.archive` 容器。
+- **归档工具** —— 读取并提取 `.archive` 容器。散装（loose）`.archive` 视觉 mod 已经能在游戏内加载。
 - **模组管理器** —— 以事务化方式安装、列出和移除模组。
 
-这是 alpha 软件。请预期会有粗糙之处。使用作弊功能前请务必备份你的存档（见底部免责声明）。
+商店一致性：**Steam 和 GOG 已测试可用**；Epic 使用相同的 Mac build，但尚未测试。框架支持（Codeware、ArchiveXL）**尚未实现** —— 依赖它们的 mod 无法加载。
+
+这是 beta 软件。请预期会有粗糙之处。使用作弊功能前请务必备份你的存档（见底部免责声明）。
 
 ---
 
@@ -29,10 +32,10 @@ BWMS 是一个原生运行时，外加一套针对 Apple Silicon 版游戏的数
 
 - 运行于 **Apple Silicon**（M1 / M2 / M3 / M4）的 macOS。
 - 通过 [rustup](https://rustup.rs) 安装的 **Rust**（stable），并带有 `aarch64-apple-darwin` target。
-- `python3` 和 `codesign` —— 两者均随 macOS 基础系统一起提供。
-- 一份合法的、已安装的 Cyberpunk 2077（macOS 版，通过 Steam）。
+- `codesign`（随 macOS 提供）和 `python3`（`build.sh` 的路径重映射步骤会用到）。注意：较新的 macOS 版本**不**预装 `python3`；若缺失，请安装 Apple 的命令行工具（`xcode-select --install`）或 python.org 版本。
+- 一份合法的、已安装的 Cyberpunk 2077（macOS 版 —— Steam 或 GOG 已测试；Epic 尚未测试）。
 
-构建运行时**不**需要 Xcode 或 Homebrew。
+构建运行时**不**需要完整的 Xcode 应用或 Homebrew。
 
 一次性添加构建 target：
 

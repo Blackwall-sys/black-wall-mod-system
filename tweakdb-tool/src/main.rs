@@ -528,7 +528,7 @@ fn cmd_dump(args: &[String]) -> Result<(), String> {
 /// Formato: "BWTDB01\0" (8) + count u64 LE (8) + N×{id u64 LE, val u64 LE, tag u8}.
 /// tag: 1=Float (val=f32 bits), 2=Int (val=i64), 3=Bool, 4=CName (val=FNV1a64 da
 /// string), 5=TweakDBID (val=u64). É a via do `TweakDB():GetFloat(...)` do console
-/// sem chamar o jogo (o getter in-game trava). Ver memória cp77-legado-console-plan.
+/// sem chamar o jogo (o getter in-game trava). Ver memória cp77-frida-console-plan.
 fn cmd_bake(args: &[String]) -> Result<(), String> {
     use std::io::Write;
     use tweakdb::FlatValue;
@@ -1225,7 +1225,7 @@ fn apply_decl(
     let db = open(file)?;
     let mut model = Model::from_db(&db).map_err(|e| format!("modelo: {e}"))?;
 
-    let results = crate::tweakxl::apply_ops(&mut model, &names, &ops);
+    let results = crate::writer::apply_ops(&mut model, &names, &ops);
     let mut ok = 0usize;
     let mut fail = 0usize;
     for r in &results {

@@ -7,7 +7,7 @@
 100% Rust + redscript. Sem máquina virtual, sem Wine, sem streaming do Windows — os
 mods rodam diretamente dentro do build nativo macOS do jogo.
 
-> **Status: ALPHA 0.1.2** — cedo, mas real. Este README é honesto sobre o que
+> **Status: BETA 0.1.3** — cedo, mas real. Este README é honesto sobre o que
 > funciona hoje versus o que está no roadmap. Apenas single-player.
 
 ---
@@ -15,21 +15,35 @@ mods rodam diretamente dentro do build nativo macOS do jogo.
 ## O que faz
 
 O BWMS é um runtime nativo e um conjunto de ferramentas de dados para o build Apple Silicon
-do jogo. A partir da 0.1.2:
+do jogo. A partir da 0.1.3:
 
 - **Console in-game + overlay ImGui** — um console de desenvolvedor renderizado sobre o
-  jogo via um overlay ImGui baseado em Metal.
+  jogo via um overlay ImGui baseado em Metal. É um **console de comandos nativo, não
+  um interpretador Lua**: a feature `lua` do cargo é **OFF por padrão**, então o build
+  publicado não embute LuaJIT e o `lua_stub.rs::run_code` é um no-op — ele **não**
+  carrega mods Lua do CET. Comandos: `heal`, `level`, `money`, `give`, `remove`,
+  `godmode`, `help`. Ele também traduz duas linhas estilo CET coladas
+  (`Game.AddMoney(N)`, `Game.AddToInventory(...)`) em chamadas nativas.
 - **Cheats** — god mode, capacidade de carga, toggles de dano e recursos, eddies,
-  atributos, perks, veículos e conveniências single-player similares, expostos
-  como ações nativas em redscript.
+  atributos, perks, veículos e conveniências single-player similares (~15), expostos
+  como ações nativas em redscript num painel **Configurações > Mods** próprio (UI em
+  redscript do BWMS — **não** o framework NativeSettings do PC).
+- **Pular boot de 3 níveis** — um seletor (Desligado / até o menu / direto pra gameplay,
+  zero input) com tela de carregamento no boot e barra de progresso real; vale a partir
+  do próximo boot.
 - **Edição ao vivo do TweakDB** — ler e editar records no TweakDB em execução
   (dano, stats, flats) sem reempacotar archives.
 - **Reflection para modders** — ler e escrever campos e chamar métodos por nome
   contra objetos vivos do jogo através do RTTI da engine.
-- **Ferramentas de archive** — ler e extrair containers `.archive`.
+- **Ferramentas de archive** — ler e extrair containers `.archive`. Mods visuais
+  `.archive` soltos (loose) já carregam in-game.
 - **Gerenciador de mods** — instalar, listar e remover mods de forma transacional.
 
-É software alpha. Espere arestas. Sempre faça backup dos seus saves antes de usar
+Paridade de loja: **Steam e GOG testados e funcionando**; Epic usa o mesmo build do
+Mac mas ainda não foi testado. Suporte a frameworks (Codeware, ArchiveXL) **ainda não
+está implementado** — mods que dependem deles não carregam.
+
+É software beta. Espere arestas. Sempre faça backup dos seus saves antes de usar
 cheats (veja o disclaimer no rodapé).
 
 ---
@@ -39,10 +53,14 @@ cheats (veja o disclaimer no rodapé).
 - macOS em **Apple Silicon** (M1 / M2 / M3 / M4).
 - **Rust** (stable) instalado via [rustup](https://rustup.rs), com o
   target `aarch64-apple-darwin`.
-- `python3` e `codesign` — ambos vêm com o sistema base do macOS.
-- Uma cópia legítima e instalada de Cyberpunk 2077 (build macOS, via Steam).
+- `codesign` (vem com o macOS) e `python3` (usado pelo passo de path-remap do
+  `build.sh`). Nota: versões recentes do macOS **não** trazem o `python3`
+  pré-instalado; se faltar, instale as Command Line Tools da Apple
+  (`xcode-select --install`) ou o python.org.
+- Uma cópia legítima e instalada de Cyberpunk 2077 (build macOS — Steam ou GOG
+  testados; Epic ainda não testado).
 
-Você **não** precisa de Xcode ou Homebrew para compilar o runtime.
+Você **não** precisa do app Xcode completo ou do Homebrew para compilar o runtime.
 
 Adicione o build target uma vez:
 

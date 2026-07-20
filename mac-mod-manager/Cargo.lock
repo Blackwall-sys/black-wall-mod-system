@@ -5,6 +5,13 @@ version = 4
 [[package]]
 name = "bwms-core"
 version = "0.1.0"
+dependencies = [
+ "bwms-hashes",
+]
+
+[[package]]
+name = "bwms-hashes"
+version = "0.1.0"
 
 [[package]]
 name = "mac-mod-manager"

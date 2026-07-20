@@ -1,0 +1,17 @@
+# bwms-hashes — funções de hash do Cyberpunk 2077 (TweakDBID/CRC32, murmur3 type-key,
+# FNV-1a 32/64). FONTE ÚNICA compartilhada pelo runtime (cp77-console) E pelas ferramentas
+# offline (tweakdb-tool): a mesma semântica dos dois lados, sem duplicar. Zero-dep, só core.
+[package]
+name = "bwms-hashes"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Funções de hash do TweakDB/RDAR do Cyberpunk 2077 (CRC32/TweakDBID, murmur3, FNV-1a). Zero-dep."
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "bwms_hashes"
+path = "src/lib.rs"
+
+# Crate isolado (mods-research tem vários repos clonados; cada binário é seu próprio workspace).
+[workspace]

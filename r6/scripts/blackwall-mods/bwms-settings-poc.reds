@@ -1,10 +1,33 @@
 // BWMS — pagina nativa (Mods > Cheats) via bypass do ConfigVar. 100% redscript, sem CET, sem NativeSettings.
-// Aba "Cheats": 9 cheats (Modo Imortal + faceis). Toggles guardam estado em campos do PlayerPuppet (persiste ao reabrir).
+// Aba "Cheats": 14 cheats (Modo Imortal + faceis). Toggles guardam estado em campos do PlayerPuppet (persiste ao reabrir).
 // Gate = !IsDefined(this.m_SettingsEntry): nossos controllers tem entry null; os do jogo nao.
 // Clique unico: OnShortcutPress/OnShortcutRepeat neutralizados pros nossos (corpo/setas ja alteram).
 
+// Seletor "Pular boot" (kind 3): liga os marcadores do modo de boot (~/.bwms-skipintro,
+// ~/.bwms-autocontinue, ~/.bwms-fire-start) — níveis 1 E 2 armam o lever zero-input (save-system
+// ativa de verdade nos dois); autocontinue só liga no nível 2 (ver BWMSApplyBoot).
+native func BwmsAutoContinueOn() -> Bool;
+native func BwmsAutoContinueOff() -> Bool;
+native func BwmsFireStartOn() -> Bool;
+native func BwmsFireStartOff() -> Bool;
+// redscript-mod-persistence: config fora do save (~/.bwms-modconfig.txt), sobrevive ao reboot.
+native func BwmsConfigGet(key: String) -> String;
+native func BwmsConfigSet(key: String, value: String) -> Bool;
+
+// Contrato ÚNICO de extensão p/ mods de 3os (redscript puro, dispatch por método virtual — sem
+// tocar RTTI/native, sem @wrapMethod em BWMSRun/BWMSIsOn): um cheatId numérico (nosso, switch
+// legado abaixo, intocado) OU um handler de objeto (novo, pro 3o). Se handler != null, ele MANDA;
+// senão cai no switch de sempre. Um 3o soma 1 cheat com efeito próprio via 1 ArrayPush em
+// BWMSCheats() (subclasse de BWMSCheatHandler) — sem tocar/wrapar nenhum .reds do BWMS.
+public abstract class BWMSCheatHandler {
+  public func BWMSOnToggle(pp: ref<PlayerPuppet>, game: GameInstance) -> Void {}
+  public func BWMSOnQuery(pp: ref<PlayerPuppet>, game: GameInstance) -> Bool { return false; }
+}
+
 @addField(SettingsSelectorControllerBool) let m_bwmsGame: GameInstance;
 @addField(SettingsSelectorControllerBool) let m_bwmsCheat: Int32;
+@addField(SettingsSelectorControllerBool) let m_bwmsIsToggle: Bool;
+@addField(SettingsSelectorControllerBool) let m_bwmsHandler: ref<BWMSCheatHandler>;
 @addField(SettingsSelectorControllerInt) let m_bwmsMin: Int32;
 @addField(SettingsSelectorControllerInt) let m_bwmsMax: Int32;
 @addField(SettingsSelectorControllerInt) let m_bwmsStep: Int32;
@@ -13,12 +36,17 @@
 @addField(SettingsSelectorControllerFloat) let m_bwmsStepF: Float;
 @addField(SettingsSelectorControllerListString) let m_bwmsElems: array<String>;
 @addField(SettingsSelectorControllerListString) let m_bwmsIdx: Int32;
+@addField(SettingsSelectorControllerListString) let m_bwmsAct: Int32;
+@addField(SettingsSelectorControllerListString) let m_bwmsActGame: GameInstance;
+@addField(SettingsSelectorControllerListString) let m_bwmsNet: Int32;
+@addField(SettingsSelectorControllerListString) let m_bwmsBoot: Bool;
 
 // estado de cheat persistido no proprio jogador (sobrevive a reabrir a aba; NAO vai pro save = runtime-only)
 @addField(PlayerPuppet) let m_bwmsCarry: ref<gameStatModifierData>;
 @addField(PlayerPuppet) let m_bwmsDmg: ref<gameStatModifierData>;
 @addField(PlayerPuppet) let m_bwmsRam: ref<gameStatModifierData>;
 @addField(PlayerPuppet) let m_bwmsSlow: Bool;
+@addField(PlayerPuppet) let m_bwmsInvis: Bool;
 
 @addMethod(SettingsCategoryController)
 public func BWMSSetText(text: String) -> Void {
@@ -66,12 +94,87 @@ private final func BWMSDocLine(text: String) -> Void {
   if IsDefined(cc) { cc.BWMSSetText(text); };
 }
 
+// Registro DATA-DRIVEN de cheats. NOSSOS 16 usam `id`+switch legado (kind 0/1/2/3, intocado,
+// zero risco de regressão). 3os de VERDADE usam `handler` (kind 0/1 só, ver BWMSCheatHandler
+// acima): 1 ArrayPush em BWMSCheats() com uma subclasse de BWMSCheatHandler — SEM @wrapMethod
+// em BWMSRun/BWMSIsOn (a fragilidade que o contrato antigo tinha: esquecer 1 dos 3 wraps deixava
+// o cheat aparecer sem efeito/estado). `kind` decide render: 0=toggle Bool, 1=ação tiro-único
+// Bool, 2=setas ± ListString (só id/switch por ora), 3=seletor de boot (interno).
+public struct BWMSCheatDef {
+  public let label: String;
+  public let id: Int32;
+  public let kind: Int32;
+  public let handler: ref<BWMSCheatHandler>;
+}
 @addMethod(SettingsMainGameController)
-private final func BWMSCheat(label: String, cheatId: Int32, game: GameInstance) -> Void {
+private final func BWMSDef(label: String, id: Int32, opt kind: Int32) -> BWMSCheatDef {
+  let d: BWMSCheatDef;
+  d.label = label;
+  d.id = id;
+  d.kind = kind;
+  return d;
+}
+// PONTO DE EXTENSÃO p/ 3os DE VERDADE (contrato único, sem @wrapMethod em BWMSRun/BWMSIsOn):
+// 1 ArrayPush(this.BWMSCheats(), this.BWMSDefH(label, handlerInstance)) — kind 0=toggle,
+// 1=ação tiro-único (opt, default 0). `id` fica 0 (não usado — quem manda é o handler).
+@addMethod(SettingsMainGameController)
+public final func BWMSDefH(label: String, handler: ref<BWMSCheatHandler>, opt kind: Int32) -> BWMSCheatDef {
+  let d: BWMSCheatDef;
+  d.label = label;
+  d.id = 0;
+  d.kind = kind;
+  d.handler = handler;
+  return d;
+}
+// PONTO DE EXTENSÃO: o array de cheats da aba (os 16 nossos). Mod de 3o faz @wrapMethod e dá
+// ArrayPush no resultado pra somar o dele — via BWMSDefH (handler, SEM tocar switch nenhum) ou,
+// pro estilo antigo, via BWMSDef+id (aí precisa @wrapMethod BWMSRun/BWMSIsOn pro id novo).
+@addMethod(SettingsMainGameController)
+public func BWMSCheats() -> array<BWMSCheatDef> {
+  let c: array<BWMSCheatDef>;
+  ArrayPush(c, this.BWMSDef(this.L("Invincible (God Mode)", "Invencível (Modo Imortal)", "无敌（上帝模式）"), 1));
+  ArrayPush(c, this.BWMSDef(this.L("Infinite carry weight", "Carga infinita", "无限负重"), 2));
+  ArrayPush(c, this.BWMSDef(this.L("Massive damage (+1000%)", "Dano massivo (+1000%)", "巨额伤害（+1000%）"), 3));
+  ArrayPush(c, this.BWMSDef(this.L("Infinite cyberdeck RAM", "RAM do cyberdeck infinita", "无限赛博硬件内存"), 4));
+  ArrayPush(c, this.BWMSDef(this.L("Slow motion", "Câmera lenta", "慢动作"), 5));
+  ArrayPush(c, this.BWMSDef(this.L("Invisibility", "Invisibilidade", "隐身"), 10));
+  ArrayPush(c, this.BWMSDef(this.L("Eddies (arrows: +/- 10,000)", "Eddies (seta: +/- 10.000)", "欧元币（箭头：±10,000）"), 6, 2));
+  ArrayPush(c, this.BWMSDef(this.L("Attribute Point (arrows: +/- 1)", "Ponto de Atributo (seta: +/- 1)", "属性点（箭头：±1）"), 7, 2));
+  ArrayPush(c, this.BWMSDef(this.L("Perk Point (arrows: +/- 1)", "Ponto de Perk (seta: +/- 1)", "专长点（箭头：±1）"), 8, 2));
+  ArrayPush(c, this.BWMSDef(this.L("Street Cred (arrows: +/- 1 level)", "Street Cred (seta: +/- 1 nível)", "街头声望（箭头：±1级）"), 13, 2));
+  ArrayPush(c, this.BWMSDef(this.L("Unlock all vehicles", "Desbloquear todos os veículos", "解锁所有载具"), 9, 1));
+  ArrayPush(c, this.BWMSDef(this.L("Clear wanted level", "Zerar nível de procurado", "清除通缉等级"), 11, 1));
+  ArrayPush(c, this.BWMSDef(this.L("Set time to noon", "Ajustar hora p/ meio-dia", "时间设为正午"), 12, 1));
+  ArrayPush(c, this.BWMSDef(this.L("Summon vehicle", "Chamar veículo", "召唤载具"), 14, 1));
+  ArrayPush(c, this.BWMSDef(this.L("Skip boot (next boot)", "Pular boot (próx. boot)", "跳过启动（下次启动）"), 15, 3));
+  ArrayPush(c, this.BWMSDef(this.L("Full heal", "Curar (vida cheia)", "满血治疗"), 16, 1));
+  return c;
+}
+
+@addMethod(SettingsMainGameController)
+private final func BWMSCheat(label: String, cheatId: Int32, kind: Int32, game: GameInstance, opt handler: ref<BWMSCheatHandler>) -> Void {
+  if kind == 3 {
+    let elems: array<String>;
+    ArrayPush(elems, this.L("Off", "Desligado", "关闭"));
+    ArrayPush(elems, this.L("To the menu", "Até o menu", "到主菜单"));
+    ArrayPush(elems, this.L("To gameplay", "Até a gameplay", "到游戏内"));
+    let cboot: ref<SettingsSelectorControllerListString> =
+      this.SpawnFromLocal(inkWidgetRef.Get(this.m_settingsOptionsList), n"settingsSelectorStringList")
+          .GetController() as SettingsSelectorControllerListString;
+    if IsDefined(cboot) { cboot.BWMSSetupBoot(label, elems); ArrayPush(this.m_settingsElements, cboot); };
+    return;
+  };
+  if kind == 2 {
+    let cl: ref<SettingsSelectorControllerListString> =
+      this.SpawnFromLocal(inkWidgetRef.Get(this.m_settingsOptionsList), n"settingsSelectorStringList")
+          .GetController() as SettingsSelectorControllerListString;
+    if IsDefined(cl) { cl.BWMSSetupAction(label, cheatId, game); ArrayPush(this.m_settingsElements, cl); };
+    return;
+  };
   let cb: ref<SettingsSelectorControllerBool> =
     this.SpawnFromLocal(inkWidgetRef.Get(this.m_settingsOptionsList), n"settingsSelectorBool")
         .GetController() as SettingsSelectorControllerBool;
-  if IsDefined(cb) { cb.BWMSSetupBool(label, cheatId, game); ArrayPush(this.m_settingsElements, cb); };
+  if IsDefined(cb) { cb.BWMSSetupBool(label, cheatId, kind == 0, game, handler); ArrayPush(this.m_settingsElements, cb); };
 }
 
 @wrapMethod(SettingsMainGameController)
@@ -87,15 +190,13 @@ private final func PopulateCategorySettingsOptions(idx: Int32) -> Void {
     let pl: ref<GameObject> = this.GetPlayerControlledObject();
     if IsDefined(pl) {
       let g: GameInstance = pl.GetGame();
-      this.BWMSCheat(this.L("Invincible (God Mode)", "Invencível (Modo Imortal)", "无敌（上帝模式）"), 1, g);
-      this.BWMSCheat(this.L("Infinite carry weight", "Carga infinita", "无限负重"), 2, g);
-      this.BWMSCheat(this.L("Massive damage (+1000%)", "Dano massivo (+1000%)", "巨额伤害（+1000%）"), 3, g);
-      this.BWMSCheat(this.L("Infinite cyberdeck RAM", "RAM do cyberdeck infinita", "无限赛博硬件内存"), 4, g);
-      this.BWMSCheat(this.L("Slow motion", "Câmera lenta", "慢动作"), 5, g);
-      this.BWMSCheat(this.L("+10,000 Eddies", "+10.000 Eddies", "+10,000 欧元币"), 6, g);
-      this.BWMSCheat(this.L("+1 Attribute Point", "+1 Ponto de Atributo", "+1 属性点"), 7, g);
-      this.BWMSCheat(this.L("+1 Perk Point", "+1 Ponto de Perk", "+1 专长点数"), 8, g);
-      this.BWMSCheat(this.L("Unlock all vehicles", "Desbloquear todos os veículos", "解锁所有载具"), 9, g);
+      // data-driven: itera o registro (extensível por 3os via @wrapMethod BWMSCheats)
+      let defs: array<BWMSCheatDef> = this.BWMSCheats();
+      let i: Int32 = 0;
+      while i < ArraySize(defs) {
+        this.BWMSCheat(defs[i].label, defs[i].id, defs[i].kind, g, defs[i].handler);
+        i += 1;
+      };
     } else {
       this.BWMSDocLine(this.L("Load a save to use the cheats (you need a living V).", "Carregue um save para usar os cheats (precisa de um V vivo).", "载入存档后才能使用作弊（需要存活的 V）。"));
     };
@@ -124,31 +225,37 @@ private final func PopulateCategorySettingsOptions(idx: Int32) -> Void {
 }
 
 // ===== Bool selector = despachante de CHEAT =====
-// cheatId: 1 GodMode 2 Carga 3 Dano 4 RAM 5 Slow (toggles) | 6 Eddies 7 Atributo 8 Perk 9 Veiculos (acoes)
+// cheatId: 1 GodMode 2 Carga 3 Dano 4 RAM 5 Slow 10 Invisível (kind 0 = toggle Bool)
+//        | 9 Veiculos 11 Zerar-procurado 12 Meio-dia 14 Chamar-veiculo (kind 1 = ação Bool)
+//        | 6 Eddies 7 Atrib 8 Perk 13 StreetCred (kind 2 = setas ± no ListString, BWMSDoAction)
 @addMethod(SettingsSelectorControllerBool)
 public func BWMSPlayer() -> ref<GameObject> {
   return GameInstance.GetPlayerSystem(this.m_bwmsGame).GetLocalPlayerControlledGameObject();
 }
 @addMethod(SettingsSelectorControllerBool)
-public func BWMSSetupBool(label: String, cheatId: Int32, game: GameInstance) -> Void {
+public func BWMSSetupBool(label: String, cheatId: Int32, isToggle: Bool, game: GameInstance, opt handler: ref<BWMSCheatHandler>) -> Void {
   this.m_bwmsGame = game;
   this.m_bwmsCheat = cheatId;
+  this.m_bwmsIsToggle = isToggle;
+  this.m_bwmsHandler = handler;
   inkTextRef.SetText(this.m_LabelText, label);
   this.BWMSPaint();
 }
 @addMethod(SettingsSelectorControllerBool)
-public func BWMSIsToggle() -> Bool { return this.m_bwmsCheat <= 5; }
+public func BWMSIsToggle() -> Bool { return this.m_bwmsIsToggle; }
 @addMethod(SettingsSelectorControllerBool)
 public func BWMSIsOn() -> Bool {
   let p: ref<GameObject> = this.BWMSPlayer();
   let pp: ref<PlayerPuppet> = p as PlayerPuppet;
   if !IsDefined(pp) { return false; };
+  if IsDefined(this.m_bwmsHandler) { return this.m_bwmsHandler.BWMSOnQuery(pp, this.m_bwmsGame); };
   switch this.m_bwmsCheat {
     case 1: return GameInstance.GetGodModeSystem(this.m_bwmsGame).HasGodMode(pp.GetEntityID(), gameGodModeType.Invulnerable);
     case 2: return IsDefined(pp.m_bwmsCarry);
     case 3: return IsDefined(pp.m_bwmsDmg);
     case 4: return IsDefined(pp.m_bwmsRam);
     case 5: return pp.m_bwmsSlow;
+    case 10: return pp.m_bwmsInvis;
   };
   return false;
 }
@@ -171,14 +278,17 @@ public func BWMSRun() -> Void {
   let pp: ref<PlayerPuppet> = p as PlayerPuppet;
   if !IsDefined(pp) { return; };
   let game: GameInstance = this.m_bwmsGame;
+  if IsDefined(this.m_bwmsHandler) { this.m_bwmsHandler.BWMSOnToggle(pp, game); return; };
   let ss: ref<StatsSystem> = GameInstance.GetStatsSystem(game);
   let soid: StatsObjectID = Cast<StatsObjectID>(pp.GetEntityID());
   switch this.m_bwmsCheat {
     case 1:
       if GameInstance.GetGodModeSystem(game).HasGodMode(pp.GetEntityID(), gameGodModeType.Invulnerable) {
         GameInstance.GetGodModeSystem(game).RemoveGodMode(pp.GetEntityID(), gameGodModeType.Invulnerable, n"BWMS");
+        BwmsConfigSet("godmode", "0"); // redscript-mod-persistence: sobrevive ao reboot, fora do save
       } else {
         GameInstance.GetGodModeSystem(game).AddGodMode(pp.GetEntityID(), gameGodModeType.Invulnerable, n"BWMS");
+        BwmsConfigSet("godmode", "1");
       };
       break;
     case 2:
@@ -214,17 +324,30 @@ public func BWMSRun() -> Void {
         pp.m_bwmsSlow = true;
       };
       break;
-    case 6:
-      GameInstance.GetTransactionSystem(game).GiveItem(pp, ItemID.FromTDBID(t"Items.money"), 10000);
-      break;
-    case 7:
-      PlayerDevelopmentSystem.GetData(pp).AddDevelopmentPoints(1, gamedataDevelopmentPointType.Attribute);
-      break;
-    case 8:
-      PlayerDevelopmentSystem.GetData(pp).AddDevelopmentPoints(1, gamedataDevelopmentPointType.Primary);
-      break;
     case 9:
       GameInstance.GetVehicleSystem(game).EnableAllPlayerVehicles();
+      break;
+    case 10:
+      if pp.m_bwmsInvis {
+        StatusEffectHelper.RemoveStatusEffect(pp, t"BaseStatusEffect.Cloaked");
+        pp.m_bwmsInvis = false;
+      } else {
+        StatusEffectHelper.ApplyStatusEffect(pp, t"BaseStatusEffect.Cloaked");
+        pp.m_bwmsInvis = true;
+      };
+      break;
+    case 11:
+      GameInstance.GetQuestsSystem(game).SetFact(n"wanted_level", 0);
+      GameInstance.GetQuestsSystem(game).SetFact(n"wanted_chase_active", 0);
+      break;
+    case 12:
+      GameInstance.GetTimeSystem(game).SetGameTimeByHMS(12, 0, 0, n"BWMS");
+      break;
+    case 14:
+      GameInstance.GetVehicleSystem(game).SpawnActivePlayerVehicle(gamedataVehicleType.Car);
+      break;
+    case 16:
+      GameInstance.GetStatPoolsSystem(game).RequestSettingStatPoolValue(soid, gamedataStatPoolType.Health, 100.0, pp, true);
       break;
   };
 }
@@ -348,19 +471,108 @@ public func BWMSPaintList() -> Void {
   };
   this.SelectDot(this.m_bwmsIdx);
 }
+// ===== StringList em modo BOOT: seletor "Pular boot" de 3 níveis =====
+// idx 0=Desligado 1=Até o menu (com saves) 2=Até a gameplay. Estado inicial lido dos marcadores;
+// cada mudança re-aplica os 3 toggles (idempotente). 1 e 2 usam o MESMO lever (save-system real);
+// só o nível 2 auto-carrega o save depois.
+@addMethod(SettingsSelectorControllerListString)
+public func BWMSSetupBoot(label: String, elems: array<String>) -> Void {
+  this.m_bwmsBoot = true;
+  this.m_bwmsElems = elems;
+  this.m_bwmsIdx = BwmsSkipIntroState() ? (BwmsAutoContinue() ? 2 : 1) : 0;
+  inkTextRef.SetText(this.m_LabelText, label);
+  this.PopulateDots(ArraySize(elems));
+  this.BWMSPaintList();
+}
+@addMethod(SettingsSelectorControllerListString)
+public func BWMSApplyBoot() -> Void {
+  if this.m_bwmsIdx == 0 { BwmsSkipIntroOff(); } else { BwmsSkipIntroOn(); };
+  // Níveis 1 E 2 ligam o lever (fire-start) — os dois ativam o save-system de verdade
+  // (CONTINUAR + lista de saves funcionando). Só o autocontinue muda: nível 2 carrega
+  // sozinho, nível 1 para no menu com os saves prontos (ver BwmsTryContinue).
+  if this.m_bwmsIdx >= 1 { BwmsFireStartOn(); } else { BwmsFireStartOff(); };
+  if this.m_bwmsIdx == 2 { BwmsAutoContinueOn(); } else { BwmsAutoContinueOff(); };
+}
+
+// ===== StringList em modo AÇÃO (setas ±): seta direita soma, esquerda subtrai =====
+// (recuperado do bundle de 25/jun via decompile — a "forma de setas" da aba Cheats)
+@addMethod(SettingsSelectorControllerListString)
+public func BWMSSetupAction(label: String, actId: Int32, game: GameInstance) -> Void {
+  this.m_bwmsAct = actId;
+  this.m_bwmsActGame = game;
+  this.m_bwmsNet = 0;
+  inkTextRef.SetText(this.m_LabelText, label);
+  this.PopulateDots(0);
+  this.BWMSPaintAction();
+}
+@addMethod(SettingsSelectorControllerListString)
+public func BWMSPaintAction() -> Void {
+  let v: String = "";
+  if this.m_bwmsAct == 13 {
+    let pp: ref<PlayerPuppet> =
+      GameInstance.GetPlayerSystem(this.m_bwmsActGame).GetLocalPlayerControlledGameObject() as PlayerPuppet;
+    if IsDefined(pp) {
+      v = "Nv " + IntToString(PlayerDevelopmentSystem.GetData(pp).GetProficiencyLevel(gamedataProficiencyType.StreetCred));
+    } else { v = "?"; };
+  } else {
+    if this.m_bwmsNet == 0 { v = "Add"; }
+    else { v = (this.m_bwmsNet > 0 ? "+" : "") + IntToString(this.m_bwmsNet); };
+  };
+  inkTextRef.SetText(this.m_ValueText, v);
+}
+@addMethod(SettingsSelectorControllerListString)
+public func BWMSDoAction(forward: Bool) -> Void {
+  let pp: ref<PlayerPuppet> =
+    GameInstance.GetPlayerSystem(this.m_bwmsActGame).GetLocalPlayerControlledGameObject() as PlayerPuppet;
+  if !IsDefined(pp) { return; };
+  let game: GameInstance = this.m_bwmsActGame;
+  let sign: Int32 = forward ? 1 : -1;
+  switch this.m_bwmsAct {
+    case 6:
+      if forward {
+        GameInstance.GetTransactionSystem(game).GiveItem(pp, ItemID.FromTDBID(t"Items.money"), 10000);
+      } else {
+        GameInstance.GetTransactionSystem(game).RemoveItem(pp, ItemID.FromTDBID(t"Items.money"), 10000);
+      };
+      this.m_bwmsNet += sign * 10000;
+      break;
+    case 7:
+      PlayerDevelopmentSystem.GetData(pp).AddDevelopmentPoints(sign, gamedataDevelopmentPointType.Attribute);
+      this.m_bwmsNet += sign;
+      break;
+    case 8:
+      PlayerDevelopmentSystem.GetData(pp).AddDevelopmentPoints(sign, gamedataDevelopmentPointType.Primary);
+      this.m_bwmsNet += sign;
+      break;
+    case 13:
+      PlayerDevelopmentSystem.GetData(pp).SetLevel(
+        gamedataProficiencyType.StreetCred,
+        Clamp(PlayerDevelopmentSystem.GetData(pp).GetProficiencyLevel(gamedataProficiencyType.StreetCred) + sign, 0, 50),
+        telemetryLevelGainReason.Gameplay);
+      break;
+  };
+  this.BWMSPaintAction();
+}
 @wrapMethod(SettingsSelectorControllerListString)
 private func ChangeValue(forward: Bool) -> Void {
   if !IsDefined(this.m_SettingsEntry) {
-    let n: Int32 = ArraySize(this.m_bwmsElems);
-    if n > 0 {
-      this.m_bwmsIdx = (this.m_bwmsIdx + (forward ? 1 : -1) + n) % n;
-      this.BWMSPaintList();
+    if this.m_bwmsAct > 0 {
+      this.BWMSDoAction(forward);
+    } else {
+      let n: Int32 = ArraySize(this.m_bwmsElems);
+      if n > 0 {
+        this.m_bwmsIdx = (this.m_bwmsIdx + (forward ? 1 : -1) + n) % n;
+        if this.m_bwmsBoot { this.BWMSApplyBoot(); };
+        this.BWMSPaintList();
+      };
     };
   } else { wrappedMethod(forward); };
 }
 @wrapMethod(SettingsSelectorControllerListString)
 public func Refresh() -> Void {
-  if !IsDefined(this.m_SettingsEntry) { this.BWMSPaintList(); } else { wrappedMethod(); };
+  if !IsDefined(this.m_SettingsEntry) {
+    if this.m_bwmsAct > 0 { this.BWMSPaintAction(); } else { this.BWMSPaintList(); };
+  } else { wrappedMethod(); };
 }
 
 // ===== base: derefs de m_SettingsEntry — clique unico =====

@@ -10,6 +10,7 @@
 use crate::hashes::tweak_db_id;
 use crate::names::NameDb;
 use crate::tweakdb::{self, RawGroup, TweakDb, MAGIC};
+use crate::tweakxl::Op;
 
 pub struct Model {
     pub blob_version: i32,
@@ -427,27 +428,12 @@ impl Model {
     }
 }
 
-/// Operação de edição de um flat. As variantes de array espelham as tags do
-/// TweakXL (`!append`, `!prepend`, `!append-once`, `!prepend-once`, `!remove`).
-pub enum EditOp {
-    /// `= valor` (escalar) ou `= [a, b, c]` (array inteiro).
-    Assign(String),
-    /// `+= valor` / `!append` — adiciona um elemento ao FIM do array.
-    Append(String),
-    /// `!append-once` — adiciona ao fim só se ainda não estiver presente.
-    AppendOnce(String),
-    /// `!prepend` — adiciona um elemento ao INÍCIO do array.
-    Prepend(String),
-    /// `!prepend-once` — adiciona ao início só se ainda não estiver presente.
-    PrependOnce(String),
-    /// `-= valor` / `!remove` — remove os elementos iguais (igualdade de bytes).
-    Remove(String),
-    /// `!append-from` / `!merge` — anexa ao FIM os elementos de outro flat array
-    /// (pelo nome). O TweakXL trata `!merge` e `!append-from` como o mesmo op.
-    AppendFrom(String),
-    /// `!prepend-from` — anexa ao INÍCIO os elementos de outro flat array.
-    PrependFrom(String),
-}
+// `EditOp` mora em `tweakxl.rs` (2026-07-15): é o tipo de INTENÇÃO (Op::Edit), não do writer
+// offline — desacopla `tweakxl.rs` de `writer.rs`/`tweakdb.rs`/`kraken`, permitindo expor só
+// `yaml+template+tweakxl+hashes` como lib pro runtime (cp77-console), sem arrastar a dependência
+// nativa do Kraken (build.rs+ooz) pro dylib do jogo. Re-exportado aqui (`pub use`) pra `main.rs`
+// continuar enxergando `writer::EditOp` sem mudar nada lá.
+pub use crate::tweakxl::EditOp;
 
 /// Resultado de aplicar um edit a um flat.
 pub enum SetOutcome {
@@ -457,6 +443,48 @@ pub enum SetOutcome {
     NotFound,
     /// Existe, mas a operação/valor não casa (tipo, faixa, sintaxe de array).
     NotEditable { ty: String, reason: String },
+}
+
+/// Resultado de aplicar uma op (para relatório de `apply-*`/`--check`).
+pub struct OpResult {
+    pub desc: String,
+    pub ok: bool,
+    pub detail: String,
+}
+
+/// Aplica as ops (de `tweakxl::interpret_from`) a um Model em sequência, devolvendo um resultado
+/// por op. Mora aqui (não em `tweakxl.rs`) — é a aplicação OFFLINE contra o `Model` (writer), não
+/// o parser em si; `tweakxl.rs` fica livre pra virar lib pro runtime sem arrastar `Model`/`NameDb`.
+pub fn apply_ops(model: &mut Model, names: &NameDb, ops: &[Op]) -> Vec<OpResult> {
+    ops.iter()
+        .map(|op| match op {
+            Op::Clone { record, base } => match model.clone_record(base, record, names) {
+                Ok(n) => OpResult {
+                    desc: format!("$base {record} ⟵ {base}"),
+                    ok: true,
+                    detail: format!("{n} flats clonados"),
+                },
+                Err(e) => OpResult { desc: format!("$base {record}"), ok: false, detail: e },
+            },
+            Op::Create { record, class } => match model.create_record(record, class, names) {
+                Ok((sample, n)) => OpResult {
+                    desc: format!("$type {record} ({class})"),
+                    ok: true,
+                    detail: format!("criado de amostra {sample} — {n} flats"),
+                },
+                Err(e) => OpResult { desc: format!("$type {record} ({class})"), ok: false, detail: e },
+            },
+            Op::Edit { flat, op } => match model.apply(flat, op) {
+                SetOutcome::Applied(ty) => OpResult { desc: flat.clone(), ok: true, detail: ty },
+                SetOutcome::NotFound => {
+                    OpResult { desc: flat.clone(), ok: false, detail: "flat inexistente".into() }
+                }
+                SetOutcome::NotEditable { ty, reason } => {
+                    OpResult { desc: flat.clone(), ok: false, detail: format!("{ty}: {reason}") }
+                }
+            },
+        })
+        .collect()
 }
 
 /// Parseia `[a, b, c]` (ou `[]`) em elementos-texto. Separa por vírgula → não

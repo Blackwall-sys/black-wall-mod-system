@@ -3,5 +3,12 @@
 version = 3
 
 [[package]]
+name = "bwms-hashes"
+version = "0.1.0"
+
+[[package]]
 name = "tweakdb-tool"
 version = "0.1.0"
+dependencies = [
+ "bwms-hashes",
+]

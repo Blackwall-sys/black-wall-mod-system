@@ -146,3 +146,59 @@ impl<'a> Reader<'a> {
         }
     }
 }
+
+#[cfg(all(test, feature = "kraken"))]
+mod corpus_tests {
+    use super::*;
+    use crate::hashes::{tweak_db_id, tweak_db_id_derive};
+
+    fn corpus_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../WolvenKit/WolvenKit.Common/Resources/tweakdbstr.kark")
+    }
+
+    /// PROVA REVERSA do `tweak_db_id_derive` contra o namespace INTEIRO do jogo: pra cada nome
+    /// real `<base>.<sufixo>` da `tweakdbstr.kark`, derivar do pai + sufixo TEM que dar o mesmo id
+    /// que hashear o nome cheio. A propriedade telescópica do CRC garante isso em teoria; este
+    /// teste comprova em centenas de milhares de strings reais (multi-ponto, nomes longos perto do
+    /// limite u8 do length), fechando o `tweakxl` DERIVE com o corpus, não com 2 vetores a dedo.
+    #[test]
+    fn derive_bate_com_direto_no_corpus_inteiro() {
+        let path = corpus_path();
+        let db = NameDb::load(&path).expect("carregar tweakdbstr.kark");
+        assert!(db.len() > 100_000, "corpus pequeno demais: {}", db.len());
+
+        let mut checked = 0usize;
+        let mut mismatches = 0usize;
+        let mut max_len = 0usize;
+        let mut first_bad: Option<String> = None;
+        for name in db.by_id.values() {
+            max_len = max_len.max(name.len());
+            // split no ÚLTIMO ponto (a última derivação de segmento); só nomes com base+sufixo.
+            let Some(dot) = name.rfind('.') else { continue };
+            if dot == 0 || dot + 1 >= name.len() {
+                continue;
+            }
+            let base = &name[..dot];
+            let suffix = &name[dot..]; // inclui o '.'
+            let derived = tweak_db_id_derive(tweak_db_id(base), suffix);
+            let direct = tweak_db_id(name);
+            if derived != direct {
+                mismatches += 1;
+                if first_bad.is_none() {
+                    first_bad = Some(name.clone());
+                }
+            }
+            checked += 1;
+        }
+        println!(
+            "[corpus] nomes={} record.flat-checados={} mismatches={} max_len={}",
+            db.len(),
+            checked,
+            mismatches,
+            max_len
+        );
+        assert!(checked > 50_000, "poucos nomes com ponto: {checked}");
+        assert_eq!(mismatches, 0, "1º divergente: {first_bad:?}");
+    }
+}

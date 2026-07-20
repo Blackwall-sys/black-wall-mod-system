@@ -1,12 +1,10 @@
 [package]
-name = "bwms-plugin-example"
-version = "0.1.2"
+name = "example-plugin"
+version = "0.1.0"
 edition = "2021"
 
-# Plugin do BWMS = um cdylib (.dylib) que exporta `bwms_plugin_main`.
 [lib]
 crate-type = ["cdylib"]
 
 [profile.release]
-opt-level = "z"
-strip = true
+panic = "abort"

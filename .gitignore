@@ -36,3 +36,7 @@ Kraken/
 luacheck/
 _competitor-ref/
 cp77-symbols/
+
+# ── Lixo de refactor/backup de dev (não deve ir pro público) ─────────────
+**/.moved-to-*/
+**/*.legacy-*

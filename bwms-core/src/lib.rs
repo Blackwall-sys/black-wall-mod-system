@@ -17,6 +17,8 @@
 //! vez de cada ferramenta reimplementar/shellar a outra.
 
 pub mod apply;
+pub mod apply_xl;
 pub mod classify;
+pub mod nexus;
 pub mod theme;
 pub mod xl;

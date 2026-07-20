@@ -23,8 +23,10 @@ const PROT_READ: i32 = 1;
 const PROT_WRITE: i32 = 2;
 const PROT_EXEC: i32 = 4;
 const MAP_PRIVATE: i32 = 0x0002;
+const MAP_FIXED: i32 = 0x0010;
 const MAP_ANON: i32 = 0x1000;
 const MAP_JIT: i32 = 0x0800;
+const MAP_FAILED: isize = -1;
 
 extern "C" {
     static mach_task_self_: MachPort;
@@ -33,7 +35,20 @@ extern "C" {
     fn sys_icache_invalidate(start: *mut c_void, len: usize);
     fn pthread_jit_write_protect_np(enabled: i32);
     fn mmap(addr: *mut c_void, len: usize, prot: i32, flags: i32, fd: i32, off: i64) -> *mut c_void;
+    fn munmap(addr: *mut c_void, len: usize) -> i32;
+    fn mach_vm_region(target_task: MachPort, address: *mut u64, size: *mut u64, flavor: i32, info: *mut u32, info_cnt: *mut u32, object_name: *mut MachPort) -> KernReturn;
+    fn mach_vm_allocate(target_task: MachPort, address: *mut u64, size: u64, flags: i32) -> KernReturn;
+    fn mach_vm_remap(
+        target_task: MachPort, target_address: *mut u64, size: u64, mask: u64, flags: i32,
+        src_task: MachPort, src_address: u64, copy: i32,
+        cur_prot: *mut i32, max_prot: *mut i32, inheritance: i32,
+    ) -> KernReturn;
+    fn __error() -> *mut i32;
 }
+const VM_FLAGS_FIXED: i32 = 0x0;
+const VM_FLAGS_ANYWHERE: i32 = 0x1;
+const VM_FLAGS_OVERWRITE: i32 = 0x4000;
+const VM_REGION_BASIC_INFO_64: i32 = 9;
 
 /// True se [address, address+len) está mapeado e legível AGORA. Não crasha. Usado
 /// pelos resolvedores/diagnósticos que leem memória do jogo a partir de offsets crus.
@@ -82,6 +97,134 @@ fn emit_b_near(from: u64, to: u64) -> Option<[u8; 4]> {
     }
     let imm26 = ((off >> 2) as u32) & 0x03FF_FFFF;
     Some((0x1400_0000u32 | imm26).to_le_bytes())
+}
+
+/// `ADRP Xrd, <to>` (calcula o endereço da PÁGINA de `to`, relativo a PC&~0xFFF, alcance ±4GB —
+/// 32x maior que o `B` de 4B) seguido de `BR Xrd` — 8 bytes, exatos pro getter de 8B (2 leaf
+/// instructions). Exige `to` alinhado a 4096 (ADRP só endereça páginas inteiras). Achado
+/// 2026-07-12 (GOG): o `B` de ±128MB não alcança nosso dylib nesse layout, mas QUALQUER
+/// `mmap` comum (sem MAP_FIXED, sempre bem-sucedido) cai muito dentro de ±4GB — não precisa
+/// mais achar um endereço específico livre, só usar o que o mmap normal já devolve.
+fn emit_adrp_br(from: u64, to_page_aligned: u64, reg: u32) -> Option<[u8; 8]> {
+    if to_page_aligned & 0xFFF != 0 {
+        return None; // ADRP só aponta pra pagina (multiplo de 4096)
+    }
+    let from_page = (from as i64) & !0xFFF;
+    let delta_pages = ((to_page_aligned as i64) - from_page) >> 12;
+    if delta_pages < -(1 << 20) || delta_pages >= (1 << 20) {
+        return None; // fora de +-4GB (imm21 com sinal, em unidades de 4096)
+    }
+    let imm21 = (delta_pages as u32) & 0x1F_FFFF;
+    let immlo = imm21 & 0x3;
+    let immhi = (imm21 >> 2) & 0x7_FFFF;
+    let rd = reg & 0x1F;
+    let adrp = 0x9000_0000u32 | (immlo << 29) | (immhi << 5) | rd;
+    let br = 0xD61F_0000u32 | (rd << 5);
+    let mut out = [0u8; 8];
+    out[0..4].copy_from_slice(&adrp.to_le_bytes());
+    out[4..8].copy_from_slice(&br.to_le_bytes());
+    Some(out)
+}
+
+/// Acha um endereço LIVRE (não mapeado) de pelo menos `min_size` dentro de [lo, hi), andando
+/// pelo mapa de memória real do processo via `mach_vm_region` (nunca adivinha — `MAP_FIXED` numa
+/// suposição errada pode SUBSTITUIR silenciosamente uma região já em uso no macOS, corrompendo
+/// outra coisa; então SEMPRE confirma o gap antes de mapear ali).
+unsafe fn find_free_gap(lo: u64, hi: u64, min_size: u64) -> Option<u64> {
+    let page = 16 * 1024u64;
+    let mut cursor = lo & !(page - 1);
+    while cursor < hi {
+        let mut addr = cursor;
+        let mut size: u64 = 0;
+        let mut info = [0u32; 32];
+        let mut info_cnt: u32 = 32;
+        let mut obj: MachPort = 0;
+        let kr = mach_vm_region(mach_task_self_, &mut addr, &mut size, VM_REGION_BASIC_INFO_64, info.as_mut_ptr(), &mut info_cnt, &mut obj);
+        if kr != KERN_SUCCESS {
+            // Sem mais regiões mapeadas dali pra frente -> o resto até `hi` está livre.
+            return if hi - cursor >= min_size { Some(cursor) } else { None };
+        }
+        // `addr` agora é o início da PRÓXIMA região mapeada em ou após `cursor`.
+        if addr > cursor && (addr - cursor) >= min_size {
+            return Some(cursor); // gap [cursor, addr) confirmado livre
+        }
+        cursor = addr.max(cursor + page) + size.max(page);
+    }
+    None
+}
+
+/// Aloca um "landing pad" JIT DENTRO de ±128MB de `near_to` (achado por `find_free_gap`, nunca
+/// adivinhado) contendo um `abs_jump(dest)` (16B, alcance irrestrito). Usado quando `emit_b_near`
+/// recusa (alvo longe demais do nosso dylib — visto no GOG: layout de memória diferente do Steam
+/// empurra o hook pra fora de ±128MB). O `B` de 4B no alvo aponta pro pad (perto, sempre
+/// alcançável); o pad salta pro destino real (longe, sem limite). 2 saltos em vez de 1, custo
+/// desprezível (a função só roda ~1x/frame no getter da phase byte).
+unsafe fn alloc_near_landing_pad(near_to: u64, dest: u64) -> Option<u64> {
+    const PAGE: u64 = 16 * 1024;
+    const MARGIN: u64 = 120 * 1024 * 1024; // usa quase todo o orçamento de ±128MB do B
+    const FLOOR: u64 = 0x1_0100_0000; // um pouco acima de 4GB — abaixo disso o kernel recusa MAP_FIXED
+    // Busca SÓ PRA CIMA de `near_to` primeiro: `near_to` já mora acima da marca de 4GB (nosso
+    // esquema de vmaddr é LINK_BASE=0x1_0000_0000 + offset), mas `near_to - MARGIN` frequentemente
+    // cai ABAIXO de 4GB — achado 2026-07-12: essa faixa <4GB é reportada como "livre" pelo
+    // `mach_vm_region` mas o kernel RECUSA `mmap(..., MAP_FIXED)` lá mesmo assim (região reservada,
+    // não é só "sem mapeamento de processo"). Só cai pra busca pra baixo se a de cima falhar.
+    let free = find_free_gap(near_to, near_to.saturating_add(MARGIN), PAGE)
+        .or_else(|| find_free_gap(near_to.saturating_sub(MARGIN).max(FLOOR), near_to, PAGE))?;
+    if emit_b_near(near_to, free).is_none() {
+        return None; // gap achado mas fora do alcance do B (não devia acontecer dentro de MARGIN)
+    }
+    // TENTATIVA 1: mach_vm_allocate FIXED direto no endereço livre confirmado.
+    let mut addr_io = free;
+    let kr_alloc = mach_vm_allocate(mach_task_self_, &mut addr_io, PAGE, VM_FLAGS_FIXED);
+    let p = if kr_alloc == KERN_SUCCESS && addr_io == free {
+        Some(free as *mut c_void)
+    } else {
+        // TENTATIVA 2: mmap comum FIXED (RW, sem MAP_JIT).
+        let p2 = mmap(free as *mut c_void, PAGE as usize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_FIXED, -1, 0);
+        if !p2.is_null() && p2 as isize != MAP_FAILED && p2 as u64 == free { Some(p2) } else { None }
+    };
+    let p = match p {
+        Some(p) => p,
+        None => {
+            // TENTATIVA 3 (achado 2026-07-12: 1 e 2 batem em ENOMEM — o kernel recusa alocação NOVA
+            // perto do Mach-O do jogo, mesmo em endereço confirmado livre). `mach_vm_remap` segue um
+            // caminho de kernel DIFERENTE (mapeia de novo um objeto de memória JÁ EXISTENTE em vez de
+            // criar um novo do zero) — pode não ter a mesma restrição de posicionamento.
+            let src = mmap(std::ptr::null_mut(), PAGE as usize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+            if src.is_null() || src as isize == MAP_FAILED {
+                return None;
+            }
+            let stub = abs_jump(dest);
+            std::ptr::copy_nonoverlapping(stub.as_ptr(), src as *mut u8, stub.len());
+            if mach_vm_protect(mach_task_self_, src as u64, PAGE, 0, VM_PROT_READ | VM_PROT_EXECUTE) != KERN_SUCCESS {
+                let _ = munmap(src, PAGE as usize);
+                return None;
+            }
+            sys_icache_invalidate(src, stub.len());
+            let mut target = free;
+            let mut cur_prot: i32 = 0;
+            let mut max_prot: i32 = 0;
+            let kr_remap = mach_vm_remap(
+                mach_task_self_, &mut target, PAGE, 0, VM_FLAGS_FIXED,
+                mach_task_self_, src as u64, 0, // copy=false: mapeia o MESMO objeto (compartilhado)
+                &mut cur_prot, &mut max_prot, 1, // VM_INHERIT_COPY
+            );
+            crate::log(&format!("[gum] alloc_near_landing_pad: mach_vm_remap(src={src:p} -> free={free:#x}) -> kr={kr_remap} target={target:#x}"));
+            if kr_remap != KERN_SUCCESS || target != free {
+                return None;
+            }
+            return Some(free); // já escrito+executável (é o mesmo objeto do `src`, já preparado acima)
+        }
+    };
+    let stub = abs_jump(dest);
+    std::ptr::copy_nonoverlapping(stub.as_ptr(), p as *mut u8, stub.len());
+    let kr = mach_vm_protect(mach_task_self_, free, PAGE, 0, VM_PROT_READ | VM_PROT_EXECUTE);
+    if kr != KERN_SUCCESS {
+        let _ = munmap(p, PAGE as usize);
+        return None;
+    }
+    sys_icache_invalidate(p, stub.len());
+    Some(free)
 }
 
 // Relocador de prólogo arm64: copia os 16 bytes (4 instr) deslocados consertando os
@@ -169,23 +312,78 @@ unsafe fn relocate_n(orig: u64, n_insns: u64) -> Option<Vec<u8>> {
             i += 1;
             continue;
         }
-        // LDR literal 64-bit GP (0x58) -> materializa o endereço e faz ldr [Xscratch].
+        // LDR literal 64-bit GP (0x58) -> LÊ o valor UMA VEZ (agora, na relocação) e materializa o
+        // VALOR direto em Xt — NÃO materializa o endereço pra reler em runtime. Achado 2026-07-16
+        // (ao vivo, empilhando 2 hooks no mesmo alvo pra `red4ext-attach-detach-contract`): o
+        // padrão antigo (materializa endereço + `ldr [Xscratch]` em runtime) quebra quando o
+        // "prólogo" sendo relocado É UM abs_jump patch de OUTRO hook — o próprio abs_jump usa ESTE
+        // exato encoding (`ldr x17,#8`), e reler o endereço em runtime pega o que estiver lá NAQUELE
+        // instante, que pode já ter sido SOBRESCRITO por um patch mais novo no MESMO endereço
+        // (loop infinito confirmado: tramp2 relia o endereço, um hook3 sobrescrevia com seu próprio
+        // alvo, tramp2 saltava pra si mesmo). Ler o valor agora (snapshot) é imune a isso — e é
+        // igualmente correto pro caso normal (literal de constante compilada, imutável).
         if (insn & 0xFF00_0000) == 0x5800_0000 {
             let rt = insn & 0x1F;
             let mut off = ((insn >> 5) & 0x7_FFFF) as i64;
             if off & (1 << 18) != 0 { off |= !0x7_FFFFi64; }
             let lit_addr = (ia as i64).wrapping_add(off << 2) as u64;
-            let scratch = if rt == 16 { 17u32 } else { 16u32 };
-            emit_load_imm64(&mut out, scratch, lit_addr);
-            let ldr = 0xF940_0000u32 | (scratch << 5) | rt; // ldr Xt, [Xscratch]
-            out.extend_from_slice(&ldr.to_le_bytes());
+            let value = std::ptr::read_unaligned(lit_addr as *const u64);
+            emit_load_imm64(&mut out, rt, value);
             i += 1;
             continue;
         }
-        // BL (chamada) e outros literais (32-bit/SIMD/LDRSW/PRFM): ainda não tratados -> recusa segura.
-        let is_bl = (insn & 0xFC00_0000) == 0x9400_0000;
+        // BL (chamada) -> materializa o alvo absoluto em X17 (IP1, scratch de convenção — safe pra
+        // clobber antes de uma call, mesma regra dos veneers/PLT) + BLR X17. LR fica correto sozinho:
+        // BLR seta LR = PC+4 da PRÓPRIA posição no trampolim, que é exatamente onde a relocação
+        // continua (resto das instruções + jump-back pro código original) — sem precisar de contas.
+        if (insn & 0xFC00_0000) == 0x9400_0000 {
+            let mut off = (insn & 0x03FF_FFFF) as i64;
+            if off & (1 << 25) != 0 { off |= !0x03FF_FFFFi64; }
+            let target = (ia as i64).wrapping_add(off << 2) as u64;
+            emit_load_imm64(&mut out, 17, target);
+            let blr = 0xD63F_0000u32 | (17u32 << 5); // blr x17
+            out.extend_from_slice(&blr.to_le_bytes());
+            i += 1;
+            continue;
+        }
+        // LDR literal (32-bit GP, opc=00,V=0, 0x18) -> lê o valor UMA VEZ (u32, zero-estende pra
+        // Xt) e materializa direto — mesmo motivo do caso 64-bit acima (snapshot, imune a
+        // sobrescrita por um hook mais novo no mesmo endereço).
+        if (insn & 0xFF00_0000) == 0x1800_0000 {
+            let rt = insn & 0x1F;
+            let mut off = ((insn >> 5) & 0x7_FFFF) as i64;
+            if off & (1 << 18) != 0 { off |= !0x7_FFFFi64; }
+            let lit_addr = (ia as i64).wrapping_add(off << 2) as u64;
+            let value = std::ptr::read_unaligned(lit_addr as *const u32) as u64; // ldr Wt zero-estende
+            emit_load_imm64(&mut out, rt, value);
+            i += 1;
+            continue;
+        }
+        // LDRSW literal (opc=10,V=0, 0x98) -> lê o valor UMA VEZ (i32, SINAL-estende pra Xt) e
+        // materializa direto — mesmo motivo dos casos acima (snapshot, imune a sobrescrita).
+        if (insn & 0xFF00_0000) == 0x9800_0000 {
+            let rt = insn & 0x1F;
+            let mut off = ((insn >> 5) & 0x7_FFFF) as i64;
+            if off & (1 << 18) != 0 { off |= !0x7_FFFFi64; }
+            let lit_addr = (ia as i64).wrapping_add(off << 2) as u64;
+            let raw32 = std::ptr::read_unaligned(lit_addr as *const i32);
+            let value = raw32 as i64 as u64; // ldrsw sinal-estende 32->64
+            emit_load_imm64(&mut out, rt, value);
+            i += 1;
+            continue;
+        }
+        // PRFM literal (opc=11,V=0, 0xD8): hint puro de cache, sem efeito observável -> vira NOP.
+        // (Prefetch nunca muda o resultado do programa; descartar é seguro e mais simples que
+        // materializar o endereço só pra manter um hint que o núcleo pode ignorar de qualquer jeito.)
+        if (insn & 0xFF00_0000) == 0xD800_0000 {
+            out.extend_from_slice(&0xD503_201Fu32.to_le_bytes()); // nop
+            i += 1;
+            continue;
+        }
+        // Literais SIMD/FP (LDR St/Dt/Qt, opc=00/01/10 com V=1: 0x1C/0x5C/0x9C) — registrador de
+        // destino é o banco SIMD/FP, não GP; ainda não tratado -> recusa segura (raro em prólogo real).
         let is_other_lit = (insn & 0x3B00_0000) == 0x1800_0000;
-        if is_bl || is_other_lit {
+        if is_other_lit {
             return None;
         }
 
@@ -201,6 +399,29 @@ struct Hook {
     orig: [u8; 16],
 }
 static HOOKS: Mutex<Vec<Hook>> = Mutex::new(Vec::new());
+
+// ---- bookkeeping do contrato attach/detach (puro, unit-testável sem tocar memória) ----
+// Vários hooks podem empilhar no MESMO alvo: cada `Hook.orig` guarda os 16 bytes que estavam lá
+// QUANDO ELE aplicou (o `replace` copia o prólogo atual antes de patchar). Logo o desfazer correto
+// é LIFO: reverter o ÚLTIMO hook do alvo restaura o estado anterior a ele (que reativa o penúltimo),
+// e assim por diante até o 1º hook restaurar o original verdadeiro. O bug antigo usava o PRIMEIRO
+// (`position`), restaurando o original verdadeiro cedo demais e corrompendo os hooks empilhados.
+
+/// Índice do hook mais RECENTE instalado em `target` (LIFO). `None` se não há hook nesse alvo.
+fn latest_index_for(hooks: &[Hook], target: u64) -> Option<usize> {
+    hooks.iter().rposition(|h| h.target == target)
+}
+
+/// Os 16 bytes ORIGINAIS verdadeiros de `target` (o `orig` do PRIMEIRO hook instalado nele) —
+/// antes de qualquer patch. `None` se não há hook nesse alvo.
+fn true_original_of(hooks: &[Hook], target: u64) -> Option<[u8; 16]> {
+    hooks.iter().find(|h| h.target == target).map(|h| h.orig)
+}
+
+/// Quantos hooks estão empilhados em `target`.
+fn count_for(hooks: &[Hook], target: u64) -> usize {
+    hooks.iter().filter(|h| h.target == target).count()
+}
 
 unsafe fn set_prot(addr: u64, prot: i32) -> bool {
     let page = addr & !0xFFF;
@@ -229,6 +450,33 @@ pub unsafe fn vtable_hook(vtbl: *mut u64, slot_idx: usize, replacement: *const c
     slot.write(replacement as u64);
     set_prot(addr, VM_PROT_READ); // restaura RO (vtable é dado, não código)
     Some(original)
+}
+
+/// Hooka VÁRIOS slots da MESMA vtable com UM ÚNICO ciclo de COW. O `vtable_hook` repetido faz
+/// `VM_PROT_COPY` N vezes na mesma página → corrompe o mapeamento (crash). Aqui: COW a página 1×,
+/// escreve todos os slots, restaura RO 1×. Slots com original 0 (gaps) são pulados. Devolve os
+/// originais (0 nos pulados), na ordem de `hooks`.
+/// # Safety
+/// `vtbl` válida; todos os `slot` dentro da mesma página de `vtbl`.
+pub unsafe fn vtable_hook_bulk(vtbl: *mut u64, hooks: &[(usize, *const c_void)]) -> Vec<*const c_void> {
+    let mut origs = vec![core::ptr::null(); hooks.len()];
+    if vtbl.is_null() || hooks.is_empty() {
+        return origs;
+    }
+    let page_addr = vtbl as u64;
+    if !set_prot(page_addr, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) {
+        return origs;
+    }
+    for (i, &(slot, repl)) in hooks.iter().enumerate() {
+        let s = vtbl.add(slot);
+        let orig = s.read();
+        origs[i] = orig as *const c_void;
+        if orig != 0 {
+            s.write(repl as u64);
+        }
+    }
+    set_prot(page_addr, VM_PROT_READ);
+    origs
 }
 
 /// Desfaz um `vtable_hook`, restaurando o ponteiro original no slot.
@@ -316,6 +564,56 @@ pub unsafe fn vtable_selftest_once(obj: *mut c_void) {
 mod tests {
     use super::*;
 
+    // ---- contrato attach/detach: bookkeeping puro (LIFO + original verdadeiro) ----
+
+    fn hk(target: u64, tag: u8) -> Hook {
+        Hook { target, orig: [tag; 16] } // `orig` marcado com o tag p/ rastrear qual bytes voltam
+    }
+
+    #[test]
+    fn attach_detach_lifo_e_original_verdadeiro() {
+        // 2 hooks no MESMO alvo 0xA (tags 1 e 2), 1 num alvo 0xB (tag 9). Ordem de inserção = Vec.
+        let hooks = vec![hk(0xA, 1), hk(0xB, 9), hk(0xA, 2)];
+        // LIFO no 0xA = o mais recente = índice 2 (tag 2)
+        assert_eq!(latest_index_for(&hooks, 0xA), Some(2));
+        // no 0xB só há um (índice 1)
+        assert_eq!(latest_index_for(&hooks, 0xB), Some(1));
+        // alvo sem hook
+        assert_eq!(latest_index_for(&hooks, 0xC), None);
+        // original verdadeiro do 0xA = o do PRIMEIRO hook (tag 1), não o do último
+        assert_eq!(true_original_of(&hooks, 0xA), Some([1u8; 16]));
+        assert_eq!(true_original_of(&hooks, 0xB), Some([9u8; 16]));
+        assert_eq!(true_original_of(&hooks, 0xC), None);
+        // contagem por alvo
+        assert_eq!(count_for(&hooks, 0xA), 2);
+        assert_eq!(count_for(&hooks, 0xB), 1);
+        assert_eq!(count_for(&hooks, 0xC), 0);
+    }
+
+    #[test]
+    fn attach_detach_desfaz_em_ordem_lifo() {
+        // Simula o desfazer que o `revert` faz (remove o latest_index_for a cada passo) e confere
+        // que os bytes restaurados saem na ordem LIFO: primeiro o penúltimo estado, depois o original.
+        let mut hooks = vec![hk(0xA, 1), hk(0xA, 2), hk(0xA, 3)]; // 3 hooks empilhados no 0xA
+        let mut restaurados = Vec::new();
+        while let Some(pos) = latest_index_for(&hooks, 0xA) {
+            restaurados.push(hooks[pos].orig[0]); // tag dos bytes que o revert escreveria
+            hooks.remove(pos);
+        }
+        // reverte 3→2→1 (LIFO): cada um restaura o estado anterior a ele; o último restaura o original.
+        assert_eq!(restaurados, vec![3, 2, 1]);
+        assert!(hooks.is_empty());
+    }
+
+    #[test]
+    fn attach_detach_um_hook_e_identico_ao_antigo() {
+        // Caso comum (1 hook no alvo): latest == first, comportamento idêntico ao `position` antigo.
+        let hooks = vec![hk(0xA, 7), hk(0xB, 8)];
+        assert_eq!(latest_index_for(&hooks, 0xA), Some(0));
+        assert_eq!(true_original_of(&hooks, 0xA), Some([7u8; 16]));
+        assert_eq!(count_for(&hooks, 0xA), 1);
+    }
+
     // Reconstrói o imm64 de uma sequência movz+3×movk.
     fn decode_load_imm64(code: &[u8]) -> u64 {
         let mut v = 0u64;
@@ -400,21 +698,73 @@ mod tests {
 
     #[test]
     fn ldr_literal_materializa() {
+        // Achado 2026-07-16 (ao vivo, hook empilhado): materializar o ENDEREÇO e reler em runtime
+        // quebra quando o "literal" é sobrescrito depois (ex.: outro hook no mesmo alvo) — agora
+        // lê o VALOR uma vez, na relocação, e materializa ele direto (snapshot imune a isso).
         let ldrlit = 0x5800_0040u32; // ldr x0, #8
         let ret = 0xD65F_03C0u32;
         let buf = mk_buf([ldrlit, ret, ret, ret]);
         let a = buf.as_ptr() as u64;
         let out = unsafe { relocate_prologue(a) }.expect("ldr-literal deve relocar");
-        assert_eq!(decode_load_imm64(&out[0..16]), a + 8, "x16 = endereço do literal");
-        assert_eq!(&out[16..20], &0xF940_0200u32.to_le_bytes(), "ldr x0, [x16]");
+        // valor no "literal" (buf+8..+16) = os 8 bytes de [ret,ret] concatenados (LE) — o mesmo
+        // padrão de bytes que o abs_jump embute (2 instruções de dado após ldr+br).
+        let mut lit = [0u8; 8];
+        lit[0..4].copy_from_slice(&ret.to_le_bytes());
+        lit[4..8].copy_from_slice(&ret.to_le_bytes());
+        assert_eq!(decode_load_imm64(&out[0..16]), u64::from_le_bytes(lit), "x0 = VALOR do literal (não o endereço)");
     }
 
     #[test]
-    fn bl_recusa() {
-        let bl = 0x9400_0001u32; // bl #4 (chamada — precisa preservar x30)
+    fn bl_vira_blr_absoluto() {
+        let bl = 0x9400_0001u32; // bl #4
         let ret = 0xD65F_03C0u32;
         let buf = mk_buf([bl, ret, ret, ret]);
-        assert!(unsafe { relocate_prologue(buf.as_ptr() as u64) }.is_none(), "BL no prólogo -> recusa (preservar x30)");
+        let a = buf.as_ptr() as u64;
+        let out = unsafe { relocate_prologue(a) }.expect("bl deve relocar (materializa+blr)");
+        assert_eq!(decode_load_imm64(&out[0..16]), a + 4, "x17 = alvo absoluto do bl");
+        assert_eq!(&out[16..20], &0xD63F_0220u32.to_le_bytes(), "blr x17");
+    }
+
+    #[test]
+    fn ldr_literal_32bit_materializa() {
+        let ldrlit = 0x1800_0040u32; // ldr w0, #8
+        let ret = 0xD65F_03C0u32;
+        let buf = mk_buf([ldrlit, ret, ret, ret]);
+        let a = buf.as_ptr() as u64;
+        let out = unsafe { relocate_prologue(a) }.expect("ldr-literal 32-bit deve relocar");
+        // valor no "literal" = só os 4 bytes em buf+8 (1º `ret`), ZERO-estendido (ldr Wt).
+        assert_eq!(decode_load_imm64(&out[0..16]), ret as u64, "w0 zero-estendido = VALOR do literal (não o endereço)");
+    }
+
+    #[test]
+    fn ldrsw_literal_materializa() {
+        let ldrsw = 0x9800_0040u32; // ldrsw x0, #8
+        let ret = 0xD65F_03C0u32;
+        let buf = mk_buf([ldrsw, ret, ret, ret]);
+        let a = buf.as_ptr() as u64;
+        let out = unsafe { relocate_prologue(a) }.expect("ldrsw-literal deve relocar");
+        // valor no "literal" = 4 bytes em buf+8 (1º `ret`, bit alto setado), SINAL-estendido.
+        let expected = (ret as i32) as i64 as u64;
+        assert_eq!(decode_load_imm64(&out[0..16]), expected, "x0 sinal-estendido = VALOR do literal (não o endereço)");
+    }
+
+    #[test]
+    fn prfm_literal_vira_nop() {
+        let prfm = 0xD800_0040u32; // prfm pldl1keep, #8
+        let ret = 0xD65F_03C0u32;
+        let buf = mk_buf([prfm, ret, ret, ret]);
+        let out = unsafe { relocate_prologue(buf.as_ptr() as u64) }.expect("prfm-literal deve relocar (vira nop)");
+        assert_eq!(&out[0..4], &0xD503_201Fu32.to_le_bytes(), "prfm -> nop");
+        assert_eq!(&out[4..16], &mk_buf([0, ret, ret, ret])[4..16], "resto segue verbatim");
+    }
+
+    #[test]
+    fn ldr_literal_simd_ainda_recusa() {
+        // ldr s0, #8 (0x1C, SIMD/FP — registrador de destino não é GP, ainda não tratado)
+        let ldrsimd = 0x1C00_0040u32;
+        let ret = 0xD65F_03C0u32;
+        let buf = mk_buf([ldrsimd, ret, ret, ret]);
+        assert!(unsafe { relocate_prologue(buf.as_ptr() as u64) }.is_none(), "LDR SIMD/FP literal -> ainda recusa (fora de escopo)");
     }
 
     #[test]
@@ -446,6 +796,36 @@ mod tests {
         assert_eq!(emit_b_near(0x1000, 0x1003), None);
     }
 
+    #[test]
+    fn adrp_br_codifica_e_recusa() {
+        // exige `to` alinhado a pagina (4096); nao-alinhado -> None
+        assert_eq!(emit_adrp_br(0x1_0000_0000, 0x1_0000_0001, 17), None);
+        // gera 8 bytes: ADRP seguido de BR (offset de ~1.5GB, bem dentro de +-4GB)
+        let out = emit_adrp_br(0x1_0000_0000, 0x1_6000_0000, 17).expect("dentro de +-4GB deve codificar");
+        assert_eq!(out.len(), 8);
+        let adrp = u32::from_le_bytes(out[0..4].try_into().unwrap());
+        let br = u32::from_le_bytes(out[4..8].try_into().unwrap());
+        // decodifica o ADRP (mesmo padrao de bits usado em relocate_prologue/decode_load_imm64)
+        assert_eq!(adrp & 0x1F, 17, "Rd do ADRP deve ser X17");
+        let is_adrp = (adrp >> 31) & 1 == 1;
+        assert!(is_adrp, "op=1 (ADRP, nao ADR)");
+        let immlo = (adrp >> 29) & 0x3;
+        let immhi = (adrp >> 5) & 0x7_FFFF;
+        let mut imm = ((immhi << 2) | immlo) as i64;
+        if imm & (1 << 20) != 0 {
+            imm |= !0x1F_FFFFi64; // sign-extend 21 bits
+        }
+        let from_page: i64 = 0x1_0000_0000i64 & !0xFFF;
+        let computed = (from_page + (imm << 12)) as u64;
+        assert_eq!(computed, 0x1_6000_0000, "ADRP decodificado deve apontar pra pagina certa");
+        // BR Xn: 0xD61F0000 | (Rn<<5)
+        assert_eq!(br, 0xD61F_0000u32 | (17 << 5), "BR X17");
+        // fora de +-4GB -> None
+        assert_eq!(emit_adrp_br(0x1_0000_0000, 0x1_0000_0000 + (1u64 << 32), 17), None);
+        // dentro, perto do limite -> Some
+        assert!(emit_adrp_br(0x1_0000_0000, (0x1_0000_0000i64 + (1i64 << 32) - 0x1000) as u64, 17).is_some());
+    }
+
     // Relocar 1 instrução não-PC-relativa (caso do getter `ldrsb w0,[x0,#0x84]`) = verbatim, 4 bytes.
     #[test]
     fn relocate_n1_verbatim() {
@@ -455,6 +835,44 @@ mod tests {
         let out = unsafe { relocate_n(buf.as_ptr() as u64, 1) }.expect("1 instr deve relocar");
         assert_eq!(out.len(), 4, "n=1 rouba só 4 bytes");
         assert_eq!(&out[0..4], &ldrsb.to_le_bytes(), "não-PC-relativo = verbatim");
+    }
+
+    /// REGRESSÃO (2026-07-16, achado empilhando 2 hooks no mesmo alvo ao vivo p/
+    /// `red4ext-attach-detach-contract`): relocar o PRÓPRIO encoding do `abs_jump` (o patch que
+    /// `Interceptor::replace` escreve no alvo) — o cenário de um hook capturando o que OUTRO hook
+    /// já escreveu ali (hook empilhado). O `abs_jump` é `ldr x17,#8; br x17; <8B: endereço>` — o
+    /// mesmo LDR-literal 64-bit que qualquer prólogo real pode ter. Prova que o valor relocado
+    /// (materializado em Xt) é um SNAPSHOT: sobrescrever o buffer ORIGINAL depois (simulando um
+    /// 2º patch no mesmo endereço) NÃO muda o valor já materializado no trampolim. Antes do fix
+    /// (materializava o ENDEREÇO + `ldr [Xscratch]` em RUNTIME), isto quebrava: reler em runtime
+    /// pegava o valor NOVO (sobrescrito), não o antigo — causava loop infinito ao vivo (o
+    /// trampolim do hook mais novo saltava de volta pra si mesmo).
+    #[test]
+    fn ldr_literal_sobrevive_a_sobrescrita_do_alvo_original() {
+        let a_addr = 0x1_1000_0000u64;
+        let b_addr = 0x1_2000_0000u64;
+        let mut buf = mk_buf([0, 0, 0, 0]);
+        // escreve abs_jump(a_addr) no buffer (mimetiza hook1 patchando o alvo).
+        let patch_a = abs_jump(a_addr);
+        buf.copy_from_slice(&patch_a);
+        let addr = buf.as_ptr() as u64;
+
+        // hook2 captura+reloca o que está lá AGORA (abs_jump pro a_addr).
+        let out = unsafe { relocate_prologue(addr) }.expect("abs_jump(a) deve relocar (é so um LDR-lit + BR)");
+        assert_eq!(decode_load_imm64(&out[0..16]), a_addr, "materializou o VALOR (a_addr), não o endereço do literal");
+
+        // AGORA sobrescreve o buffer com abs_jump(b_addr) — mimetiza hook2 patchando o MESMO
+        // endereço com seu PRÓPRIO alvo (b_addr), exatamente como Interceptor::replace faz.
+        let patch_b = abs_jump(b_addr);
+        buf.copy_from_slice(&patch_b);
+
+        // o trampolim JÁ CONSTRUÍDO (out) não deve ter mudado — é um snapshot, imune à
+        // sobrescrita. Se isto falhar (valor virou b_addr), a bug do loop infinito voltou.
+        assert_eq!(
+            decode_load_imm64(&out[0..16]),
+            a_addr,
+            "trampolim já construído deve continuar apontando pro valor ORIGINAL (a_addr), mesmo após o buffer real ser sobrescrito com b_addr"
+        );
     }
 }
 
@@ -512,15 +930,24 @@ impl Interceptor {
     /// Como `replace`, mas p/ FUNÇÕES PEQUENAS (leaf de 8B etc.): escreve só um `B` de 4 bytes
     /// no alvo (rouba 1 instrução) em vez do abs-jump de 16B → **NÃO transborda a função vizinha**
     /// (a causa do SIGILL @0x3f5ec7c ao hookar o getter da phase-byte). Exige `replacement` em
-    /// ±128MB do alvo (alcance do `B`); se longe, RECUSA limpo (`None`) — guard anti-transbordo,
-    /// nunca corrompe. O trampolim devolvido roda a 1ª instrução (relocada) + volta pro alvo+4.
+    /// ±128MB do alvo (alcance do `B`); se longe, tenta um landing-pad JIT perto do alvo (2 saltos,
+    /// alcance irrestrito no 2º) antes de recusar — achado 2026-07-12: no GOG o slide do dylib vs. o
+    /// jogo empurra o getter da phase byte pra fora de ±128MB (funcionava sempre no Steam, nunca no
+    /// GOG até este fallback). Só recusa (`None`) se nem o pad couber em lugar nenhum.
     ///
     /// # Safety
     /// Mesmos requisitos de `replace`. O alvo deve ter ≥4 bytes de prólogo não-BL.
     pub unsafe fn replace_near4(&self, target: *mut c_void, replacement: *mut c_void) -> Option<*mut c_void> {
         let t = target as u64;
-        // GUARD: B só alcança ±128MB. Longe → recusa (nunca escreve 16B numa função pequena).
-        let b = emit_b_near(t, replacement as u64)?;
+        // GUARD: B só alcança ±128MB. Longe → tenta um landing-pad perto do alvo antes de recusar.
+        let b = match emit_b_near(t, replacement as u64) {
+            Some(b) => b,
+            None => {
+                let pad = alloc_near_landing_pad(t, replacement as u64)?;
+                crate::log(&format!("[gum] replace_near4: fora de alcance direto, landing-pad @ {pad:#x}"));
+                emit_b_near(t, pad)?
+            }
+        };
         // trampolim do original: 1ª instrução roubada (relocada) + abs-jump pro alvo+4.
         let reloc = relocate_n(t, 1)?;
         let tramp = mmap(std::ptr::null_mut(), 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
@@ -547,12 +974,79 @@ impl Interceptor {
         Some(tramp)
     }
 
+    /// Como `replace_near4`, mas usa `ADRP+BR` (8 bytes, ±4GB de alcance) em vez de `B` (4 bytes,
+    /// ±128MB) — rouba as DUAS instruções do getter de 8B (em vez de só a 1ª) mas ainda cabe
+    /// exatamente sem transbordar a vizinha. Achado 2026-07-12 (GOG): o landing-pad de
+    /// `replace_near4` precisa de um endereço DENTRO de ±128MB do alvo, e o macOS recusa alocar
+    /// memória nova nessa vizinhança (reserva de kernel em torno do Mach-O do jogo). Com ADRP
+    /// (±4GB) o orçamento é 32x maior — um `mmap` NORMAL (sem `MAP_FIXED`, sempre bem-sucedido,
+    /// em QUALQUER endereço que o kernel escolher) cai folgadamente dentro de ±4GB de qualquer
+    /// alvo no mesmo processo, sem precisar achar um endereço específico livre.
+    ///
+    /// # Safety
+    /// Mesmos requisitos de `replace`. O alvo deve ter EXATAMENTE 8 bytes de prólogo (2
+    /// instruções) não-PC-relativas e não-BL (ambas relocáveis verbatim).
+    pub unsafe fn replace_adrp_br8(&self, target: *mut c_void, replacement: *mut c_void) -> Option<*mut c_void> {
+        let t = target as u64;
+        // landing pad: mmap comum (sem FIXED) -- sempre sucede, endereço page-aligned de graça.
+        const PAGE: usize = 16 * 1024;
+        let pad = mmap(std::ptr::null_mut(), PAGE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+        if pad.is_null() || pad as isize == -1 {
+            return None;
+        }
+        let pad_addr = pad as u64;
+        debug_assert_eq!(pad_addr & 0xFFF, 0, "mmap sempre devolve endereço alinhado a página");
+        let b = match emit_adrp_br(t, pad_addr, 17) {
+            Some(b) => b,
+            None => {
+                let _ = munmap(pad, PAGE);
+                crate::log(&format!("[gum] replace_adrp_br8: landing-pad @ {pad_addr:#x} fora de ±4GB do alvo (inesperado)"));
+                return None;
+            }
+        };
+        let stub = abs_jump(replacement as u64);
+        std::ptr::copy_nonoverlapping(stub.as_ptr(), pad as *mut u8, stub.len());
+        if mach_vm_protect(mach_task_self_, pad_addr, PAGE as u64, 0, VM_PROT_READ | VM_PROT_EXECUTE) != KERN_SUCCESS {
+            let _ = munmap(pad, PAGE);
+            return None;
+        }
+        sys_icache_invalidate(pad, stub.len());
+
+        // trampolim do original: as 2 instruções roubadas (relocadas) + abs-jump pro alvo+8.
+        let reloc = relocate_n(t, 2)?;
+        let tramp = mmap(std::ptr::null_mut(), 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+        if tramp.is_null() || tramp as isize == -1 {
+            return None;
+        }
+        let mut orig = [0u8; 16];
+        std::ptr::copy_nonoverlapping(target as *const u8, orig.as_mut_ptr(), 16);
+        let back = abs_jump(t + 8);
+        let rl = reloc.len();
+        pthread_jit_write_protect_np(0);
+        std::ptr::copy_nonoverlapping(reloc.as_ptr(), tramp as *mut u8, rl);
+        std::ptr::copy_nonoverlapping(back.as_ptr(), (tramp as *mut u8).add(rl), 16);
+        pthread_jit_write_protect_np(1);
+        sys_icache_invalidate(tramp, rl + 16);
+        // patch: os 8 bytes inteiros do alvo (é a função inteira -- não sobra nada da vizinha aqui).
+        if !set_prot(t, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) {
+            return None;
+        }
+        std::ptr::copy_nonoverlapping(b.as_ptr(), target as *mut u8, 8);
+        set_prot(t, VM_PROT_READ | VM_PROT_EXECUTE);
+        sys_icache_invalidate(target, 8);
+        HOOKS.lock().unwrap().push(Hook { target: t, orig });
+        Some(tramp)
+    }
+
     /// # Safety
     /// `target` precisa ser um alvo previamente substituído por `replace`.
     pub unsafe fn revert(&self, target: *mut c_void) {
         let t = target as u64;
         let mut hooks = HOOKS.lock().unwrap();
-        if let Some(pos) = hooks.iter().position(|h| h.target == t) {
+        // LIFO: desfaz o hook mais RECENTE do alvo. Restaura os bytes que estavam lá antes DELE
+        // (`orig`), o que reativa o hook anterior no mesmo alvo (ou o original, se era o único).
+        // Com 1 hook no alvo (caso comum), é idêntico ao comportamento antigo.
+        if let Some(pos) = latest_index_for(&hooks, t) {
             let orig = hooks[pos].orig;
             if set_prot(t, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_COPY) {
                 std::ptr::copy_nonoverlapping(orig.as_ptr(), target as *mut u8, 16);
@@ -562,4 +1056,42 @@ impl Interceptor {
             hooks.remove(pos);
         }
     }
+
+    /// `red4ext-attach-detach-contract`: desfaz TODOS os hooks empilhados em `target` num call
+    /// só (o "Detach(target) -> ambos somem" do contrato) — chama `revert` em loop LIFO até
+    /// `target` não ter mais nenhum hook nosso. Idempotente: no-op se já não há hook ali.
+    ///
+    /// # Safety
+    /// Mesmos requisitos de `revert`.
+    pub unsafe fn revert_all(&self, target: *mut c_void) {
+        while self.hooks_on(target) > 0 {
+            self.revert(target);
+        }
+    }
+
+    /// Quantos hooks estão empilhados em `target` agora (0 = nenhum).
+    pub fn hooks_on(&self, target: *mut c_void) -> usize {
+        let hooks = HOOKS.lock().unwrap();
+        count_for(&hooks, target as u64)
+    }
+}
+
+/// Aloca 1 página JIT NOVA contendo só `ret` — alvo dummy SEGURO pra hookar quando o teste não
+/// precisa de um alvo real do jogo (ex.: `red4ext-attach-detach-contract`, provar o contrato de
+/// empilhamento em si). NUNCA hookar uma função compilada no NOSSO PRÓPRIO dylib para isso: o
+/// `set_prot`(RW+COPY) do `replace()` te dá a página INTEIRA (4K) do alvo gravável — se essa
+/// página for compartilhada com o código que está EXECUTANDO a própria chamada de `replace()`
+/// (plausível quando o alvo é uma fn Rust pequena definida perto de quem chama), a auto-
+/// modificação em pleno voo pode dar fault de instrução ali mesmo. Uma página `mmap` nova nunca
+/// colide com nenhum código nosso em execução.
+pub unsafe fn alloc_ret_stub() -> Option<*mut c_void> {
+    let m = mmap(std::ptr::null_mut(), 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON | MAP_JIT, -1, 0);
+    if m.is_null() || m as isize == -1 {
+        return None;
+    }
+    pthread_jit_write_protect_np(0);
+    (m as *mut u32).write_unaligned(0xD65F_03C0u32); // ret
+    pthread_jit_write_protect_np(1);
+    sys_icache_invalidate(m, 4);
+    Some(m)
 }

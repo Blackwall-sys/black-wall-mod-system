@@ -35,7 +35,12 @@ extern "C" {
     fn method_setImplementation(m: Method, imp: Imp) -> Imp;
     fn objc_msgSend();
     fn MTLCreateSystemDefaultDevice() -> Id;
-    // re-acopla o cursor ao mouse (o jogo desacopla p/ a câmera em gameplay).
+}
+// CGAssociate = controle de cursor do overlay (re-acopla o mouse ao cursor; o jogo desacopla p/ a
+// câmera em gameplay). Bloco PRÓPRIO com o link do CoreGraphics — mantém o framework linkado mesmo
+// quando a automação de teclado (cg_press, feature "autoproceed") sai do build público.
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
     fn CGAssociateMouseAndMouseCursorPosition(connected: bool) -> i32;
 }
 
@@ -108,6 +113,35 @@ unsafe fn nsstring(s: &str) -> Id {
             f(cls as Id, sel("stringWithUTF8String:"), c.as_ptr())
         }
         Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Desabilita o App Nap do processo do jogo: `[[NSProcessInfo processInfo] beginActivityWithOptions:
+/// (UserInitiated|LatencyCritical) reason:...]`. Sem isso o macOS PAUSA o Cyberpunk quando ele não
+/// está na frente (janela ocluída) — no modo CPVR (olhando o capacete) o jogo vai pro fundo e congela:
+/// boot de "30min", engagement que não processa o SPACE injetado, câmera com "coices". O token é
+/// RETIDO pela sessão toda (App Nap fica OFF enquanto o jogo vive). Chamado 1x no on_load.
+pub unsafe fn disable_app_nap() {
+    let pi_class = class("NSProcessInfo");
+    if pi_class.is_null() {
+        return;
+    }
+    let pi: Id = msg0(pi_class as Id, sel("processInfo"));
+    if pi.is_null() {
+        return;
+    }
+    // NSActivityUserInitiated (0x00FFFFFF) | NSActivityLatencyCritical (0xFF00000000)
+    const OPTS: u64 = 0x00FF_FFFF | 0xFF_0000_0000;
+    let reason = nsstring("BWMS: sem App Nap (boot/CPVR rodam a full mesmo em background)");
+    let f: extern "C" fn(Id, Sel, u64, Id) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+    let token = f(pi, sel("beginActivityWithOptions:reason:"), OPTS, reason);
+    if !token.is_null() {
+        // retém o token pela sessão (senão o autorelease o libera e o App Nap volta)
+        let r: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+        r(token, sel("retain"));
+        crate::log("[appnap] App Nap DESABILITADO (o jogo roda a full em background)");
+    } else {
+        crate::log("[appnap] beginActivityWithOptions retornou null (App Nap NÃO desabilitado)");
     }
 }
 
@@ -214,8 +248,225 @@ fn letter_key(kc: u16) -> Option<imgui::Key> {
 
 static ORIG_PRESENT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static ORIG_SENDEVENT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Injeta um key press (keyDown+keyUp) no app via NSEvent + sendEvent original — SEM acessibilidade,
+/// SEM foco (fala direto com o NSApplication). Usado p/ auto-avançar a engagement do boot ("APERTE E
+/// PARA CONTINUAR"), cujo proceed é 100% nativo (não há gancho redscript). keyCode 14 = "E".
+/// Chamado da main thread (present) — AppKit exige. No-op se o sendEvent ainda não foi swizzlado.
+// CoreGraphics: injeção de tecla em nível HID (o CP2077 lê input via IOKit HID, NÃO via NSApp
+// sendEvent — por isso postEvent NSEvent não avança a engagement, mas CGEvent HID sim, igual ao
+// input real do teclado). CGEventPost pode exigir Acessibilidade (TCC) pro processo do jogo.
+#[cfg(feature = "autoproceed")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventSourceCreate(state: i32) -> *mut c_void;
+    fn CGEventCreateKeyboardEvent(source: *mut c_void, keycode: u16, keydown: bool) -> *mut c_void;
+    fn CGEventPost(tap: u32, event: *mut c_void);
+    fn CGEventPostToPid(pid: i32, event: *mut c_void);
+    fn CFRelease(cf: *mut c_void);
+    fn CGEventCreateMouseEvent(
+        source: *mut c_void,
+        mouse_type: u32,
+        xy: NSPoint,
+        button: u32,
+    ) -> *mut c_void;
+    fn CGEventSetIntegerValueField(event: *mut c_void, field: u32, value: i64);
+    fn CGEventGetIntegerValueField(event: *mut c_void, field: u32) -> i64;
+    fn CGEventGetLocation(event: *mut c_void) -> NSPoint;
+    fn CGEventCreate(source: *mut c_void) -> *mut c_void;
+}
+#[cfg(feature = "autoproceed")]
+extern "C" {
+    fn getpid() -> i32;
+}
+
+/// O jogo é o app da FRENTE agora? (NSApp.isActive). Usado p/ não vazar o CGEvent global pros
+/// outros apps do usuário quando ele sai do jogo (ex.: digitar num browser). Fail-open (assume
+/// frente se não der pra checar) — o cheque normal funciona.
+#[cfg(feature = "autoproceed")]
+pub unsafe fn game_is_frontmost() -> bool {
+    let app_cls = class("NSApplication");
+    if app_cls.is_null() {
+        return true;
+    }
+    let shared = msg0(app_cls as Id, sel("sharedApplication"));
+    if shared.is_null() {
+        return true;
+    }
+    (msg0(shared, sel("isActive")) as usize) & 0xff != 0
+}
+
+/// Força a janela do jogo pra FRENTE (`[NSApp activateIgnoringOtherApps:YES]`). A engagement do boot
+/// só aceita o SPACE quando o jogo está em foco (lê evento HID global, não o CGEventPostToPid). No
+/// CPVR o usuário olha o capacete → o jogo fica atrás → o auto-proceed não passava. Chamado antes de
+/// cada injeção durante o boot pra garantir que o SPACE global chegue. Só age até o menu (auto-proceed).
+pub unsafe fn force_game_frontmost() {
+    let app_cls = class("NSApplication");
+    if app_cls.is_null() {
+        return;
+    }
+    let shared = msg0(app_cls as Id, sel("sharedApplication"));
+    if shared.is_null() {
+        return;
+    }
+    let f: extern "C" fn(Id, Sel, bool) = std::mem::transmute(objc_msgSend as *const c_void);
+    f(shared, sel("activateIgnoringOtherApps:"), true);
+}
+
+/// Injeta keyDown+keyUp da tecla via CGEvent (HID). O `CGEventPostToPid(getpid())` é inócuo (o jogo
+/// lê HID, não pega o self-post). O que REALMENTE avança é o `CGEventPost` global — mas esse vai pro
+/// app da FRENTE, então SÓ é postado quando o jogo está em foco; senão vazaria SPACE pros outros apps
+/// do usuário (bug reportado: teclado dando espaço aleatório ao digitar fora do jogo). Thread-safe.
+#[cfg(feature = "autoproceed")]
+pub unsafe fn cg_press(keycode: u16) {
+    let pid = getpid();
+    let frontmost = game_is_frontmost();
+    let src = CGEventSourceCreate(1); // kCGEventSourceStateHIDSystemState
+    let down = CGEventCreateKeyboardEvent(src, keycode, true);
+    let up = CGEventCreateKeyboardEvent(src, keycode, false);
+    if !down.is_null() {
+        CGEventPostToPid(pid, down);
+        if frontmost {
+            CGEventPost(0, down); // global SÓ com o jogo em foco (senão vaza pros outros apps)
+        }
+        CFRelease(down);
+    }
+    if !up.is_null() {
+        CGEventPostToPid(pid, up);
+        if frontmost {
+            CGEventPost(0, up);
+        }
+        CFRelease(up);
+    }
+    if !src.is_null() {
+        CFRelease(src);
+    }
+}
+
+/// `cw-real-mod-e2e`/`axl-link-visual-proof` (2026-07-19): navegação de menu nativo por MOUSE.
+/// Achado de sessão anterior (documentado em `proofs/2026-07-18-redscript-cheat-effects-proof-
+/// CLIQUE-REAL-PROVADO.log`): o jogo lê DELTA relativo de HID pro cursor renderizado por ele
+/// (não posição absoluta — `CGWarpMouseCursorPosition` não sincroniza). MESMA receita de
+/// `cg_press` (CGEventPost de DENTRO do processo do jogo, evita o gate de Acessibilidade/TCC que
+/// bloquearia um processo externo tentando postar globalmente). `dx`/`dy` em pontos de tela;
+/// aplicados como `kCGMouseEventDeltaX/Y` num evento `mouseMoved` cuja location é a posição
+/// ATUAL (lida via `CGEventGetLocation` de um evento novo) — não usamos warp/posição alvo.
+#[cfg(feature = "autoproceed")]
+pub unsafe fn cg_mouse_delta(dx: i64, dy: i64) {
+    let frontmost = game_is_frontmost();
+    let probe = CGEventCreate(std::ptr::null_mut());
+    let probe_ok = !probe.is_null();
+    let loc = if probe_ok {
+        let l = CGEventGetLocation(probe);
+        CFRelease(probe);
+        l
+    } else {
+        NSPoint { x: 0.0, y: 0.0 }
+    };
+    let newloc = NSPoint {
+        x: loc.x + dx as f64,
+        y: loc.y + dy as f64,
+    };
+    let src = CGEventSourceCreate(1);
+    let mv = CGEventCreateMouseEvent(src, 5 /* kCGEventMouseMoved */, newloc, 0);
+    crate::log(&format!(
+        "[mousedelta-diag] frontmost={frontmost} probe_ok={probe_ok} loc=({},{}) newloc=({},{}) src={src:p} mv={mv:p}",
+        loc.x, loc.y, newloc.x, newloc.y
+    ));
+    if !mv.is_null() {
+        CGEventSetIntegerValueField(mv, 4 /* kCGMouseEventDeltaX */, dx);
+        CGEventSetIntegerValueField(mv, 5 /* kCGMouseEventDeltaY */, dy);
+        let rx = CGEventGetIntegerValueField(mv, 4);
+        let ry = CGEventGetIntegerValueField(mv, 5);
+        crate::log(&format!("[mousedelta-diag] readback dx={rx} dy={ry} (esperado {dx}/{dy})"));
+        CGEventPostToPid(getpid(), mv);
+        if frontmost {
+            CGEventPost(0, mv);
+        }
+        CFRelease(mv);
+    }
+    if !src.is_null() {
+        CFRelease(src);
+    }
+}
+
+/// Clique (mouseDown+mouseUp) do botão esquerdo na posição ATUAL do cursor do jogo (não move
+/// nada — só o clique). Mesma receita/permissão de `cg_mouse_delta`/`cg_press`.
+#[cfg(feature = "autoproceed")]
+pub unsafe fn cg_click() {
+    let frontmost = game_is_frontmost();
+    let probe = CGEventCreate(std::ptr::null_mut());
+    let loc = if !probe.is_null() {
+        let l = CGEventGetLocation(probe);
+        CFRelease(probe);
+        l
+    } else {
+        NSPoint { x: 0.0, y: 0.0 }
+    };
+    let src = CGEventSourceCreate(1);
+    let down = CGEventCreateMouseEvent(src, 1 /* kCGEventLeftMouseDown */, loc, 0);
+    let up = CGEventCreateMouseEvent(src, 2 /* kCGEventLeftMouseUp */, loc, 0);
+    if !down.is_null() {
+        CGEventPostToPid(getpid(), down);
+        if frontmost {
+            CGEventPost(0, down);
+        }
+        CFRelease(down);
+    }
+    if !up.is_null() {
+        CGEventPostToPid(getpid(), up);
+        if frontmost {
+            CGEventPost(0, up);
+        }
+        CFRelease(up);
+    }
+    if !src.is_null() {
+        CFRelease(src);
+    }
+}
+
+/// (mantida) Injeta via NSEvent postEvent — não avança a engagement (o jogo usa HID); ver cg_press.
+pub unsafe fn inject_key(keycode: u16, chars: &str) {
+    let app_cls = class("NSApplication");
+    if app_cls.is_null() {
+        return;
+    }
+    let shared = msg0(app_cls as Id, sel("sharedApplication"));
+    if shared.is_null() {
+        return;
+    }
+    let nsevent = class("NSEvent") as Id;
+    let s = sel("keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:");
+    let cs = nsstring(chars);
+    let nil: Id = std::ptr::null_mut();
+    let loc = NSPoint { x: 0.0, y: 0.0 };
+    // ABI arm64: NSPoint (2×f64) = HFA em d0,d1; inteiros/ponteiros em x; f64 timestamp em d2.
+    type KeyEvFn = extern "C" fn(Id, Sel, u64, NSPoint, u64, f64, i64, Id, Id, Id, i8, u16) -> Id;
+    let mk: KeyEvFn = std::mem::transmute(objc_msgSend as *const c_void);
+    // postEvent:atStart: é THREAD-SAFE (enfileira pro run loop da main thread) e NÃO precisa de
+    // acessibilidade (é dentro do app) — ao contrário de sendEvent (só main thread) e CGEventPost
+    // (precisa TCC). Permite injetar da thread de proceed.
+    let post: extern "C" fn(Id, Sel, Id, i8) = std::mem::transmute(objc_msgSend as *const c_void);
+    let sp = sel("postEvent:atStart:");
+    // 10 = NSEventTypeKeyDown, 11 = NSEventTypeKeyUp
+    let down = mk(nsevent, s, 10, loc, 0, 0.0, 0, nil, cs, cs, 0, keycode);
+    if !down.is_null() {
+        post(shared, sp, down, 0);
+    }
+    let up = mk(nsevent, s, 11, loc, 0, 0.0, 0, nil, cs, cs, 0, keycode);
+    if !up.is_null() {
+        post(shared, sp, up, 0);
+    }
+}
 static LOGGED: AtomicBool = AtomicBool::new(false);
 static SHOW: AtomicBool = AtomicBool::new(false); // começa ESCONDIDO (` abre)
+static PREV_SHOW: AtomicBool = AtomicBool::new(false); // p/ detectar a borda fechar→devolver o mouse
+/// `cet-lifecycle-events`: bordas abrir/fechar do overlay, sinalizadas AQUI (thread do render, via
+/// presentDrawable) mas consumidas+disparadas (`fire_event`) de dentro do `cp77_tick` (thread do
+/// jogo) — chamar a VM/redscript fora da thread do jogo é arriscado (lição desta sessão: 3ptest/
+/// fbtest/etc. só chamam call_func do cp77_tick). Ver o consumo em `lib.rs`.
+pub(crate) static OVERLAY_OPEN_EDGE: AtomicBool = AtomicBool::new(false);
+pub(crate) static OVERLAY_CLOSE_EDGE: AtomicBool = AtomicBool::new(false);
 // Mouse (preenchido pelo sendEvent na main thread, lido pelo render). f32 em bits.
 static MOUSE_X: AtomicU32 = AtomicU32::new(0);
 static MOUSE_Y: AtomicU32 = AtomicU32::new(0);
@@ -248,10 +499,98 @@ fn key_log_push(s: String) {
     }
 }
 
+// ===== INPUT LOGGER pro dataset de ML (input → tela → estado) =====
+// Grava TODA entrada do usuário com timestamp ms em /tmp/cp77-input.log, casável com os frames
+// do harness (mesmo relógio). Cobertura: tecla down/up (sem auto-repeat → dá a DURAÇÃO do hold,
+// ex.: andar = hold W), botões do mouse (L/R/outros), scroll (troca de arma), modificadores
+// (shift=sprint, ctrl=crouch, alt). Liga/desliga por `inputlog on|off`. OFF por padrão.
+static INPUT_LOG_ON: AtomicBool = AtomicBool::new(false);
+static LAST_MOVE_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+const INPUT_LOG_PATH: &str = "/tmp/cp77-input.log";
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Liga/desliga o logger. Ao ligar, trunca o arquivo e escreve um cabeçalho.
+pub fn input_log_set(on: bool) {
+    INPUT_LOG_ON.store(on, Ordering::Relaxed);
+    if on {
+        if let Ok(mut f) = std::fs::File::create(INPUT_LOG_PATH) {
+            use std::io::Write;
+            let _ = writeln!(
+                f,
+                "# bwms input log | ts_ms ev | kd/ku=key down/up(kc=keyCode), mdn/mup L|R|O=mouse, scr=scroll, mod=flags, mov=mouse pos"
+            );
+        }
+    }
+}
+
+fn input_file_log(ev: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(INPUT_LOG_PATH)
+    {
+        let _ = writeln!(f, "{} {}", now_ms(), ev);
+    }
+}
+
+/// Formata e grava UM evento de input (chamado do swizzle de sendEvent quando INPUT_LOG_ON).
+unsafe fn log_input_event(event: Id, t: usize) {
+    let ev: String = match t {
+        10 | 11 => {
+            // pula auto-repeat do key-down: hold = 1 down + 1 up (a duração sai da diferença de ts)
+            if t == 10 && msg_usize(event, sel("isARepeat")) != 0 {
+                return;
+            }
+            let kc = msg_u16(event, sel("keyCode"));
+            let mut ch = String::new();
+            let s0 = msg0(event, sel("charactersIgnoringModifiers"));
+            if !s0.is_null() {
+                let p = msg_cstr(s0, sel("UTF8String"));
+                if !p.is_null() {
+                    if let Ok(st) = CStr::from_ptr(p).to_str() {
+                        ch = st.to_string();
+                    }
+                }
+            }
+            format!("{} kc={kc} {ch:?}", if t == 10 { "kd" } else { "ku" })
+        }
+        12 => format!("mod {:#x}", msg_usize(event, sel("modifierFlags")) & 0xffff_0000),
+        1 | 2 => format!("{} L", if t == 1 { "mdn" } else { "mup" }),
+        3 | 4 => format!("{} R", if t == 3 { "mdn" } else { "mup" }),
+        25 | 26 => format!("{} O", if t == 25 { "mdn" } else { "mup" }),
+        22 => format!("scr dy={:.1}", msg_f64(event, sel("scrollingDeltaY"))),
+        5 | 6 | 7 => {
+            // mouseMoved/dragged disparam MUITO → throttle ~50ms (≤20 amostras/s)
+            let n = now_ms();
+            if n.wrapping_sub(LAST_MOVE_MS.load(Ordering::Relaxed)) < 50 {
+                return;
+            }
+            LAST_MOVE_MS.store(n, Ordering::Relaxed);
+            let p = msg_point(event, sel("locationInWindow"));
+            format!("mov {:.0},{:.0}", p.x, p.y)
+        }
+        _ => return,
+    };
+    input_file_log(&ev);
+}
+
 /// Verdadeiro só durante o `onDraw` (dentro do frame imgui, thread de render). As
 /// funções `ImGui.*` do Lua checam isso — chamar fora do onDraw é no-op (sem crash).
 pub fn in_draw() -> bool {
     IN_DRAW.load(Ordering::Relaxed)
+}
+
+/// Força o estado aberto/fechado do overlay (teste de `cet-lifecycle-events` via canal, sem HID —
+/// dispara a MESMA borda que o toggle real do backtick dispara em render_imgui).
+pub fn set_shown(v: bool) {
+    SHOW.store(v, Ordering::Relaxed);
 }
 
 /// O overlay (console) está aberto? (cp77_tick usa p/ disparar onOverlayOpen/Close.)
@@ -278,6 +617,10 @@ extern "C" fn my_sendevent(this: Id, cmd: Sel, event: Id) {
         let mut consume = false;
         if !event.is_null() {
             let t = msg_usize(event, sel("type"));
+            // dataset ML: grava o input cru (não consome, não altera o fluxo do jogo).
+            if INPUT_LOG_ON.load(Ordering::Relaxed) {
+                log_input_event(event, t);
+            }
             match t {
                 10 => {
                     let kc = msg_u16(event, sel("keyCode"));
@@ -297,9 +640,16 @@ extern "C" fn my_sendevent(this: Id, cmd: Sel, event: Id) {
                         SHOW.store(!SHOW.load(Ordering::Relaxed), Ordering::Relaxed);
                         consume = true;
                     } else if !SHOW.load(Ordering::Relaxed) {
-                        // CallbackSystem RawInput: enfileira TODA tecla (keycode) p/ o evento
-                        // "Input/Key" (drenado no cp77_tick → fire_event_args na thread do jogo).
-                        crate::push_raw_key(kc as i32);
+                        // CallbackSystem RawInput (2026-07-18, `cw-rawinput-realname`): mapeia o
+                        // keycode+char pro valor REAL de EInputKey + lê os modificadores AppKit,
+                        // enfileira TODOS pro evento "Input/Key" (drenado no cp77_tick, que
+                        // constrói+despacha um `ref<KeyInputEvent>` REAL na thread do jogo).
+                        let flags_raw = msg_usize(event, sel("modifierFlags"));
+                        let raw_shift = (flags_raw & 0x0002_0000) != 0; // NSEventModifierFlagShift
+                        let raw_control = (flags_raw & 0x0004_0000) != 0; // NSEventModifierFlagControl
+                        let raw_alt = (flags_raw & 0x0008_0000) != 0; // NSEventModifierFlagOption
+                        let mapped_key = crate::register::map_macos_keycode_to_einputkey(kc as i32, ch.chars().next());
+                        crate::push_raw_key(mapped_key, raw_shift, raw_control, raw_alt);
                         // hotkeys/inputs de mods ativos em gameplay: se a tecla é
                         // registrada, enfileira (cp77_tick dispara o cb na thread do jogo).
                         if let Some(c) = ch.chars().next() {
@@ -439,6 +789,16 @@ unsafe fn install_input_hook() {
     ORIG_SENDEVENT.store(method_getImplementation(m) as *mut c_void, Ordering::Relaxed);
     method_setImplementation(m, my_sendevent as Imp);
     crate::log("[overlay] sendEvent: swizzlado (` alterna o overlay)");
+    // dataset ML: liga o input-logger DESDE O BOOT se o marcador existir — cobre menus, criação
+    // de ficha e intro (onde o canal do console ainda não drena). `inputlog on/off` toggla em runtime.
+    let marker = std::env::var_os("HOME")
+        .map(|h| std::path::Path::new(&h).join(".bwms-inputlog").exists())
+        .unwrap_or(false)
+        || std::path::Path::new("/tmp/bwms-inputlog").exists();
+    if marker {
+        input_log_set(true);
+        crate::log("[inputlog] ligado no boot (marcador ~/.bwms-inputlog) -> /tmp/cp77-input.log");
+    }
 }
 
 // ---------------------------------------------------------------- render (imgui)
@@ -453,13 +813,164 @@ struct UiState {
     fav_dirty: bool,
     theme: usize,
     theme_dirty: bool,
+    /// Histórico de comandos do console (mais recente por último) + índice de navegação (↑/↓);
+    /// `None` = não navegando (campo livre pra digitar); `Some(i)` = mostrando `history[i]`.
+    cmd_history: Vec<String>,
+    cmd_history_idx: Option<usize>,
+}
+
+impl UiState {
+    /// Recall do histórico do console (↑=up=true = comando mais antigo; ↓=up=false = mais recente,
+    /// passar do fim volta ao campo livre). Muda `cmd_history_idx` + `cmd_buf`. Extraído do render loop
+    /// pra ser testável (`cet-console-history`). É EXATAMENTE a lógica que a tecla ↑/↓ aciona no overlay.
+    fn history_recall(&mut self, up: bool) {
+        if self.cmd_history.is_empty() {
+            return;
+        }
+        if up {
+            let next = match self.cmd_history_idx {
+                None => self.cmd_history.len() - 1,
+                Some(i) => i.saturating_sub(1),
+            };
+            self.cmd_history_idx = Some(next);
+            self.cmd_buf = self.cmd_history[next].clone();
+        } else {
+            match self.cmd_history_idx {
+                Some(i) if i + 1 < self.cmd_history.len() => {
+                    self.cmd_history_idx = Some(i + 1);
+                    self.cmd_buf = self.cmd_history[i + 1].clone();
+                }
+                _ => {
+                    self.cmd_history_idx = None;
+                    self.cmd_buf.clear();
+                }
+            }
+        }
+    }
+
+    /// `cet-console-history` — self-test AUTOMATIZÁVEL no menu (sem HID): exercita o `cmd_history` REAL
+    /// do overlay com a MESMA lógica de recall que a tecla ↑/↓ aciona, + o comando `help`. Loga cada
+    /// passo. Prova a paridade de console (↑ recupera o último comando no campo; `help` lista in-overlay)
+    /// sem precisar digitar/apertar teclas. Restaura o estado no fim. Ver `render_imgui` (gate marcador).
+    fn run_history_selftest(&mut self) {
+        let saved_hist = std::mem::take(&mut self.cmd_history);
+        let saved_idx = self.cmd_history_idx.take();
+        let saved_buf = std::mem::take(&mut self.cmd_buf);
+        let saved_log_len = self.log_lines.len();
+
+        // popula 3 comandos (como se o usuário tivesse digitado)
+        self.cmd_history = vec![
+            "money 5000".to_string(),
+            "godmode".to_string(),
+            "give Items.wsp_smg 1".to_string(),
+        ];
+        self.cmd_history_idx = None;
+        self.cmd_buf.clear();
+
+        // ↑ recupera o ÚLTIMO comando no campo (cmd_buf) — a essência do gap
+        self.history_recall(true);
+        let up1 = self.cmd_buf.clone();
+        self.history_recall(true);
+        let up2 = self.cmd_buf.clone();
+        self.history_recall(true);
+        let up3 = self.cmd_buf.clone();
+        // ↓ volta pra frente
+        self.history_recall(false);
+        let down1 = self.cmd_buf.clone();
+
+        // `help` lista comandos IN-OVERLAY (empurra HELP_LINES pro log_lines do console — o que a UI mostra)
+        for line in HELP_LINES {
+            self.log_lines.push((*line).to_string());
+        }
+        let help_pushed = self.log_lines.len() - saved_log_len - 0; // linhas de help adicionadas
+        let help_ok = help_pushed >= HELP_LINES.len()
+            && self.log_lines.iter().any(|l| l.contains("↑/↓ navegam o histórico"));
+
+        let hist_ok = up1 == "give Items.wsp_smg 1"   // ↑ pega o MAIS RECENTE (último digitado)
+            && up2 == "godmode"
+            && up3 == "money 5000"
+            && down1 == "godmode";
+        let ok = hist_ok && help_ok;
+        let verdict = if ok {
+            ">>> CONSOLE-HISTORY OK: ↑ recupera o último comando no campo (give→godmode→money), ↓ volta, e 'help' listou os comandos in-overlay (log_lines) — tudo no cmd_history REAL do overlay, sem HID <<<"
+        } else {
+            "verificar: ↑/↓ recall ou help não bateu"
+        };
+        crate::log(&format!(
+            "[histtest] ↑1='{up1}' ↑2='{up2}' ↑3='{up3}' ↓1='{down1}' | hist_ok={hist_ok} | help: +{help_pushed} linhas help_ok={help_ok} | {verdict}"
+        ));
+
+        // restaura
+        self.log_lines.truncate(saved_log_len);
+        self.cmd_history = saved_hist;
+        self.cmd_history_idx = saved_idx;
+        self.cmd_buf = saved_buf;
+    }
 }
 struct Renderer {
     ctx: imgui::Context,
     pso: metal::RenderPipelineState,
     lut_pso: Option<metal::RenderPipelineState>,
     font_tex: metal::Texture,
+    /// Textura do splash de boot (bwms-splash.png do dir do jogo), se existir. tex_id imgui = 2.
+    splash_tex: Option<metal::Texture>,
+    splash_dim: (f32, f32), // (w, h) da imagem, p/ manter aspecto
     ui: UiState,
+}
+/// imgui TextureId da fonte (=1) e do splash (=2); usados no draw loop p/ ligar a textura certa.
+const TEXID_FONT: usize = 1;
+const TEXID_SPLASH: usize = 2;
+
+/// Carrega `<jogo>/red4ext/bwms-splash.png` (troca sem recompilar) → textura Metal RGBA8.
+/// Ausente = sem imagem (o splash mostra só a barra de progresso). PNG RGBA/RGB/Gray → RGBA8.
+unsafe fn load_splash_texture(dev: &metal::DeviceRef) -> Option<(metal::Texture, f32, f32)> {
+    // caminho ao lado do dylib deployado: .../Cyberpunk 2077/red4ext/bwms-splash.png
+    let path = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .map(|exe_dir| exe_dir.join("../../../red4ext/bwms-splash.png"))
+        .filter(|p| p.exists())
+        .or_else(|| {
+            // fallback: procura a partir do CWD do jogo
+            let p = std::path::Path::new("red4ext/bwms-splash.png");
+            if p.exists() { Some(p.to_path_buf()) } else { None }
+        })?;
+    let file = std::fs::File::open(&path).ok()?;
+    let dec = png::Decoder::new(std::io::BufReader::new(file));
+    let mut reader = dec.read_info().ok()?;
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width, info.height);
+    // normaliza p/ RGBA8 (o shader amostra RGBA)
+    let rgba: Vec<u8> = match info.color_type {
+        png::ColorType::Rgba => buf[..(w * h * 4) as usize].to_vec(),
+        png::ColorType::Rgb => buf[..(w * h * 3) as usize]
+            .chunks(3)
+            .flat_map(|c| [c[0], c[1], c[2], 255])
+            .collect(),
+        png::ColorType::Grayscale => buf[..(w * h) as usize]
+            .iter()
+            .flat_map(|&g| [g, g, g, 255])
+            .collect(),
+        png::ColorType::GrayscaleAlpha => buf[..(w * h * 2) as usize]
+            .chunks(2)
+            .flat_map(|c| [c[0], c[0], c[0], c[1]])
+            .collect(),
+        _ => return None, // indexed/paletted: fora de escopo (raro em splash)
+    };
+    let tdesc = metal::TextureDescriptor::new();
+    tdesc.set_pixel_format(metal::MTLPixelFormat::RGBA8Unorm);
+    tdesc.set_width(w as u64);
+    tdesc.set_height(h as u64);
+    tdesc.set_usage(metal::MTLTextureUsage::ShaderRead);
+    let tex = dev.new_texture(&tdesc);
+    let region = metal::MTLRegion {
+        origin: metal::MTLOrigin { x: 0, y: 0, z: 0 },
+        size: metal::MTLSize { width: w as u64, height: h as u64, depth: 1 },
+    };
+    tex.replace_region(region, 0, rgba.as_ptr() as *const c_void, (w * 4) as u64);
+    crate::log(&format!("[splash] bwms-splash.png carregado: {w}x{h}"));
+    Some((tex, w as f32, h as f32))
 }
 /// O `present` dispara em VÁRIOS threads (redDispatcher1..9); o ImGui tem UM
 /// contexto global. Seguro porque o Mutex serializa (um thread por vez).
@@ -487,21 +998,101 @@ vertex LOut lut_v(uint vid [[vertex_id]]) {
     float2 uv = float2((vid << 1) & 2, vid & 2);
     LOut o; o.pos = float4(uv * 2.0 - 1.0, 0.0, 1.0); return o;
 }
-fragment float4 lut_f(float4 cur [[color(0)]], constant uint& preset [[buffer(0)]]) {
+// ---- helpers da grade Bodycam cyberpunk (cor) ----
+float bc_chroma(float3 c) { return max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b)); }
+// VIBRANCE escalar HUE-NEUTRO: sobe croma baixo, suave no croma já-alto (não estoura neon, protege pele)
+float3 bc_vibrance(float3 c, float amount) {
+    float l = dot(c, float3(0.2126, 0.7152, 0.0722));
+    return mix(float3(l), c, 1.0 + amount * (1.0 - bc_chroma(c)));
+}
+// peso por janela de matiz (hue circular 0..1)
+float bc_hue_w(float hue, float center, float width) {
+    float d = abs(hue - center); d = min(d, 1.0 - d);
+    return 1.0 - smoothstep(0.0, width, d);
+}
+float3 bc_rgb2hsv(float3 c) {
+    float4 K = float4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+    float4 p = mix(float4(c.bg, K.wz), float4(c.gb, K.xy), step(c.b, c.g));
+    float4 q = mix(float4(p.xyw, c.r), float4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y); float e = 1e-10;
+    return float3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
+}
+float3 bc_hsv2rgb(float3 c) {
+    float4 K = float4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+    float3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+    return c.z * mix(K.xxx, saturate(p - K.xxx), c.y);
+}
+fragment float4 lut_f(float4 cur [[color(0)]], float4 pos [[position]],
+                      constant uint& preset [[buffer(0)]],
+                      constant uint2& res [[buffer(1)]],
+                      constant uint& frame [[buffer(2)]],
+                      constant uint& fx [[buffer(3)]]) {
     float3 x = cur.rgb;
+    // ===== GRADE de cor (selector 'preset') =====
     if (preset == 1u) { x = clamp(x * float3(1.18, 1.0, 0.82), 0.0, 1.0); }
     else if (preset == 2u) { x = clamp(x * float3(0.82, 0.95, 1.25), 0.0, 1.0); }
     else if (preset == 3u) { float g = dot(x, float3(0.299, 0.587, 0.114)); x = float3(g); }
     else if (preset == 4u) { x = clamp((x - 0.5) * 1.45 + 0.5, 0.0, 1.0); }
     else if (preset == 5u) { float g = dot(x, float3(0.299, 0.587, 0.114)); x = clamp(float3(g) * float3(1.0, 0.78, 0.52) * 1.25, 0.0, 1.0); }
+    else if (preset == 6u) {
+        // BODYCAM cyberpunk (per-pixel): CONTRASTE LOCAL de saturação — neon/marketing VIBRA,
+        // decadência/sombra MORRE. Vibrance hue-neutro c/ gate de luma + decay só na sombra REAL
+        // (correções da verificação: sem hue-shift, sem matar croma demais). Neon-noir, math própria.
+        // (glow/bloom dos neons = upgrade scene_tex, vem depois.)
+        x = pow(x, float3(1.10));                                 // toe: leve crush (preto sólido neon-noir)
+        x = (x - 0.5) * 1.22 + 0.5;                               // contraste
+        float luma = dot(x, float3(0.2126, 0.7152, 0.0722));
+        float lo_mask = 1.0 - smoothstep(0.15, 0.55, luma);       // cancela véu verde-ciano nas baixas/médias
+        x.g -= 0.30 * lo_mask * max(0.0, x.g - max(x.r, x.b));
+        x = bc_vibrance(x, 0.30 * smoothstep(0.10, 0.30, luma));  // vibrance só fora da sombra (sem ressuscitar ruído)
+        x = saturate(x);                                          // saneia antes do HSV
+        float3 hsv = bc_rgb2hsv(x);                               // realce SELETIVO do neon (magenta/ciano/amber)
+        float wHue = max(bc_hue_w(hsv.x, 0.86, 0.06),
+                     max(bc_hue_w(hsv.x, 0.52, 0.07),
+                         bc_hue_w(hsv.x, 0.10, 0.04)))
+                     * smoothstep(0.15, 0.40, hsv.y);             // sat-gate: concreto/pele de fora
+        hsv.y = saturate(hsv.y * (1.0 + 0.45 * wHue));
+        x = bc_hsv2rgb(hsv);
+        float l2 = dot(x, float3(0.2126, 0.7152, 0.0722));        // split-tone teal-sombra / amber-luz (tint honesto)
+        x = mix(x * float3(0.94, 1.0, 1.06), x * float3(1.07, 1.01, 0.92), smoothstep(0.0, 1.0, l2));
+        float l3 = dot(x, float3(0.2126, 0.7152, 0.0722));        // decay: SÓ sombra real perde croma (janela estreita)
+        x = mix(float3(l3), x, mix(0.70, 1.0, smoothstep(0.04, 0.22, l3)));
+        float hot = smoothstep(0.82, 1.0, l3);                    // highlight: núcleo -> branco quente, borda mantém cor
+        x = mix(x, mix(float3(l3), float3(1.0, 0.96, 0.90), 0.6), hot * 0.55);
+    }
+    x = clamp(x, 0.0, 1.0);
+    // ===== EFEITOS independentes (bitmask 'fx'; cada um liga/desliga na aba) =====
+    if ((fx & 1u) != 0u) {        // bit0 GRÃO de filme (Box-Muller, mais nas sombras, animado)
+        float luma = dot(x, float3(0.299, 0.587, 0.114));
+        float seed = dot(pos.xy, float2(12.9898, 78.233)) + float(frame) * 0.013;
+        float u1 = fract(sin(seed) * 43758.5453);
+        float u2 = fract(sin(seed + 1.0) * 43758.5453);
+        float gn = sqrt(-2.0 * log(max(u1, 1e-6))) * cos(6.2831853 * u2);
+        x = clamp(x * (1.0 + gn * mix(0.10, 0.03, luma)), 0.0, 1.0);
+    }
+    if ((fx & 2u) != 0u) {        // bit1 VINHETA oval (queda dura)
+        float2 uv = pos.xy / float2(res);
+        float2 c = (uv - 0.5) * float2(1.0, 1.12);
+        float d = length(c);
+        x *= mix(1.0, smoothstep(0.95, 0.32, d), 0.5);
+    }
     return float4(x, cur.a);
 }
 "#;
 
 /// ReShade-Metal: preset de LUT/grading ativo (0 = off, jogo intocado). Cicla com F2.
 static LUT_PRESET: AtomicU32 = AtomicU32::new(0);
-const LUT_COUNT: u32 = 6;
-const LUT_NAMES: [&str; 6] = ["off", "Quente", "Frio", "P&B", "Contraste", "Sepia"];
+const LUT_COUNT: u32 = 7;
+const LUT_NAMES: [&str; 7] = ["off", "Quente", "Frio", "P&B", "Contraste", "Sepia", "Bodycam"];
+/// `cet-lut-pixel-proof`: seta o preset por comando (sem depender de F2/ImGui click, útil pro
+/// cmd-channel de dev). MESMO write atômico que o clique da aba "LUT" já faz — zero risco novo.
+pub(crate) fn set_lut_preset(n: u32) {
+    LUT_PRESET.store(n % LUT_COUNT, Ordering::Relaxed);
+}
+/// Efeitos independentes (bitmask) que ligam SOBRE a grade: bit0=Grão, bit1=Vinheta.
+/// Texture-sample (Bloom/Aberração/Barril) entram quando o passe ganhar o `scene_tex`.
+static EFFECTS: AtomicU32 = AtomicU32::new(0);
+const FX_NAMES: [&str; 2] = ["Grão", "Vinheta"];
 
 unsafe fn init_renderer(dev: &metal::DeviceRef, pixfmt: u64) -> Option<Renderer> {
     let mut ctx = imgui::Context::create();
@@ -591,12 +1182,18 @@ unsafe fn init_renderer(dev: &metal::DeviceRef, pixfmt: u64) -> Option<Renderer>
                 None
             }
         };
+    let (splash_tex, splash_dim) = match load_splash_texture(dev) {
+        Some((t, w, h)) => (Some(t), (w, h)),
+        None => (None, (0.0, 0.0)),
+    };
     crate::log("[overlay] imgui renderer pronto (fonte + pipeline + lut)");
     Some(Renderer {
         ctx,
         pso,
         lut_pso,
         font_tex,
+        splash_tex,
+        splash_dim,
         ui: UiState {
             cmd_buf: String::with_capacity(128),
             search_buf: String::with_capacity(64),
@@ -607,11 +1204,27 @@ unsafe fn init_renderer(dev: &metal::DeviceRef, pixfmt: u64) -> Option<Renderer>
             fav_dirty: false,
             theme: load_theme(),
             theme_dirty: false,
+            cmd_history: Vec::new(),
+            cmd_history_idx: None,
         },
     })
 }
 
 /// Os 4 estilos estéticos do Cyberpunk 2077 como temas: nome + tagline.
+/// Texto do comando `help` — só os comandos PRÁTICOS de cheat (o que o hint do campo já anuncia),
+/// não a lista inteira de comandos internos de dev/RE (esses ficam em CODEBASE.md, não na UI).
+const HELP_LINES: [&str; 9] = [
+    "comandos: money N | give Items.X [N] | remove Items.X [N] | godmode [off] | heal | level N",
+    "          summon (chama veículo) | attrs/perks/relic N (pontos) | hasgod (consulta)",
+    "atalhos: ↑/↓ navegam o histórico de comandos já digitados nesta sessão.",
+    "'Items.X' = TweakDBID do item (ex: Items.money, Items.PreventionEliteBundle_Cyberware).",
+    "",
+    "exemplos:",
+    "  money 5000            → dá 5000 eddies",
+    "  give Items.wsp_smg 1   → dá 1 unidade do item",
+    "  godmode                → liga o modo deus (godmode off desliga)",
+];
+
 const THEMES: [(&str, &str); 4] = [
     ("ENTROPISM", "necessity over style"),
     ("KITSCH", "style over substance"),
@@ -712,16 +1325,28 @@ fn apply_theme(style: &mut imgui::Style, idx: usize) {
 // spam de boot na 1a abertura do overlay). O arquivo /tmp/cp77-console.log fica intacto (debug).
 static LINE_CLEAR: AtomicU32 = AtomicU32::new(0);
 pub fn clear_console_view() {
-    let n = std::fs::read_to_string("/tmp/cp77-console.log").map(|s| s.lines().count()).unwrap_or(0);
-    LINE_CLEAR.store(n as u32, Ordering::Relaxed);
+    // Build PÚBLICO (sem `devlog`): o log é no-op → nada a ler; não referencia o path (traceless).
+    #[cfg(feature = "devlog")]
+    {
+        let n = std::fs::read_to_string("/tmp/cp77-console.log").map(|s| s.lines().count()).unwrap_or(0);
+        LINE_CLEAR.store(n as u32, Ordering::Relaxed);
+    }
 }
-fn tail_log(n: usize) -> Vec<String> {
-    let s = std::fs::read_to_string("/tmp/cp77-console.log").unwrap_or_default();
-    let v: Vec<&str> = s.lines().collect();
-    let base = (LINE_CLEAR.load(Ordering::Relaxed) as usize).min(v.len());
-    let view = &v[base..];
-    let start = view.len().saturating_sub(n);
-    view[start..].iter().map(|x| x.to_string()).collect()
+fn tail_log(_n: usize) -> Vec<String> {
+    // Público: Console tab vazio (o log não é escrito). Só o DEV lê o arquivo de /tmp.
+    #[cfg(not(feature = "devlog"))]
+    {
+        Vec::new()
+    }
+    #[cfg(feature = "devlog")]
+    {
+        let s = std::fs::read_to_string("/tmp/cp77-console.log").unwrap_or_default();
+        let v: Vec<&str> = s.lines().collect();
+        let base = (LINE_CLEAR.load(Ordering::Relaxed) as usize).min(v.len());
+        let view = &v[base..];
+        let start = view.len().saturating_sub(_n);
+        view[start..].iter().map(|x| x.to_string()).collect()
+    }
 }
 
 fn favs_path() -> String {
@@ -764,6 +1389,130 @@ fn catalog() -> &'static Vec<[&'static str; 4]> {
 /// Badge discreto no canto superior direito: avisa que o runtime de mods está
 /// ATIVO (heartbeat que pisca conforme os ticks) + nº de mods carregados. Substitui
 /// o spam de "onUpdate tick #N" no log. Não-interativo (NO_INPUTS) e auto-resize.
+/// Banner ASCII "BWMS" estilo isometric (MOTD de servidor antigo, "fingindo 3D"). Monoespaçado
+/// → renderiza nítido (é feito de muitos chars pequenos, não um glifo gigante escalado).
+const BWMS_BANNER: &str = r#"      ___           ___           ___           ___
+     /\  \         /\__\         /\__\         /\  \
+    /::\  \       /:/ _/_       /::|  |       /::\  \
+   /:/\:\  \     /:/ /\__\     /:|:|  |      /:/\ \  \
+  /::\~\:\__\   /:/ /:/ _/_   /:/|:|__|__   _\:\~\ \  \
+ /:/\:\ \:|__| /:/_/:/ /\__\ /:/ |::::\__\ /\ \:\ \ \__\
+ \:\~\:\/:/  / \:\/:/ /:/  / \/__/~~/:/  / \:\ \:\ \/__/
+  \:\ \::/  /   \::/_/:/  /        /:/  /   \:\ \:\__\
+   \:\/:/  /     \:\/:/  /        /:/  /     \:\/:/  /
+    \::/__/       \::/  /        /:/  /       \::/  /
+     ~~            \/__/         \/__/         \/__/"#;
+
+/// Splash de boot: desenha por cima da tela preta do loading. Fundo escuro + (se existir)
+/// a imagem `bwms-splash.png` centralizada com aspecto preservado + barra de progresso + texto.
+/// Tudo no background draw list (atrás de qualquer janela; cobre a tela toda). Some no menu.
+fn build_boot_splash(ui: &imgui::Ui, splash: Option<(f32, f32)>, w: f32, h: f32) {
+    // Desenha numa JANELA fullscreen (o background_draw_list do imgui-rs não é renderizado por
+    // este renderer; a janela + get_window_draw_list é o caminho que comprovadamente aparece).
+    let flags = imgui::WindowFlags::NO_TITLE_BAR
+        | imgui::WindowFlags::NO_RESIZE
+        | imgui::WindowFlags::NO_MOVE
+        | imgui::WindowFlags::NO_SCROLLBAR
+        | imgui::WindowFlags::NO_INPUTS
+        | imgui::WindowFlags::NO_NAV
+        | imgui::WindowFlags::NO_SAVED_SETTINGS
+        | imgui::WindowFlags::NO_FOCUS_ON_APPEARING
+        | imgui::WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS
+        | imgui::WindowFlags::NO_BACKGROUND;
+    let _pad = ui.push_style_var(imgui::StyleVar::WindowPadding([0.0, 0.0]));
+    ui.window("##bwms_boot_splash")
+        .flags(flags)
+        .position([0.0, 0.0], imgui::Condition::Always)
+        .size([w, h], imgui::Condition::Always)
+        .build(|| {
+            // ---- paleta BWMS (tema NEOMILITARISM: vermelho sobre quase-preto) ----
+            const DARK: [f32; 4] = [0.02, 0.02, 0.03, 1.0];
+            const RED: [f32; 4] = [0.86, 0.16, 0.15, 1.0]; // o vermelho nosso
+            const RED_SOFT: [f32; 4] = [0.86, 0.16, 0.15, 0.55];
+            const DIM: [f32; 4] = [0.62, 0.62, 0.68, 0.80];
+            let dl = ui.get_window_draw_list();
+            // fundo escuro sólido
+            dl.add_rect([0.0, 0.0], [w, h], DARK).filled(true).build();
+            // molduras de canto (frame estilo HUD cyberpunk), em vermelho
+            let m = 26.0;
+            let ll = (w.min(h) * 0.05).clamp(28.0, 60.0);
+            let th = 2.0;
+            let corner = |ax: f32, ay: f32, dx: f32, dy: f32| {
+                dl.add_line([ax, ay], [ax + dx * ll, ay], RED).thickness(th).build();
+                dl.add_line([ax, ay], [ax, ay + dy * ll], RED).thickness(th).build();
+            };
+            corner(m, m, 1.0, 1.0); // sup-esq
+            corner(w - m, m, -1.0, 1.0); // sup-dir
+            corner(m, h - m, 1.0, -1.0); // inf-esq
+            corner(w - m, h - m, -1.0, -1.0); // inf-dir
+
+            // ---- centro: imagem do usuário OU a marca BWMS ----
+            if let Some((iw, ih)) = splash {
+                if iw > 0.0 && ih > 0.0 {
+                    let scale = (w / iw).min(h / ih);
+                    let (dw, dh) = (iw * scale, ih * scale);
+                    dl.add_image(
+                        imgui::TextureId::from(TEXID_SPLASH),
+                        [(w - dw) * 0.5, (h - dh) * 0.5],
+                        [(w + dw) * 0.5, (h + dh) * 0.5],
+                    )
+                    .build();
+                }
+            } else {
+                // banner ASCII "BWMS" (isometric, fingindo 3D) — monoespaçado, nítido, em vermelho
+                let banner_scale = 1.5;
+                ui.set_window_font_scale(banner_scale);
+                let s = ui.calc_text_size(BWMS_BANNER);
+                let bx0 = (w - s[0]) * 0.5;
+                let by0 = (h * 0.44 - s[1]).max(h * 0.14); // bloco centrado ~44% da altura
+                ui.set_cursor_pos([bx0, by0]);
+                ui.text_colored(RED, BWMS_BANNER);
+                let sub_y = by0 + s[1] + 14.0;
+                // subtítulo "BLACK WALL MOD SYSTEM"
+                ui.set_window_font_scale(1.4);
+                let sub = "B L A C K   W A L L   M O D   S Y S T E M";
+                let s2 = ui.calc_text_size(sub);
+                ui.set_cursor_pos([(w - s2[0]) * 0.5, sub_y]);
+                ui.text_colored(DIM, sub);
+                ui.set_window_font_scale(1.0);
+                // linha-acento vermelha sob o subtítulo
+                let ly = sub_y + s2[1] + 12.0;
+                dl.add_line([(w - s2[0]) * 0.5, ly], [(w + s2[0]) * 0.5, ly], RED_SOFT)
+                    .thickness(2.0)
+                    .build();
+            }
+
+            // ---- barra de progresso (vermelha) + texto, na base ----
+            let prog = crate::selfboot::boot_progress();
+            let secs = crate::selfboot::boot_elapsed_secs();
+            let bar_w = (w * 0.42).min(560.0);
+            let bar_h = 5.0;
+            let bx = (w - bar_w) * 0.5;
+            let by = h * 0.86;
+            dl.add_rect([bx, by], [bx + bar_w, by + bar_h], [1.0, 1.0, 1.0, 0.08])
+                .filled(true)
+                .build(); // trilho
+            dl.add_rect([bx, by], [bx + bar_w * prog, by + bar_h], RED)
+                .filled(true)
+                .build(); // preenchimento
+            let pct = (prog * 100.0) as u32;
+            let stage = crate::selfboot::boot_stage_label();
+            let label = format!("CARREGANDO   {pct}%   ·   {stage}   ·   {secs}s");
+            ui.set_window_font_scale(1.1);
+            let ls = ui.calc_text_size(&label);
+            ui.set_cursor_pos([(w - ls[0]) * 0.5, by - ls[1] - 12.0]);
+            ui.text_colored(DIM, label);
+            ui.set_window_font_scale(1.0);
+            // versão (a que vai pro Nexus) — escrita no splash de carregamento
+            let ver = format!("v{}  BETA", crate::BWMS_VERSION);
+            ui.set_window_font_scale(0.95);
+            let vs = ui.calc_text_size(&ver);
+            ui.set_cursor_pos([(w - vs[0]) * 0.5, by + bar_h + 10.0]);
+            ui.text_colored(DIM, &ver);
+            ui.set_window_font_scale(1.0);
+        });
+}
+
 fn build_badge(ui: &imgui::Ui, ticks: u64, mods: usize) {
     let [dw, _] = ui.io().display_size;
     let flags = imgui::WindowFlags::NO_TITLE_BAR
@@ -828,19 +1577,41 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                     ui.set_next_item_width(-1.0);
                     // sem a feature `lua`, o overlay é 100% comandos nativos (sem menção a Lua)
                     #[cfg(feature = "lua")]
-                    let hint = "Enter: money N | give Items.X N | godmode | level N | OU Lua: Game.AddMoney(7777)";
+                    let hint = "Enter: money N | give Items.X N | godmode | level N | help | OU Lua: Game.AddMoney(7777)";
                     #[cfg(not(feature = "lua"))]
-                    let hint = "Enter: money N | give Items.X N | godmode | level N";
+                    let hint = "Enter: money N | give Items.X N | godmode | level N | help";
                     let entered = ui
                         .input_text("##cmd", &mut st.cmd_buf)
                         .enter_returns_true(true)
                         .hint(hint)
                         .build();
+                    // Histórico ↑/↓ (paridade de console, cet-console-history): só navega quando o
+                    // campo de comando está com foco (senão ↑/↓ noutro widget da aba acionaria isso
+                    // à toa). ↑ = comando mais antigo, ↓ = mais recente; passar do mais recente
+                    // volta ao campo livre (history_idx=None).
+                    if ui.is_item_focused() && !st.cmd_history.is_empty() {
+                        if ui.is_key_pressed(imgui::Key::UpArrow) {
+                            st.history_recall(true);
+                        } else if ui.is_key_pressed(imgui::Key::DownArrow) {
+                            st.history_recall(false);
+                        }
+                    }
                     if entered {
                         let c = st.cmd_buf.trim().to_string();
                         if !c.is_empty() {
-                            write_cmd(&c);
+                            if c.eq_ignore_ascii_case("help") {
+                                for line in HELP_LINES {
+                                    st.log_lines.push((*line).to_string());
+                                }
+                            } else {
+                                write_cmd(&c);
+                            }
+                            // não duplica se repetir o último comando seguido (padrão de shell)
+                            if st.cmd_history.last().map(|s| s.as_str()) != Some(c.as_str()) {
+                                st.cmd_history.push(c);
+                            }
                         }
+                        st.cmd_history_idx = None;
                         st.cmd_buf.clear();
                     }
                 }
@@ -899,8 +1670,9 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                         st.fav_dirty = true;
                     }
                 }
-                // ---- GAME CHEATS: favoritos pinados + botões de 1-clique ----
-                if let Some(_t) = ui.tab_item("Game cheats") {
+                // ---- FAVORITOS: itens pinados na aba Items. Os CHEATS foram removidos daqui
+                // (não duplicar) — vivem em Settings > Cheats (redscript/config). ----
+                if let Some(_t) = ui.tab_item("Favoritos") {
                     if !st.favorites.is_empty() {
                         ui.text("Favoritos (pinados na aba Items):");
                         let mut remove = None;
@@ -919,43 +1691,11 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                             st.favorites.remove(i);
                             st.fav_dirty = true;
                         }
-                        ui.separator();
+                    } else {
+                        ui.text_disabled("Sem favoritos. Pinhe itens na aba Items (botao +) pra aparecerem aqui.");
                     }
-                    ui.text("Cheats:");
-                    if ui.button("Money +50k") {
-                        write_cmd("money 50000");
-                    }
-                    ui.same_line();
-                    if ui.button("Heal") {
-                        write_cmd("heal");
-                    }
-                    ui.same_line();
-                    if ui.button("Godmode") {
-                        write_cmd("godmode");
-                    }
-                    ui.same_line();
-                    if ui.button("Godmode off") {
-                        write_cmd("godmode off");
-                    }
-                    if ui.button("Perks +10") {
-                        write_cmd("perks 10");
-                    }
-                    ui.same_line();
-                    if ui.button("Attrs +10") {
-                        write_cmd("attrs 10");
-                    }
-                    ui.same_line();
-                    if ui.button("Relic +10") {
-                        write_cmd("relic 10");
-                    }
-                    ui.same_line();
-                    if ui.button("Summon car") {
-                        write_cmd("summon");
-                    }
-                    ui.same_line();
-                    if ui.button("Level 50") {
-                        write_cmd("level 50");
-                    }
+                    ui.separator();
+                    ui.text_disabled("Cheats (Godmode/Money/Perks/Level...) ficam em Settings > Cheats, sem duplicar.");
                 }
                 // ---- K-LOG: captura de teclas (input/atalhos), fora do console ----
                 if let Some(_t) = ui.tab_item("K-LOG") {
@@ -993,8 +1733,22 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                         }
                     }
                     ui.separator();
-                    ui.text_disabled("Grading Metal AO VIVO no frame do jogo. Clica e a tela muda na hora.");
-                    ui.text_disabled("MVP: presets fixos. Proximo: LUTs .cube reais (Nova/Preem).");
+                    ui.text("Efeitos (liga/desliga sobre a grade):");
+                    let mut fx = EFFECTS.load(Ordering::Relaxed);
+                    for (b, name) in FX_NAMES.iter().enumerate() {
+                        let bit = 1u32 << b;
+                        let mut on = (fx & bit) != 0;
+                        if b > 0 {
+                            ui.same_line();
+                        }
+                        if ui.checkbox(format!("{}##fx{}", name, b), &mut on) {
+                            if on { fx |= bit; } else { fx &= !bit; }
+                            EFFECTS.store(fx, Ordering::Relaxed);
+                        }
+                    }
+                    ui.separator();
+                    ui.text_disabled("Grade (cor) + efeitos AO VIVO no frame; cada um liga/desliga.");
+                    ui.text_disabled("Em breve (precisa do upgrade do passe): Bloom, Aberracao cromatica, Barril.");
                 }
             }
         });
@@ -1023,17 +1777,39 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
     // badge no canto = "Blackwall.sys ativo": aparece assim que o runtime roda em
     // gameplay (ticks>0), com ou sem mod carregado. Some só no menu/boot (ticks==0).
     let badge = crate::ticks() > 0;
-    if !show && !badge {
+    // splash de boot: preenche a tela preta do loading. Gate = boot_splash_active() SÓ (armado no
+    // on_load com skip-intro, desarmado ao chegar no menu). NÃO gatear por !badge: o runtime já
+    // tickava >0 no boot, então !badge era sempre falso e o splash nunca desenhava (bug do gate).
+    // NÃO cobrir a engagement ("APERTE ESPAÇO"): se ela está ativa, esconde a splash pro usuário VER o
+    // prompt e poder apertar (senão parece congelado no BWMS). Volta a cobrir a tela preta pós-engagement.
+    // EXCEÇÃO (2026-07-12): no modo "Até a gameplay" (~/.bwms-fire-start ligado) o usuário NUNCA precisa
+    // apertar espaço — o lever dispara sozinho após o timer de bwms-skipintro.reds. Sem esta exceção, o
+    // gate acima escondia a splash pelos ~8s inteiros do timer, revelando "APERTE ESPAÇO PARA CONTINUAR"
+    // numa tela que era pra ser 100% automática (achado do Perrotta: via o prompt mesmo sem precisar dele).
+    let fire_start = std::env::var("HOME")
+        .ok()
+        .map(|h| std::path::Path::new(&h).join(".bwms-fire-start").exists())
+        .unwrap_or(false)
+        || std::path::Path::new("/tmp/bwms-fire-start").exists();
+    let boot = crate::selfboot::boot_splash_active() && (fire_start || !engagement_active());
+    if !show && !badge && !boot {
         return;
     }
-    // só re-acopla o cursor quando o painel está aberto (em gameplay o jogo prende
-    // o cursor na câmera; o badge é não-interativo e não precisa do cursor).
+    // Gestão do cursor: ABERTO = acopla (clicar no overlay). Ao FECHAR (borda de descida),
+    // DESACOPLA p/ devolver a câmera ao jogo — sem isto o mouse-look trava depois do `,
+    // porque o jogo só desacopla 1× ao entrar em gameplay e não "re-desacopla" sozinho.
+    let prev_show = PREV_SHOW.swap(show, Ordering::Relaxed);
     if show {
         CGAssociateMouseAndMouseCursorPosition(true);
+        if !prev_show {
+            OVERLAY_OPEN_EDGE.store(true, Ordering::Relaxed); // `cet-lifecycle-events`: onOverlayOpen
+        }
+    } else if prev_show {
+        CGAssociateMouseAndMouseCursorPosition(false); // fechou agora → mouse volta pra câmera
+        OVERLAY_CLOSE_EDGE.store(true, Ordering::Relaxed); // `cet-lifecycle-events`: onOverlayClose
     }
     let w = msg_usize(tex_raw, sel("width")) as f32;
     let h = msg_usize(tex_raw, sel("height")) as f32;
-    let w = msg_usize(tex_raw, sel("width")) as f32;
     FRAME_W.store(w.to_bits(), Ordering::Relaxed);
     let pixfmt = msg_usize(tex_raw, sel("pixelFormat")) as u64;
     let cb = metal::CommandBufferRef::from_ptr(cb_raw as *mut _);
@@ -1060,6 +1836,20 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
         rd.ui.frame = rd.ui.frame.wrapping_add(1);
         if show && rd.ui.frame % 30 == 1 {
             rd.ui.log_lines = tail_log(60);
+        }
+        // `cet-console-history` self-test AUTOMATIZÁVEL no menu (sem HID): roda 1× no `cmd_history` REAL
+        // do overlay, gate ~/.bwms-histtest (dev). Ver `run_history_selftest`.
+        {
+            static HISTTEST_DONE: AtomicBool = AtomicBool::new(false);
+            if !HISTTEST_DONE.load(Ordering::Relaxed)
+                && std::env::var("HOME")
+                    .ok()
+                    .map(|hh| std::path::Path::new(&hh).join(".bwms-histtest").exists())
+                    .unwrap_or(false)
+            {
+                rd.ui.run_history_selftest();
+                HISTTEST_DONE.store(true, Ordering::Relaxed);
+            }
         }
         {
             let io = rd.ctx.io_mut();
@@ -1106,7 +1896,11 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
             rd.ui.theme_dirty = false;
         }
         let ui = rd.ctx.new_frame();
-        if badge {
+        if boot {
+            let splash = if rd.splash_tex.is_some() { Some(rd.splash_dim) } else { None };
+            build_boot_splash(ui, splash, w, h);
+        }
+        if badge && !boot {
             build_badge(ui, crate::ticks(), crate::mods_loaded());
         }
         if show {
@@ -1114,6 +1908,7 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
             // mods desenham as PRÓPRIAS janelas (ImGui-pro-Lua) durante o onDraw.
             IN_DRAW.store(true, Ordering::Relaxed);
             crate::lua::run_event_draw();
+            crate::api::run_plugin_draw_callbacks(); // mods Rust NÃO-lua (cet-imgui-thirdparty)
             IN_DRAW.store(false, Ordering::Relaxed);
             WANT_MOUSE.store(ui.io().want_capture_mouse, Ordering::Relaxed);
             WANT_KEYBOARD.store(ui.io().want_capture_keyboard, Ordering::Relaxed);
@@ -1131,7 +1926,8 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
         // Render pass no proprio drawable (Load preserva o frame p/ o framebuffer-fetch),
         // sem blending → o fragment substitui cada pixel pela versao graduada.
         let preset = LUT_PRESET.load(Ordering::Relaxed);
-        if preset > 0 {
+        let fxbits = EFFECTS.load(Ordering::Relaxed);
+        if preset > 0 || fxbits != 0 {
             if let Some(lp) = rd.lut_pso.as_ref() {
                 let lrpd = metal::RenderPassDescriptor::new();
                 let la = lrpd.color_attachments().object_at(0).unwrap();
@@ -1141,6 +1937,13 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
                 let le = cb.new_render_command_encoder(lrpd);
                 le.set_render_pipeline_state(lp);
                 le.set_fragment_bytes(0, 4, &preset as *const u32 as *const c_void);
+                // res (buffer 1) + nº do frame (buffer 2): o shader os declara, então liga SEMPRE
+                // (mesmo nos presets 1-5 que ignoram), senão o Metal aborta por buffer não-ligado.
+                let res: [u32; 2] = [tex.width() as u32, tex.height() as u32];
+                le.set_fragment_bytes(1, 8, res.as_ptr() as *const c_void);
+                let bframe: u32 = rd.ui.frame;
+                le.set_fragment_bytes(2, 4, &bframe as *const u32 as *const c_void);
+                le.set_fragment_bytes(3, 4, &fxbits as *const u32 as *const c_void);
                 le.draw_primitives(metal::MTLPrimitiveType::Triangle, 0, 3);
                 le.end_encoding();
             }
@@ -1162,6 +1965,8 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
             [-1.0, 1.0, 0.0, 1.0],
         ];
         enc.set_vertex_bytes(1, 64, proj.as_ptr() as *const c_void);
+        // fonte por padrão; a textura por-comando é (re)ligada no loop conforme o texture_id
+        // (1=fonte, 2=splash) — assim o `ui.image` do splash amostra o PNG e o resto, a fonte.
         enc.set_fragment_texture(0, Some(&rd.font_tex));
 
         for dl in dd.draw_lists() {
@@ -1184,6 +1989,14 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
 
             for cmd in dl.commands() {
                 if let imgui::DrawCmd::Elements { count, cmd_params } = cmd {
+                    // liga a textura do comando: splash (id=2) amostra o PNG; qualquer outro, a fonte.
+                    if cmd_params.texture_id.id() == TEXID_SPLASH {
+                        if let Some(sp) = rd.splash_tex.as_ref() {
+                            enc.set_fragment_texture(0, Some(sp));
+                        }
+                    } else {
+                        enc.set_fragment_texture(0, Some(&rd.font_tex));
+                    }
                     let c = cmd_params.clip_rect;
                     let x = c[0].max(0.0);
                     let y = c[1].max(0.0);
@@ -1216,6 +2029,40 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
 }
 
 // ---------------------------------------------------------------- present hook
+
+// ===== AUTO-PROCEED da engagement do boot ("APERTE E PARA CONTINUAR") =====
+// O proceed da engagement é 100% nativo (sem gancho redscript — GotoMainMenu/wraps não pulam).
+// Estratégia: o vídeo de fundo da engagement é um bink; quando ele abre (selfboot marca via
+// note_engagement_video), agendamos injetar a tecla "E" ~1-2s depois, no present (main thread).
+// Injeta enquanto a engagement estiver "recente" (janela pós-bink) e SEM player; no menu o marcador
+// envelhece → para sozinho. Cap total de segurança. Opt-in pelo marcador ~/.bwms-skipintro.
+static ENGAGEMENT_ACTIVE: AtomicBool = AtomicBool::new(false); // setado pelo redscript (sinal preciso)
+static SEEN_ENGAGEMENT: AtomicBool = AtomicBool::new(false); // já apareceu 1x nesta sessão (p/ boot_progress)
+
+/// A engagement do boot está ativa agora? (setado pelo redscript). Lido pelo cp77_tick, que na
+/// game thread FORÇA o proceed nativo (force_pregame_menu) enquanto isto for true.
+pub fn engagement_active() -> bool {
+    ENGAGEMENT_ACTIVE.load(Ordering::Relaxed)
+}
+/// A engagement JÁ apareceu nesta sessão (mesmo que já tenha terminado)? Sinal p/ boot_progress()
+/// distinguir "ainda não chegou" de "passou e seguiu em frente" — engagement_active() sozinho não
+/// dá pra diferenciar as duas (ambas retornam false).
+pub fn seen_engagement() -> bool {
+    SEEN_ENGAGEMENT.load(Ordering::Relaxed)
+}
+
+/// Chamado via native BwmsEngagementOn/Off pelo redscript (EngagementScreenGameController.
+/// OnInitialize / OnUninitialize) — o ÚNICO sinal PRECISO de "estou na engagement do boot" (o bink
+/// marca cedo demais; 'sem player' é falso no pregame por causa do puppet do V). O auto-proceed é
+/// feito pelo cp77_tick (força o dispatcher na game thread), NÃO por injeção de input: o jogo lê HID
+/// e eventos sintéticos (postEvent/CGEvent) do próprio processo não avançam nem com Acessibilidade.
+pub fn set_engagement_active(on: bool) {
+    ENGAGEMENT_ACTIVE.store(on, Ordering::Relaxed);
+    if on {
+        SEEN_ENGAGEMENT.store(true, Ordering::Relaxed);
+    }
+    crate::log(&format!("[skipintro] engagement ativa = {on} (via redscript)"));
+}
 
 extern "C" fn my_present(this: Id, cmd: Sel, drawable: Id) {
     unsafe {

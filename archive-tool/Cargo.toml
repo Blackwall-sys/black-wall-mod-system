@@ -1,8 +1,8 @@
 # archive-tool — CLI standalone para ler/extrair .archive (RDAR) do Cyberpunk 2077 no macOS.
-# Zero dependências: só `std`. Compila offline, em arm64-apple-darwin, sem rede.
+# Só `std` + `bwms-hashes` (crate-folha local, zero-dep) como fonte única de hash. Offline, arm64.
 [package]
 name = "archive-tool"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.74"
 description = "Lê o índice de um .archive (RDAR) do Cyberpunk 2077, gera datamap.md e extrai conteúdo (Kraken pendente)."
@@ -12,6 +12,10 @@ license = "MIT OR Apache-2.0"
 [[bin]]
 name = "archive-tool"
 path = "src/main.rs"
+
+[dependencies]
+# Fonte ÚNICA de hash do BWMS (crc32/crc64/sha1/fnv1a64/murmur3) — converge offline com o runtime.
+bwms-hashes = { path = "../bwms-hashes" }
 
 # Tabela [workspace] vazia: mantém o crate isolado de qualquer workspace pai
 # (mods-research contém vários repos clonados; não queremos ser absorvidos).

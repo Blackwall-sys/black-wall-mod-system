@@ -151,7 +151,7 @@ pub unsafe fn drain_pending(reg: &Registry) {
         DIRTY.store(true, Ordering::Relaxed);
     }
     WATCH_COUNT.store(map.len(), Ordering::Relaxed);
-    // O `cp77-watch.txt` era export pra SONDA ANTIGA (morta) ler o set vigiado — sem leitor hoje
+    // O `cp77-watch.txt` era export pra SONDA FRIDA (morta) ler o set vigiado — sem leitor hoje
     // (o dispatch in-process usa WATCH_COUNT + o map direto). Export + log só em dev: em jogo
     // normal o registro dos ~21 hooks do NativeSettings roda CALADO. `swap` roda antes do `&&`
     // (curto-circuito) → DIRTY sempre reseta, sem mudança de semântica.

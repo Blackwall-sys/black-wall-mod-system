@@ -1,6 +1,6 @@
 [package]
 name = "cp77-console"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 
 # .dylib carregada pelo jogo (LC_LOAD_DYLIB). Hooks via biblioteca de
@@ -11,10 +11,24 @@ crate-type = ["cdylib"]
 
 # `dev-gadget`: build da trilha de DEV — adiciona a checagem de injetor externo
 # (pra coexistir com a ferramenta de dev sem duplicar o hook). FORA do default:
-# o build PÚBLICO 0.1.2 carrega nativo e nem compila essa checagem/strings.
+# o build PÚBLICO 0.1.0 carrega nativo e nem compila essa checagem/strings.
 [features]
 default = []
 dev-gadget = []
+# `autoproceed`: injeção de SPACE via CGEvent HID (auto-proceed do skip-intro, pula a tela de
+# engagement). OFF por padrão = o build PÚBLICO não importa CGEventPost/CGEventCreateKeyboardEvent
+# (o padrão "keylogger/automation" que o heurístico do VirusTotal marca) e não exige Acessibilidade.
+# O skip do VÍDEO (bink hook) e o auto-continue (redscript) NÃO dependem disto. Dev liga via deploy.sh.
+autoproceed = []
+# `devlog`: logging verboso pro /tmp/cp77-console.log (dezenas de strings de debug em PT). OFF por
+# padrão = build público sem essas strings no binário (ruído p/ heurística/analista). Dev liga.
+devlog = []
+# `cpvr`: natives INERTES do toggle VR (BwmsCpvrOn/Off/State, marcador ~/.bwms-cpvr). DEV-ONLY —
+# habilita a coexistência BWMS+CPVR (evita "enfiar build"). Os reds do CPVR + gadget Frida NÃO
+# entram por esta feature; ela só expõe o marcador. OFF no build público.
+cpvr = []
+# guarda-chuva das ferramentas de DEV (o deploy.sh liga; o build público NÃO).
+devtools = ["autoproceed", "devlog", "cpvr"]
 # `capture`: módulo experimental de captura de frame/depth (uso interno). OFF por padrão
 # = não entra na dylib pública. Liga com `--features capture`.
 capture = []
@@ -29,9 +43,19 @@ panic = "abort"   # uma .dylib carregada no jogo não deve unwind pro processo
 # overlay: render no frame do jogo via Metal (metal-rs) + bridge de ponteiros cru
 # (foreign-types) do nosso swizzle. O resto (engine RTTI) segue zero-dep.
 [dependencies]
+# FONTE ÚNICA das funções de hash do TweakDB (CRC32/TweakDBID, murmur3 type-key) — a MESMA
+# impl do tweakdb-tool offline. Zero-dep, pura (só core) → não incha nem contamina o dylib.
+bwms-hashes = { path = "../bwms-hashes" }
+# Parser puro do formato declarativo do TweakXL (.yaml/.toml -> Vec<Op>), reusado do
+# tweakdb-tool offline (`tweakxl-pipeline-runtime`, 2026-07-15). `default-features = false`:
+# NÃO liga a feature `kraken` (decodificador Kraken/ooz nativo) — o dylib do jogo não precisa
+# disso, só o parser (`lib.rs` do tweakdb-tool já isola isso: hashes+template+tweakxl+yaml).
+tweakdb-tool = { path = "../tweakdb-tool", default-features = false }
 metal = "0.29"
 foreign-types = "0.5"
 imgui = "0.12"
+# decoder PNG puro-Rust p/ o splash de boot (carrega bwms-splash.png do dir do jogo). Sem C, sem traço.
+png = "0.17"
 # Rota A (compat CET): runtime Lua OPCIONAL (feature `lua`). LuaJIT = o que os mods CET usam.
 # Fora do default → o build público não embute luajit (core 0% Lua).
 mlua = { version = "0.10", features = ["luajit", "vendored"], optional = true }

@@ -325,11 +325,20 @@ pub struct ResourcePatch {
     pub excludes: Vec<String>,
 }
 
-/// Um link de recurso: o `target` (path virtual) resolve para as `sources` (paths reais).
+/// Um link de recurso. **Direção depende da FORMA no YAML (achado 2026-07-13, RE de
+/// `ResourceLink/Config.cpp` + `Extension.cpp` real do ArchiveXL — não é uma escolha nossa, é
+/// assimetria genuína no C++ upstream):**
+/// - forma SCALAR (`target: source`): `target` (fake) resolve pra `source` (real) — 1 fonte.
+/// - forma SEQUÊNCIA (`target: [source1, source2, ...]`): **INVERTIDO** — CADA item da lista
+///   resolve pro `target` (o padrão real de uso, confirmado no fixture `Migration.xl`: o
+///   `target` é o path NOVO/real, e a lista contém nomes ANTIGOS/legados que devem redirecionar
+///   pra ele — é o caso de uso de MIGRAÇÃO, não "várias fontes candidatas pro mesmo alvo").
+/// Rastreado via `is_sequence_form` (setado no parse, consumido em `apply_xl::build_apply_plan`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResourceLink {
     pub target: String,
     pub sources: Vec<String>,
+    pub is_sequence_form: bool,
 }
 
 /// Um escopo de recurso (`resource.scope`): o recurso `resource` define o ESCOPO dos `targets`
@@ -366,6 +375,200 @@ pub struct LocalizationGroup {
     pub entries: Vec<(String, Vec<String>)>,
 }
 
+/// `player.bodyTypes` (`PuppetState/Config.cpp`): lista de nomes de tipo de corpo (scalar OU seq).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PuppetStateConfig {
+    pub body_types: Vec<String>,
+}
+
+/// `customizations.{male,female}` (`Customization/Config.cpp`): paths de opção de customização
+/// por gênero (cada um scalar OU seq — `ReadOptions` idêntica pros dois).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CustomizationConfig {
+    pub male_options: Vec<String>,
+    pub female_options: Vec<String>,
+}
+
+/// Uma entrada de `animations[]` (`Animation/Config.cpp::AnimationEntry`). `entity`: nomes de
+/// entidade-alvo (scalar OU seq — **achado de RE: o C++ upstream tem um bug de copy-paste,
+/// `else if (entityNode.IsScalar())` deveria ser `IsSequence()`, então a forma-lista NUNCA
+/// preenche no binário real; implementamos CORRETO aqui pro nosso parser ter valor prático,
+/// documentando a divergência**). `set`: nome do anim set (obrigatório). `vars`: **outro bug
+/// upstream** (`if (variablesNode.IsScalar())` checa o nó ERRADO — o pai, não o item do loop —
+/// `variables` fica SEMPRE vazio no binário real; idem, implementamos correto). `priority`
+/// (default 128) e `component` (default "root") opcionais.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimationEntry {
+    pub entities: Vec<String>,
+    pub set: String,
+    pub variables: Vec<String>,
+    pub priority: u8,
+    pub component: String,
+}
+
+impl Default for AnimationEntry {
+    fn default() -> Self {
+        AnimationEntry { entities: vec![], set: String::new(), variables: vec![], priority: 128, component: "root".to_string() }
+    }
+}
+
+/// Vetor 3D (`scale`, sempre `[x, y, z]` — exatamente 3 floats).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Vec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+/// Vetor 4D (`position`). **Achado de RE:** o `.W` final é SEMPRE forçado a `0` no C++ real
+/// (`WorldStreaming/Config.cpp`), mesmo quando a lista YAML tem 4 valores — o 4º valor (índice 3)
+/// é lido em `positionValues[3]` mas NUNCA usado; só serve pra decidir se a forma de 4 é aceita
+/// (nó de sector aceita 3 OU 4 valores; sub-node exige EXATAMENTE 4). Replicado aqui fielmente.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Vec4 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub w: f32,
+}
+
+/// Quaternion (`orientation`, sempre `[i, j, k, r]` — exatamente 4 floats, ordem i/j/k/r do RED4).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Quat {
+    pub i: f32,
+    pub j: f32,
+    pub k: f32,
+    pub r: f32,
+}
+
+/// Mutação de um SUB-node (`actorMutations`/`instanceMutations` dentro de um `nodeMutations[]`;
+/// `WorldStreaming/Config.cpp::ParseSubMutations`). Exige `expectedActors`/`expectedInstances`
+/// (a contagem esperada) presente e válido, senão a lista inteira é ignorada (fiel ao C++: sem
+/// count válido, `ParseSubMutations` devolve `false` cedo e NADA é lido). `position` aqui exige
+/// EXATAMENTE 4 valores (≠ do node-level, que aceita 3 ou 4).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorldSubNodeMutation {
+    pub sub_node_index: i64,
+    pub position: Option<Vec4>,
+    pub orientation: Option<Quat>,
+    pub scale: Option<Vec3>,
+}
+
+/// Mutação de um node de streaming sector (`nodeMutations[]`, `WorldStreaming/Config.cpp`).
+/// `resource_path`/`appearance_name`/`record_id` cada um lido de VÁRIAS chaves-sinônimo (a última
+/// presente vence — `resource`/`mesh`/`meshRef`/`material`/`effect`/`entityTemplate` pro path;
+/// `appearance`/`appearanceName`/`meshAppearance` pro nome; `recordID`/`recordId`/`objectRecordId`
+/// pro TweakDBID). `sub_node_mutations` vem de `actorMutations` OU `instanceMutations` (mutuamente
+/// exclusivos na prática — o 2º chamado, se presente e válido, sobrescreve).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorldNodeMutation {
+    pub node_index: i64,
+    pub node_type: String,
+    pub position: Option<Vec4>,
+    pub orientation: Option<Quat>,
+    pub scale: Option<Vec3>,
+    pub resource_path: Option<String>,
+    pub appearance_name: Option<String>,
+    pub record_id: Option<String>,
+    pub nb_nodes_under_proxy_diff: Option<i32>,
+    pub expected_sub_nodes: i64,
+    pub sub_node_mutations: Vec<WorldSubNodeMutation>,
+}
+
+/// Deleção de um node de streaming sector (`nodeDeletions[]`). `sub_node_deletions` vem de
+/// `actorDeletions` OU `instanceDeletions` (mesmo padrão sinônimo-sobrescreve de `WorldNodeMutation`).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorldNodeDeletion {
+    pub node_index: i64,
+    pub node_type: String,
+    pub expected_sub_nodes: i64,
+    pub sub_node_deletions: Vec<i64>,
+}
+
+/// Um streaming sector modificado (`streaming.sectors[]`). `expected_nodes` é obrigatório e usado
+/// como LIMITE de sanidade pros índices de `nodeIndex` (fora do range = descartado, fiel ao C++).
+/// Uma entrada só é mantida se tiver PELO MENOS 1 deleção ou 1 mutação (senão é ruído).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorldSectorMod {
+    pub path: String,
+    pub expected_nodes: i64,
+    pub node_deletions: Vec<WorldNodeDeletion>,
+    pub node_mutations: Vec<WorldNodeMutation>,
+}
+
+/// `streaming.{blocks,sectors}` (`WorldStreaming/Config.cpp`) — o 7º e último item da lista
+/// original de "11 seções" do parser `.xl` (as outras 4 citadas — Attachment/Mesh/Transmog/
+/// InkSpawner — não têm `Config.cpp`/seção própria nenhuma, RE 2026-07-15 cont.60).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorldStreamingSection {
+    pub blocks: Vec<String>,
+    pub sectors: Vec<WorldSectorMod>,
+}
+
+/// Máscara de chunks de mesh (`Garment/ChunkMask.hpp`, RE 2026-07-15): decide quais índices de
+/// chunk do componente aparecem. `show=true` = seleção POSITIVA (a máscara final tem bit setado
+/// exatamente nos chunks listados, forma `show: [...]`, sem inversão). `show=false` = seleção por
+/// EXCLUSÃO (a máscara final é o COMPLEMENTO dos chunks listados — forma `hide: [...]`, sequência
+/// nua, OU escalar cru já-computado — replica `ChunkMask::Set` bit a bit: OR dos `1<<chunk`, depois
+/// `mask = ~mask` se `!show && mask != 0`). Confirma e generaliza o achado da RE do full-body:
+/// `chunkMask=0xFFFFFFFFFFFFFF1F` em `t0_000_pwa_fpp__01_ca_pale` = `hide: [5, 6, 7]` por esta
+/// fórmula exata (`~((1<<5)|(1<<6)|(1<<7)) = 0xFFFFFFFFFFFFFF1F`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChunkMask {
+    pub show: bool,
+    pub mask: u64,
+}
+
+impl ChunkMask {
+    /// Constrói a partir de uma lista de índices de chunk (0-63), replicando `ChunkMask::Set`.
+    fn from_chunks(show: bool, chunks: &[u8]) -> Self {
+        let mut mask: u64 = 0;
+        for &c in chunks {
+            mask |= 1u64 << (c & 63);
+        }
+        if !show && mask != 0 {
+            mask = !mask;
+        }
+        ChunkMask { show, mask }
+    }
+}
+
+/// Uma conexão de nó do quest graph (`node`+`socket`, ou só `node` — `QuestPhase/Config.cpp::
+/// FillConnection`): forma mapa `{node:[..], socket: nome}` OU sequência nua (só node path, sem
+/// socket).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QuestPhaseConnection {
+    pub node_path: Vec<u16>,
+    pub socket: Option<String>,
+}
+
+/// Uma phase de quest (`quest.phases[]`, `QuestPhase/Config.cpp`): `path`+`parent` obrigatórios
+/// (senão a entrada é descartada); `connection`/`input` alimentam o MESMO campo `input` (o C++
+/// chama `FillConnection` duas vezes seguidas pro mesmo destino — "connection" é sinônimo/alias
+/// de "input", o 2º chamado sobrescreve se ambos existirem); `output` e `intercept` (bool) opcionais.
+/// `parent` é uma STRING só (não lista): o C++ guarda num `Set` mas cada parse de UM phase-node só
+/// insere UM scalar — o merge entre vários mods pro mesmo `path` acontece rio-acima, fora do escopo
+/// de parsear um `.xl` isolado.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct QuestPhaseMod {
+    pub phase_path: String,
+    pub parent: String,
+    pub input: QuestPhaseConnection,
+    pub output: QuestPhaseConnection,
+    pub intercept: bool,
+}
+
+/// Um override de tag de garment (`overrides.tags.<tag>.<component>` → máscara de chunks;
+/// `Garment/Config.cpp::GarmentOverrideConfig::LoadYAML` — a chave de TOPO real é `overrides`,
+/// não `garment` — `GarmentOverrideConfig::LoadYAML` lê `aNode["overrides"]["tags"]` direto da
+/// raiz do documento, confirmado lendo `ExtensionLoader.cpp::AddConfig`, que passa o documento
+/// INTEIRO pra cada extensão decidir sua própria subchave).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct GarmentOverrideTag {
+    pub tag: String,
+    pub components: Vec<(String, ChunkMask)>,
+}
+
 /// O `.xl` inteiro, tipado.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct XlFile {
@@ -377,7 +580,14 @@ pub struct XlFile {
     pub fixes: Vec<ResourceFix>,
     pub localization: Vec<LocalizationGroup>,
     pub localization_extend: Option<String>,
-    /// chaves de topo presentes mas ainda não tipadas (streaming, customNodes, ...). Nada some.
+    pub garment_overrides: Vec<GarmentOverrideTag>,
+    pub quest_phases: Vec<QuestPhaseMod>,
+    pub journals: Vec<String>,
+    pub puppet_state: Option<PuppetStateConfig>,
+    pub customization: Option<CustomizationConfig>,
+    pub animations: Vec<AnimationEntry>,
+    pub streaming: Option<WorldStreamingSection>,
+    /// chaves de topo presentes mas ainda não tipadas (customNodes, ...). Nada some.
     pub other_sections: Vec<String>,
 }
 
@@ -391,6 +601,16 @@ pub fn parse_xl(input: &str) -> Result<XlFile, String> {
             "factories" => xl.factories = val.to_str_list(),
             "resource" => parse_resource(val, &mut xl),
             "localization" => parse_localization(val, &mut xl),
+            "overrides" => parse_garment(val, &mut xl),
+            "quest" => parse_quest_phase(val, &mut xl),
+            // `Journal/Config.cpp`: scalar OU seq de paths. Achado de RE: no C++ real, a forma
+            // escalar lê `aNode.Scalar()` (a RAIZ do documento, não o nó "journal") — sempre
+            // vazio na prática; implementamos correto aqui (lê o valor do próprio nó).
+            "journal" => xl.journals = val.to_str_list(),
+            "player" => parse_puppet_state(val, &mut xl),
+            "customizations" => parse_customization(val, &mut xl),
+            "animations" => parse_animations(val, &mut xl),
+            "streaming" => parse_world_streaming(val, &mut xl),
             other => xl.other_sections.push(other.to_string()),
         }
     }
@@ -472,8 +692,318 @@ fn parse_resource(node: &Yaml, xl: &mut XlFile) {
     }
     if let Some(link) = node.get("link").and_then(|l| l.as_map()) {
         for (target, sources) in link {
-            xl.links.push(ResourceLink { target: target.clone(), sources: sources.to_str_list() });
+            xl.links.push(ResourceLink {
+                target: target.clone(),
+                sources: sources.to_str_list(),
+                is_sequence_form: sources.as_seq().is_some(),
+            });
         }
+    }
+}
+
+/// sequência de escalares → índices de chunk (u8); itens não-numéricos são ignorados.
+fn to_u8_list(seq: &[Yaml]) -> Vec<u8> {
+    seq.iter().filter_map(|n| n.as_str()).filter_map(|s| s.trim().parse::<u8>().ok()).collect()
+}
+
+/// `ParseInt` do C++ (`Num.hpp`): decimal, ou hex com prefixo `0x`/`0X`.
+fn parse_u64(s: &str) -> Option<u64> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16).ok()
+    } else {
+        s.parse::<u64>().ok()
+    }
+}
+
+/// `overrides.tags.<tag>.<component>` → `ChunkMask` (`Garment/Config.cpp::LoadYAML`, 3 formas):
+/// mapa `{hide:[..]}` ou `{show:[..]}` (hide checado primeiro, só um dos dois é lido — replica o
+/// `for (op : {{"hide",false},{"show",true}}) ... break` do C++); sequência nua = hide implícito;
+/// escalar = máscara já-computada, crua (sem inversão — `ChunkMask(uint64_t)` guarda `show=false`
+/// e o valor tal como está).
+fn parse_garment(node: &Yaml, xl: &mut XlFile) {
+    let Some(tags) = node.get("tags").and_then(|t| t.as_map()) else { return };
+    for (tag, components_node) in tags {
+        let Some(components) = components_node.as_map() else { continue };
+        let mut out = Vec::new();
+        for (comp, chunks) in components {
+            let mask = match chunks {
+                Yaml::Map(_) => {
+                    if let Some(seq) = chunks.get("hide").and_then(|n| n.as_seq()) {
+                        ChunkMask::from_chunks(false, &to_u8_list(seq))
+                    } else if let Some(seq) = chunks.get("show").and_then(|n| n.as_seq()) {
+                        ChunkMask::from_chunks(true, &to_u8_list(seq))
+                    } else {
+                        continue;
+                    }
+                }
+                Yaml::Seq(seq) => ChunkMask::from_chunks(false, &to_u8_list(seq)),
+                Yaml::Scalar(s) => match parse_u64(s) {
+                    Some(m) => ChunkMask { show: false, mask: m },
+                    None => continue,
+                },
+                _ => continue,
+            };
+            out.push((comp.clone(), mask));
+        }
+        if !out.is_empty() {
+            xl.garment_overrides.push(GarmentOverrideTag { tag: tag.clone(), components: out });
+        }
+    }
+}
+
+/// sequência de escalares → índices u16 (node path do quest graph).
+fn to_u16_list(seq: &[Yaml]) -> Vec<u16> {
+    seq.iter().filter_map(|n| n.as_str()).filter_map(|s| s.trim().parse::<u16>().ok()).collect()
+}
+
+/// `FillConnection` (`QuestPhase/Config.cpp`): mapa `{node:[..], socket: nome}` OU sequência nua.
+fn fill_connection(node: Option<&Yaml>) -> QuestPhaseConnection {
+    let Some(node) = node else { return QuestPhaseConnection::default() };
+    if let Some(map) = node.as_map() {
+        QuestPhaseConnection {
+            node_path: node.get("node").and_then(|n| n.as_seq()).map(to_u16_list).unwrap_or_default(),
+            socket: map.iter().find(|(k, _)| k == "socket").and_then(|(_, v)| v.as_str()).map(String::from),
+        }
+    } else if let Some(seq) = node.as_seq() {
+        QuestPhaseConnection { node_path: to_u16_list(seq), socket: None }
+    } else {
+        QuestPhaseConnection::default()
+    }
+}
+
+/// `quest.phases[]` (`QuestPhase/Config.cpp::LoadYAML`): cada item precisa de `path`+`parent`
+/// escalares (senão é descartado); `connection`/`input` alimentam o MESMO campo (input chamado
+/// por último, sobrescreve); `intercept: true` opcional.
+fn parse_quest_phase(node: &Yaml, xl: &mut XlFile) {
+    let Some(phases) = node.get("phases").and_then(|p| p.as_seq()) else { return };
+    for phase in phases {
+        let Some(path) = phase.get("path").and_then(|p| p.as_str()) else { continue };
+        let Some(parent) = phase.get("parent").and_then(|p| p.as_str()) else { continue };
+        let mut input = fill_connection(phase.get("connection"));
+        if phase.get("input").is_some() {
+            input = fill_connection(phase.get("input"));
+        }
+        let output = fill_connection(phase.get("output"));
+        let intercept = phase.get("intercept").and_then(|i| i.as_str()).map(|s| s == "true").unwrap_or(false);
+        xl.quest_phases.push(QuestPhaseMod {
+            phase_path: path.to_string(),
+            parent: parent.to_string(),
+            input,
+            output,
+            intercept,
+        });
+    }
+}
+
+/// `player.bodyTypes` (`PuppetState/Config.cpp`).
+fn parse_puppet_state(node: &Yaml, xl: &mut XlFile) {
+    let Some(body_types) = node.get("bodyTypes") else { return };
+    let list = body_types.to_str_list();
+    if !list.is_empty() {
+        xl.puppet_state = Some(PuppetStateConfig { body_types: list });
+    }
+}
+
+/// `customizations.{male,female}` (`Customization/Config.cpp`).
+fn parse_customization(node: &Yaml, xl: &mut XlFile) {
+    let male = node.get("male").map(|n| n.to_str_list()).unwrap_or_default();
+    let female = node.get("female").map(|n| n.to_str_list()).unwrap_or_default();
+    if !male.is_empty() || !female.is_empty() {
+        xl.customization = Some(CustomizationConfig { male_options: male, female_options: female });
+    }
+}
+
+/// `animations[]` (`Animation/Config.cpp::LoadYAML` — ver doc de `AnimationEntry` pros 2 bugs
+/// upstream que corrigimos aqui: `entity` como sequência e `vars` nunca funcionam no C++ real).
+fn parse_animations(node: &Yaml, xl: &mut XlFile) {
+    let Some(entries) = node.as_seq() else { return };
+    for entry in entries {
+        let Some(entity_node) = entry.get("entity") else { continue };
+        let entities = entity_node.to_str_list();
+        if entities.is_empty() {
+            continue;
+        }
+        let Some(set) = entry.get("set").and_then(|s| s.as_str()) else { continue };
+        let variables = entry.get("vars").map(|v| v.to_str_list()).unwrap_or_default();
+        let priority = entry
+            .get("priority")
+            .and_then(|p| p.as_str())
+            .and_then(|s| s.trim().parse::<u8>().ok())
+            .unwrap_or(128);
+        let component = entry.get("component").and_then(|c| c.as_str()).unwrap_or("root").to_string();
+        xl.animations.push(AnimationEntry { entities, set: set.to_string(), variables, priority, component });
+    }
+}
+
+// ===== streaming.sectors (WorldStreaming/Config.cpp) =====
+
+/// sequência de escalares → f32; `None` se QUALQUER item não for um número (fiel ao C++: um único
+/// item inválido invalida a lista inteira — `as<std::vector<float>>()` do yaml-cpp lançaria).
+fn to_f32_list(seq: &[Yaml]) -> Option<Vec<f32>> {
+    let mut out = Vec::with_capacity(seq.len());
+    for item in seq {
+        out.push(item.as_str()?.trim().parse::<f32>().ok()?);
+    }
+    Some(out)
+}
+
+fn parse_vec3(node: Option<&Yaml>) -> Option<Vec3> {
+    let v = to_f32_list(node?.as_seq()?)?;
+    (v.len() == 3).then(|| Vec3 { x: v[0], y: v[1], z: v[2] })
+}
+
+/// `position` no nível de NODE: aceita 3 OU 4 valores; o `.w` final é SEMPRE 0 (RE, ver doc de `Vec4`).
+fn parse_position_node(node: Option<&Yaml>) -> Option<Vec4> {
+    let v = to_f32_list(node?.as_seq()?)?;
+    (v.len() == 3 || v.len() == 4).then(|| Vec4 { x: v[0], y: v[1], z: v[2], w: 0.0 })
+}
+
+/// `position` no nível de SUB-node: exige EXATAMENTE 4 valores; `.w` também sempre 0.
+fn parse_position_subnode(node: Option<&Yaml>) -> Option<Vec4> {
+    let v = to_f32_list(node?.as_seq()?)?;
+    (v.len() == 4).then(|| Vec4 { x: v[0], y: v[1], z: v[2], w: 0.0 })
+}
+
+fn parse_quat(node: Option<&Yaml>) -> Option<Quat> {
+    let v = to_f32_list(node?.as_seq()?)?;
+    (v.len() == 4).then(|| Quat { i: v[0], j: v[1], k: v[2], r: v[3] })
+}
+
+fn parse_i64(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        i64::from_str_radix(hex, 16).ok()
+    } else {
+        s.parse::<i64>().ok()
+    }
+}
+
+/// "última chave PRESENTE vence" — replica a sequência de `ParseResource`/`ParseName`/
+/// `ParseRecordID` chamadas nas várias chaves-sinônimo (cada chamada só sobrescreve se o
+/// SEU próprio nó estiver definido; ausência não apaga o que já foi lido por um sinônimo anterior).
+fn last_present_str(node: &Yaml, keys: &[&str]) -> Option<String> {
+    keys.iter().filter_map(|k| node.get(k).and_then(|n| n.as_str())).last().map(String::from)
+}
+
+/// `ParseSubDeletions`: exige a lista de índices E a contagem esperada, ambas presentes e válidas
+/// (senão não faz nada). Índice fora de `[0, count)` OU item não-numérico invalida a lista
+/// INTEIRA (`aDeletions.clear()` no C++ — inclusive apagando entradas já lidas por um sinônimo
+/// anterior nesta mesma chamada de node). `expected` é sobrescrito pelo count desta chamada.
+fn parse_sub_deletions(node: &Yaml, list_key: &str, count_key: &str, out: &mut Vec<i64>, expected: &mut i64) {
+    let Some(seq) = node.get(list_key).and_then(|n| n.as_seq()) else { return };
+    let Some(count) = node.get(count_key).and_then(|n| n.as_str()).and_then(parse_i64) else { return };
+    if count <= 0 {
+        return;
+    }
+    let mut collected = Vec::with_capacity(seq.len());
+    for item in seq {
+        match item.as_str().and_then(parse_i64) {
+            Some(idx) if (0..count).contains(&idx) => collected.push(idx),
+            _ => {
+                out.clear();
+                return;
+            }
+        }
+    }
+    out.extend(collected);
+    *expected = count;
+}
+
+/// `ParseSubMutations`: exige a lista E a contagem esperada válidas; itens malformados ou sem
+/// NENHUM de position/orientation/scale são simplesmente PULADOS (≠ `parse_sub_deletions`, que
+/// invalida a lista inteira — assimetria real do C++, replicada fielmente).
+fn parse_sub_mutations(node: &Yaml, list_key: &str, count_key: &str, out: &mut Vec<WorldSubNodeMutation>, expected: &mut i64) {
+    let Some(seq) = node.get(list_key).and_then(|n| n.as_seq()) else { return };
+    let Some(count) = node.get(count_key).and_then(|n| n.as_str()).and_then(parse_i64) else { return };
+    if count <= 0 {
+        return;
+    }
+    for item in seq {
+        if item.as_map().is_none() {
+            continue;
+        }
+        let Some(idx) = item.get("index").and_then(|n| n.as_str()).and_then(parse_i64) else { continue };
+        if !(0..count).contains(&idx) {
+            continue;
+        }
+        let position = parse_position_subnode(item.get("position"));
+        let orientation = parse_quat(item.get("orientation"));
+        let scale = parse_vec3(item.get("scale"));
+        if position.is_none() && orientation.is_none() && scale.is_none() {
+            continue;
+        }
+        out.push(WorldSubNodeMutation { sub_node_index: idx, position, orientation, scale });
+    }
+    *expected = count;
+}
+
+const RESOURCE_KEYS: [&str; 6] = ["resource", "mesh", "meshRef", "material", "effect", "entityTemplate"];
+const APPEARANCE_KEYS: [&str; 3] = ["appearance", "appearanceName", "meshAppearance"];
+const RECORD_ID_KEYS: [&str; 3] = ["recordID", "recordId", "objectRecordId"];
+
+fn parse_world_streaming(node: &Yaml, xl: &mut XlFile) {
+    let blocks = node.get("blocks").map(|b| b.to_str_list()).unwrap_or_default();
+    let mut sectors = Vec::new();
+    if let Some(sector_seq) = node.get("sectors").and_then(|s| s.as_seq()) {
+        for sector in sector_seq {
+            let Some(path) = sector.get("path").and_then(|p| p.as_str()).filter(|s| !s.is_empty()) else { continue };
+            let Some(expected_nodes) = sector.get("expectedNodes").and_then(|n| n.as_str()).and_then(parse_i64) else { continue };
+            if expected_nodes <= 0 {
+                continue;
+            }
+            let mut node_deletions = Vec::new();
+            if let Some(seq) = sector.get("nodeDeletions").and_then(|n| n.as_seq()) {
+                for del in seq {
+                    let Some(node_type) = del.get("type").and_then(|t| t.as_str()) else { continue };
+                    let Some(idx) = del.get("index").and_then(|i| i.as_str()).and_then(parse_i64) else { continue };
+                    if !(0..expected_nodes).contains(&idx) {
+                        continue;
+                    }
+                    let mut d = WorldNodeDeletion { node_index: idx, node_type: node_type.to_string(), ..Default::default() };
+                    parse_sub_deletions(del, "actorDeletions", "expectedActors", &mut d.sub_node_deletions, &mut d.expected_sub_nodes);
+                    parse_sub_deletions(del, "instanceDeletions", "expectedInstances", &mut d.sub_node_deletions, &mut d.expected_sub_nodes);
+                    node_deletions.push(d);
+                }
+            }
+            let mut node_mutations = Vec::new();
+            if let Some(seq) = sector.get("nodeMutations").and_then(|n| n.as_seq()) {
+                for mu in seq {
+                    let Some(node_type) = mu.get("type").and_then(|t| t.as_str()) else { continue };
+                    let Some(idx) = mu.get("index").and_then(|i| i.as_str()).and_then(parse_i64) else { continue };
+                    if !(0..expected_nodes).contains(&idx) {
+                        continue;
+                    }
+                    let nb_diff = mu
+                        .get("nbNodesUnderProxyDiff")
+                        .and_then(|n| n.as_str())
+                        .and_then(|s| parse_i64(s))
+                        .and_then(|v| i32::try_from(v).ok());
+                    let mut m = WorldNodeMutation {
+                        node_index: idx,
+                        node_type: node_type.to_string(),
+                        position: parse_position_node(mu.get("position")),
+                        orientation: parse_quat(mu.get("orientation")),
+                        scale: parse_vec3(mu.get("scale")),
+                        resource_path: last_present_str(mu, &RESOURCE_KEYS),
+                        appearance_name: last_present_str(mu, &APPEARANCE_KEYS),
+                        record_id: last_present_str(mu, &RECORD_ID_KEYS),
+                        nb_nodes_under_proxy_diff: nb_diff,
+                        ..Default::default()
+                    };
+                    parse_sub_mutations(mu, "actorMutations", "expectedActors", &mut m.sub_node_mutations, &mut m.expected_sub_nodes);
+                    parse_sub_mutations(mu, "instanceMutations", "expectedInstances", &mut m.sub_node_mutations, &mut m.expected_sub_nodes);
+                    node_mutations.push(m);
+                }
+            }
+            if node_deletions.is_empty() && node_mutations.is_empty() {
+                continue;
+            }
+            sectors.push(WorldSectorMod { path: path.to_string(), expected_nodes, node_deletions, node_mutations });
+        }
+    }
+    if !blocks.is_empty() || !sectors.is_empty() {
+        xl.streaming = Some(WorldStreamingSection { blocks, sectors });
     }
 }
 
@@ -532,6 +1062,38 @@ impl XlFile {
         }
         if let Some(ext) = &self.localization_extend {
             s.push_str(&format!("localization.extend: {ext}\n"));
+        }
+        if let Some(st) = &self.streaming {
+            s.push_str(&format!("streaming.blocks: {}\n", st.blocks.len()));
+            s.push_str(&format!("streaming.sectors: {}\n", st.sectors.len()));
+            for sec in &st.sectors {
+                s.push_str(&format!(
+                    "  {} (expectedNodes={}) → {} deleção(ões), {} mutação(ões)\n",
+                    sec.path, sec.expected_nodes, sec.node_deletions.len(), sec.node_mutations.len()
+                ));
+            }
+        }
+        s.push_str(&format!("journal: {}\n", self.journals.len()));
+        if let Some(ps) = &self.puppet_state {
+            s.push_str(&format!("player.bodyTypes: {}\n", ps.body_types.join(", ")));
+        }
+        if let Some(c) = &self.customization {
+            s.push_str(&format!("customizations: {} male, {} female\n", c.male_options.len(), c.female_options.len()));
+        }
+        s.push_str(&format!("animations: {}\n", self.animations.len()));
+        for a in &self.animations {
+            s.push_str(&format!("  {} → set={} priority={}\n", a.entities.join(","), a.set, a.priority));
+        }
+        s.push_str(&format!("quest.phases: {}\n", self.quest_phases.len()));
+        for p in &self.quest_phases {
+            s.push_str(&format!("  {} (parent={}, intercept={})\n", p.phase_path, p.parent, p.intercept));
+        }
+        s.push_str(&format!("overrides.tags: {}\n", self.garment_overrides.len()));
+        for t in &self.garment_overrides {
+            s.push_str(&format!("  {} → {} componente(s)\n", t.tag, t.components.len()));
+            for (comp, m) in &t.components {
+                s.push_str(&format!("    {comp}: show={} mask={:#018x}\n", m.show, m.mask));
+            }
         }
         if !self.other_sections.is_empty() {
             s.push_str(&format!("⚠ seções ainda não processadas: {}\n", self.other_sections.join(", ")));
@@ -621,8 +1183,10 @@ mod tests {
 
     #[test]
     fn secao_desconhecida_vai_pra_other_sections() {
-        let xl = parse_xl("streaming:\n  sectors:\n    - s.streamingsector\ncustomNode: x\n").unwrap();
-        assert!(xl.other_sections.contains(&"streaming".to_string()));
+        // "streaming" agora É tipado (RE 2026-07-15 cont.60) — usa 2 chaves genuinamente
+        // desconhecidas (Attachment/Mesh/Transmog/InkSpawner não têm seção .xl própria nenhuma).
+        let xl = parse_xl("attachment:\n  x: y\ncustomNode: x\n").unwrap();
+        assert!(xl.other_sections.contains(&"attachment".to_string()));
         assert!(xl.other_sections.contains(&"customNode".to_string()));
     }
 
@@ -677,5 +1241,231 @@ mod tests {
         let xl = parse_xl(src).unwrap();
         assert_eq!(xl.localization.len(), 2);
         assert_eq!(xl.localization_extend, Some("base".to_string()));
+    }
+
+    // ===== overrides.tags (Garment ChunkMask, RE 2026-07-15) =====
+
+    #[test]
+    fn garment_overrides_forma_sequencia_e_hide_implicito() {
+        // sequência nua = hide implícito (ChunkMask(vector<uint8_t>), sem `set` explícito).
+        let src = "overrides:\n  tags:\n    my_tag:\n      my_component:\n        - 0\n        - 1\n";
+        let xl = parse_xl(src).unwrap();
+        assert_eq!(xl.garment_overrides.len(), 1);
+        let t = &xl.garment_overrides[0];
+        assert_eq!(t.tag, "my_tag");
+        assert_eq!(t.components.len(), 1);
+        let (comp, mask) = &t.components[0];
+        assert_eq!(comp, "my_component");
+        assert!(!mask.show);
+        assert_eq!(mask.mask, !0b11u64); // tudo, exceto os chunks 0 e 1
+        assert!(xl.other_sections.is_empty());
+    }
+
+    #[test]
+    fn garment_overrides_forma_mapa_hide_e_show() {
+        let src = "overrides:\n  tags:\n    t1:\n      c_hide:\n        hide:\n          - 2\n      c_show:\n        show:\n          - 2\n";
+        let xl = parse_xl(src).unwrap();
+        let t = &xl.garment_overrides[0];
+        assert_eq!(t.components.len(), 2);
+        let hide = &t.components.iter().find(|(n, _)| n == "c_hide").unwrap().1;
+        let show = &t.components.iter().find(|(n, _)| n == "c_show").unwrap().1;
+        assert!(!hide.show);
+        assert_eq!(hide.mask, !0b100u64); // hide: complemento do bit 2
+        assert!(show.show);
+        assert_eq!(show.mask, 0b100u64); // show: seleção positiva, SEM inversão
+    }
+
+    #[test]
+    fn garment_overrides_forma_escalar() {
+        // escalar = máscara já-computada, crua (sem inversão — ChunkMask(uint64_t): show=false).
+        let src = "overrides:\n  tags:\n    t1:\n      c1: 0xff\n      c2: 15\n";
+        let xl = parse_xl(src).unwrap();
+        let t = &xl.garment_overrides[0];
+        let c1 = &t.components.iter().find(|(n, _)| n == "c1").unwrap().1;
+        let c2 = &t.components.iter().find(|(n, _)| n == "c2").unwrap().1;
+        assert!(!c1.show);
+        assert_eq!(c1.mask, 0xff);
+        assert_eq!(c2.mask, 15);
+    }
+
+    #[test]
+    fn garment_overrides_bate_com_chunkmask_real_do_full_body() {
+        // Fecha o loop com o achado da RE do full-body (2026-07-15, cont.56): o chunkMask
+        // 0xFFFFFFFFFFFFFF1F achado em `t0_000_pwa_fpp__01_ca_pale` (componente
+        // t0_000_pwa_fpp__torso) é EXATAMENTE `hide: [5, 6, 7]` por esta fórmula.
+        let src = "overrides:\n  tags:\n    t:\n      t0_000_pwa_fpp__torso:\n        hide:\n          - 5\n          - 6\n          - 7\n";
+        let xl = parse_xl(src).unwrap();
+        let mask = xl.garment_overrides[0].components[0].1.mask;
+        assert_eq!(mask, 0xFFFFFFFFFFFFFF1Fu64);
+    }
+
+    // ===== quest.phases (QuestPhase/Config.cpp) =====
+
+    #[test]
+    fn quest_phases_path_parent_e_conexoes() {
+        let src = "quest:\n  phases:\n    - path: my_phase\n      parent: root_graph\n      input:\n        node: [1, 2]\n        socket: In\n      output:\n        - 3\n        - 4\n      intercept: true\n";
+        let xl = parse_xl(src).unwrap();
+        assert_eq!(xl.quest_phases.len(), 1);
+        let p = &xl.quest_phases[0];
+        assert_eq!(p.phase_path, "my_phase");
+        assert_eq!(p.parent, "root_graph");
+        assert_eq!(p.input.node_path, vec![1, 2]);
+        assert_eq!(p.input.socket, Some("In".to_string()));
+        assert_eq!(p.output.node_path, vec![3, 4]);
+        assert_eq!(p.output.socket, None);
+        assert!(p.intercept);
+        assert!(xl.other_sections.is_empty());
+    }
+
+    #[test]
+    fn quest_phases_sem_path_ou_parent_e_descartada() {
+        let src = "quest:\n  phases:\n    - path: only_path\n    - parent: only_parent\n    - path: ok\n      parent: ok_parent\n";
+        let xl = parse_xl(src).unwrap();
+        assert_eq!(xl.quest_phases.len(), 1);
+        assert_eq!(xl.quest_phases[0].phase_path, "ok");
+    }
+
+    #[test]
+    fn quest_phases_input_sobrescreve_connection() {
+        // "connection" e "input" alimentam o MESMO campo; input (chamado por último) vence.
+        let src = "quest:\n  phases:\n    - path: p\n      parent: r\n      connection: [9]\n      input: [1]\n";
+        let xl = parse_xl(src).unwrap();
+        assert_eq!(xl.quest_phases[0].input.node_path, vec![1]);
+    }
+
+    // ===== journal / player.bodyTypes / customizations / animations =====
+
+    #[test]
+    fn journal_scalar_e_seq() {
+        let xl = parse_xl("journal: a.journal\n").unwrap();
+        assert_eq!(xl.journals, vec!["a.journal"]);
+        let xl2 = parse_xl("journal:\n  - a.journal\n  - b.journal\n").unwrap();
+        assert_eq!(xl2.journals, vec!["a.journal", "b.journal"]);
+        assert!(xl2.other_sections.is_empty());
+    }
+
+    #[test]
+    fn puppet_state_body_types() {
+        let xl = parse_xl("player:\n  bodyTypes:\n    - Male\n    - Female\n").unwrap();
+        assert_eq!(xl.puppet_state.unwrap().body_types, vec!["Male", "Female"]);
+    }
+
+    #[test]
+    fn customizations_male_female() {
+        let src = "customizations:\n  male:\n    - a.app\n  female: b.app\n";
+        let xl = parse_xl(src).unwrap();
+        let c = xl.customization.unwrap();
+        assert_eq!(c.male_options, vec!["a.app"]);
+        assert_eq!(c.female_options, vec!["b.app"]);
+    }
+
+    #[test]
+    fn animations_entrada_completa() {
+        let src = "animations:\n  - entity:\n      - npc_a\n      - npc_b\n    set: my_set.animset\n    vars:\n      - v1\n      - v2\n    priority: 200\n    component: torso\n";
+        let xl = parse_xl(src).unwrap();
+        assert_eq!(xl.animations.len(), 1);
+        let a = &xl.animations[0];
+        assert_eq!(a.entities, vec!["npc_a", "npc_b"]);
+        assert_eq!(a.set, "my_set.animset");
+        assert_eq!(a.variables, vec!["v1", "v2"]);
+        assert_eq!(a.priority, 200);
+        assert_eq!(a.component, "torso");
+    }
+
+    #[test]
+    fn animations_defaults_e_entity_scalar() {
+        let src = "animations:\n  - entity: solo_npc\n    set: s.animset\n";
+        let xl = parse_xl(src).unwrap();
+        let a = &xl.animations[0];
+        assert_eq!(a.entities, vec!["solo_npc"]);
+        assert_eq!(a.priority, 128);
+        assert_eq!(a.component, "root");
+        assert!(a.variables.is_empty());
+    }
+
+    #[test]
+    fn animations_sem_set_e_descartada() {
+        let xl = parse_xl("animations:\n  - entity: x\n").unwrap();
+        assert!(xl.animations.is_empty());
+    }
+
+    // ===== streaming.sectors (WorldStreaming/Config.cpp) =====
+
+    #[test]
+    fn streaming_blocks_e_sector_com_delecao() {
+        let src = "streaming:\n  blocks:\n    - a.streamingblock\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 10\n      nodeDeletions:\n        - type: worldStaticMeshNode\n          index: 3\n";
+        let xl = parse_xl(src).unwrap();
+        let st = xl.streaming.unwrap();
+        assert_eq!(st.blocks, vec!["a.streamingblock"]);
+        assert_eq!(st.sectors.len(), 1);
+        let sec = &st.sectors[0];
+        assert_eq!(sec.path, "s.streamingsector");
+        assert_eq!(sec.expected_nodes, 10);
+        assert_eq!(sec.node_deletions.len(), 1);
+        assert_eq!(sec.node_deletions[0].node_index, 3);
+        assert_eq!(sec.node_deletions[0].node_type, "worldStaticMeshNode");
+        assert!(xl.other_sections.is_empty());
+    }
+
+    #[test]
+    fn streaming_indice_fora_do_range_e_descartado() {
+        // expectedNodes=5, index=9 (fora) → deleção inteira descartada → sector some (0 del + 0 mut)
+        let src = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeDeletions:\n        - type: t\n          index: 9\n";
+        let xl = parse_xl(src).unwrap();
+        assert!(xl.streaming.is_none());
+    }
+
+    #[test]
+    fn streaming_mutacao_position_3_e_4_valores_w_sempre_zero() {
+        let src = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeMutations:\n        - type: t\n          index: 0\n          position: [1.0, 2.0, 3.0]\n";
+        let xl = parse_xl(src).unwrap();
+        let m = &xl.streaming.unwrap().sectors[0].node_mutations[0];
+        let pos = m.position.unwrap();
+        assert_eq!((pos.x, pos.y, pos.z, pos.w), (1.0, 2.0, 3.0, 0.0));
+
+        // forma com 4 valores: o 4º é aceito mas IGNORADO (w continua 0, fiel ao C++)
+        let src2 = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeMutations:\n        - type: t\n          index: 0\n          position: [1.0, 2.0, 3.0, 9.0]\n";
+        let xl2 = parse_xl(src2).unwrap();
+        let m2 = &xl2.streaming.unwrap().sectors[0].node_mutations[0];
+        assert_eq!(m2.position.unwrap().w, 0.0);
+    }
+
+    #[test]
+    fn streaming_mutacao_recursos_e_sinonimos_ultimo_presente_vence() {
+        let src = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeMutations:\n        - type: t\n          index: 0\n          resource: a.mesh\n          meshRef: b.mesh\n          appearance: default\n          recordID: Items.X\n";
+        let xl = parse_xl(src).unwrap();
+        let m = &xl.streaming.unwrap().sectors[0].node_mutations[0];
+        // "meshRef" vem depois de "resource" na ordem de chaves-sinônimo → vence
+        assert_eq!(m.resource_path.as_deref(), Some("b.mesh"));
+        assert_eq!(m.appearance_name.as_deref(), Some("default"));
+        assert_eq!(m.record_id.as_deref(), Some("Items.X"));
+    }
+
+    #[test]
+    fn streaming_submutacoes_actor_com_expected_count() {
+        let src = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeMutations:\n        - type: t\n          index: 0\n          expectedActors: 3\n          actorMutations:\n            - index: 1\n              scale: [2.0, 2.0, 2.0]\n";
+        let xl = parse_xl(src).unwrap();
+        let m = &xl.streaming.unwrap().sectors[0].node_mutations[0];
+        assert_eq!(m.expected_sub_nodes, 3);
+        assert_eq!(m.sub_node_mutations.len(), 1);
+        assert_eq!(m.sub_node_mutations[0].sub_node_index, 1);
+        assert_eq!(m.sub_node_mutations[0].scale.unwrap().x, 2.0);
+    }
+
+    #[test]
+    fn streaming_subdelecoes_sem_expected_count_e_ignorada() {
+        // actorDeletions presente mas SEM expectedActors → parse_sub_deletions não faz nada
+        let src = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeDeletions:\n        - type: t\n          index: 0\n          actorDeletions:\n            - 1\n";
+        let xl = parse_xl(src).unwrap();
+        let d = &xl.streaming.unwrap().sectors[0].node_deletions[0];
+        assert!(d.sub_node_deletions.is_empty());
+        assert_eq!(d.expected_sub_nodes, 0);
+    }
+
+    #[test]
+    fn streaming_sector_sem_delecao_ou_mutacao_e_omitido() {
+        let src = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n";
+        let xl = parse_xl(src).unwrap();
+        assert!(xl.streaming.is_none());
     }
 }

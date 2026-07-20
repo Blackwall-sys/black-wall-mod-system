@@ -9,6 +9,17 @@ use std::ffi::c_void;
 use crate::cname::cname;
 use crate::rtti::{self, Arg, Registry};
 
+/// `call_func` devolve até 0x20 bytes (alargado p/ caber `String` de retorno — ver nota em
+/// `rtti::call_func`), mas GameInstance/EntityID são valores de 16 bytes de verdade — trunca
+/// os bytes extras (sempre lixo/zero pra esses tipos) antes de passar pra `Arg::Raw`/funções
+/// que ainda modelam o tipo como `[u8;16]` fixo.
+#[inline]
+fn trunc16(v: [u8; 0x20]) -> [u8; 16] {
+    let mut o = [0u8; 16];
+    o.copy_from_slice(&v[..16]);
+    o
+}
+
 /// Refcount fake alto (não libera o handle) — sentinela 0x00100000_00100000 dele.
 pub(crate) unsafe fn refcnt() -> *mut c_void {
     static mut REFCNT: u64 = 0x0010_0000_0010_0000;
@@ -28,7 +39,7 @@ unsafe fn auth_player(reg: &Registry, captured: *mut c_void) -> *mut c_void {
         }
     };
     let gi = match rtti::call_func(&gg, captured, &[]) {
-        Some(b) => b,
+        Some(b) => trunc16(b),
         None => {
             crate::log("[auth] GetGame falhou");
             return std::ptr::null_mut();
@@ -82,7 +93,7 @@ pub unsafe fn give(
     tx: *mut c_void,
     name: &str,
     qty: u32,
-) -> Option<[u8; 16]> {
+) -> Option<[u8; 0x20]> {
     let owner = {
         let a = auth_player(reg, captured_player);
         if a.is_null() {
@@ -171,7 +182,7 @@ unsafe fn dev_data(reg: &Registry, captured_player: *mut c_void) -> *mut c_void 
         None => return std::ptr::null_mut(),
     };
     let gi = match rtti::call_func(&gg, owner, &[]) {
-        Some(b) => b,
+        Some(b) => trunc16(b),
         None => return std::ptr::null_mut(),
     };
     let sys = scriptable_system(reg, owner, gi, "PlayerDevelopmentSystem");
@@ -252,7 +263,7 @@ unsafe fn auth_or(reg: &Registry, captured: *mut c_void) -> *mut c_void {
 /// GameInstance (16B) via `PlayerPuppet.GetGame`.
 unsafe fn get_gi(reg: &Registry, owner: *mut c_void) -> Option<[u8; 16]> {
     let gg = rtti::resolve_func(reg, "PlayerPuppet", "GetGame")?;
-    rtti::call_func(&gg, owner, &[])
+    rtti::call_func(&gg, owner, &[]).map(trunc16)
 }
 
 /// Sistema/facility via getter estático `GameInstance.GetXxx(gi)` (GetGodModeSystem etc.).
@@ -294,7 +305,7 @@ unsafe fn system_flex(
 /// entEntityID (nos 8 primeiros bytes do buffer) via `gameObject.GetEntityID`.
 unsafe fn entity_id(reg: &Registry, player: *mut c_void) -> Option<[u8; 16]> {
     let g = rtti::resolve_any(reg, &["gameObject", "gameEntity"], "GetEntityID")?;
-    rtti::call_func(&g, player, &[])
+    rtti::call_func(&g, player, &[]).map(trunc16)
 }
 
 /// Godmode REAL via `gameGodModeType::Invulnerable` (não toma dano — vence o
@@ -340,6 +351,31 @@ pub unsafe fn godmode(reg: &Registry, captured_player: *mut c_void, on: bool) ->
     }
     crate::log("[god] nenhum membro de gameGodModeType resolveu");
     false
+}
+
+/// `redscript-cheat-effects-proof` (2026-07-13) — checagem READ-ONLY de `HasGodMode` (mesma
+/// chamada que `blackwall-mods.reds::BWHasGodMode` faz), pra provar que um toggle disparado
+/// PELO CAMINHO .reds (não pelo `godmode()` acima, que é só console) teve efeito real e
+/// observável. Não muta nada — só lê e loga.
+pub unsafe fn hasgod(reg: &Registry, captured_player: *mut c_void) -> Option<bool> {
+    let owner = auth_or(reg, captured_player);
+    let gi = get_gi(reg, owner)?;
+    let sys = via_getter(reg, owner, gi, "GetGodModeSystem");
+    if !rtti::sane(sys) {
+        crate::log("[hasgod] GetGodModeSystem inacessível");
+        return None;
+    }
+    let eid = entity_id(reg, owner)?;
+    let f = rtti::resolve_any(reg, &["gameGodModeSystem"], "HasGodMode")?;
+    for mem in ["Invulnerable", "Immortal", "Default"] {
+        if let Some(ev) = rtti::resolve_enum_value(reg, "gameGodModeType", mem) {
+            let r = rtti::call_func(&f, sys, &[Arg::Raw(eid), Arg::Enum(ev)]);
+            let has = r.map(|b| b[0] != 0);
+            crate::log(&format!("[hasgod] HasGodMode({mem}) = {has:?}"));
+            return has;
+        }
+    }
+    None
 }
 
 /// Seta o nível via `PlayerDevelopmentData.SetLevel(Level, n, reason=0, true)`.
@@ -427,7 +463,7 @@ pub unsafe fn remove(
     tx: *mut c_void,
     name: &str,
     qty: u32,
-) -> Option<[u8; 16]> {
+) -> Option<[u8; 0x20]> {
     let owner = auth_or(reg, captured_player);
     let rf = rtti::resolve_func(reg, "gameTransactionSystem", "RemoveItem")?;
     let item = rtti::from_tdbid(reg, name)?;

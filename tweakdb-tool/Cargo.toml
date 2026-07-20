@@ -2,12 +2,16 @@
 # Zero dependências (só std). Os flats NÃO são comprimidos: não precisa de Kraken.
 [package]
 name = "tweakdb-tool"
-version = "0.1.2"
+version = "0.1.0"
 edition = "2021"
 rust-version = "1.74"
 description = "Lê/mapeia o tweakdb.bin (records, flats, queries, group tags) do Cyberpunk 2077."
 authors = ["blackwall"]
 license = "MIT OR Apache-2.0"
+
+[lib]
+name = "tweakdb_tool"
+path = "src/lib.rs"
 
 [[bin]]
 name = "tweakdb-tool"
@@ -15,6 +19,11 @@ path = "src/main.rs"
 
 # Crate isolado de qualquer workspace pai (mods-research tem vários repos).
 [workspace]
+
+[dependencies]
+# FONTE ÚNICA das funções de hash (CRC32/TweakDBID, murmur3, FNV-1a) — compartilhada
+# com o runtime cp77-console. Antes duplicadas byte-a-byte em src/hashes.rs.
+bwms-hashes = { path = "../bwms-hashes" }
 
 [features]
 # `kraken`: compila/linka o ooz (../ooz) via build.rs para descomprimir a

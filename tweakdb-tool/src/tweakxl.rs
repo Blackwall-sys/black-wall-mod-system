@@ -11,8 +11,6 @@
 use std::collections::HashMap;
 
 use crate::hashes::fnv1a32;
-use crate::names::NameDb;
-use crate::writer::{EditOp, Model, SetOutcome};
 use crate::yaml::{Kind, Node};
 
 /// Uma operação de alto nível extraída do documento.
@@ -25,11 +23,28 @@ pub enum Op {
     Edit { flat: String, op: EditOp },
 }
 
-/// Resultado de aplicar uma op (para relatório de `apply-*`/`--check`).
-pub struct OpResult {
-    pub desc: String,
-    pub ok: bool,
-    pub detail: String,
+/// Operação de edição de um flat. As variantes de array espelham as tags do
+/// TweakXL (`!append`, `!prepend`, `!append-once`, `!prepend-once`, `!remove`). Mora aqui (não em
+/// `writer.rs`) porque é o tipo de INTENÇÃO (Op::Edit) — desacoplado do writer offline, permite
+/// expor `tweakxl.rs` numa lib SEM arrastar `writer`/`tweakdb`/`kraken` (ver `lib.rs`).
+pub enum EditOp {
+    /// `= valor` (escalar) ou `= [a, b, c]` (array inteiro).
+    Assign(String),
+    /// `+= valor` / `!append` — adiciona um elemento ao FIM do array.
+    Append(String),
+    /// `!append-once` — adiciona ao fim só se ainda não estiver presente.
+    AppendOnce(String),
+    /// `!prepend` — adiciona um elemento ao INÍCIO do array.
+    Prepend(String),
+    /// `!prepend-once` — adiciona ao início só se ainda não estiver presente.
+    PrependOnce(String),
+    /// `-= valor` / `!remove` — remove os elementos iguais (igualdade de bytes).
+    Remove(String),
+    /// `!append-from` / `!merge` — anexa ao FIM os elementos de outro flat array
+    /// (pelo nome). O TweakXL trata `!merge` e `!append-from` como o mesmo op.
+    AppendFrom(String),
+    /// `!prepend-from` — anexa ao INÍCIO os elementos de outro flat array.
+    PrependFrom(String),
 }
 
 /// Contexto da interpretação: a origem (caminho do arquivo, p/ o hash do nome
@@ -272,39 +287,6 @@ fn struct_map_to_scalar(entries: &[(String, Node)]) -> Option<String> {
 
 fn set(items: &[&'static str]) -> std::collections::BTreeSet<&'static str> {
     items.iter().copied().collect()
-}
-
-/// Aplica as ops a um Model em sequência, devolvendo um resultado por op.
-pub fn apply_ops(model: &mut Model, names: &NameDb, ops: &[Op]) -> Vec<OpResult> {
-    ops.iter()
-        .map(|op| match op {
-            Op::Clone { record, base } => match model.clone_record(base, record, names) {
-                Ok(n) => OpResult {
-                    desc: format!("$base {record} ⟵ {base}"),
-                    ok: true,
-                    detail: format!("{n} flats clonados"),
-                },
-                Err(e) => OpResult { desc: format!("$base {record}"), ok: false, detail: e },
-            },
-            Op::Create { record, class } => match model.create_record(record, class, names) {
-                Ok((sample, n)) => OpResult {
-                    desc: format!("$type {record} ({class})"),
-                    ok: true,
-                    detail: format!("criado de amostra {sample} — {n} flats"),
-                },
-                Err(e) => OpResult { desc: format!("$type {record} ({class})"), ok: false, detail: e },
-            },
-            Op::Edit { flat, op } => match model.apply(flat, op) {
-                SetOutcome::Applied(ty) => OpResult { desc: flat.clone(), ok: true, detail: ty },
-                SetOutcome::NotFound => {
-                    OpResult { desc: flat.clone(), ok: false, detail: "flat inexistente".into() }
-                }
-                SetOutcome::NotEditable { ty, reason } => {
-                    OpResult { desc: flat.clone(), ok: false, detail: format!("{ty}: {reason}") }
-                }
-            },
-        })
-        .collect()
 }
 
 #[cfg(test)]

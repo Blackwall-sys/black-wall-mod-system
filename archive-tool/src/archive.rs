@@ -46,6 +46,10 @@ pub const DEPENDENCY_SIZE: usize = 8;
 pub const LXRS_MAGIC: u32 = 0x4C58_5253; // bytes "SRXL" em disco (LxrsFooter)
 pub const KARK_MAGIC: u32 = 0x4B52_414B; // bytes "KARK" — header de segmento Oodle/Kraken
 
+/// CRC-64/XZ (= `Crc64` do WolvenKit, crc do índice RDAR) + SHA-1 (FileEntry) — fonte única
+/// `bwms-hashes`. Verificado contra o índice de .archive REAIS do jogo (ver `Archive::open`).
+pub use bwms_hashes::{crc64, sha1};
+
 /// Limite defensivo para o índice (256 MiB). Um basegame.archive real tem
 /// índice de poucos MB; isto só barra arquivos corrompidos/maliciosos.
 const MAX_INDEX_SIZE: u64 = 256 * 1024 * 1024;
@@ -154,6 +158,8 @@ pub struct Archive {
     pub custom_paths: Vec<String>,
     /// `true` se havia um LxrsFooter comprimido que não pôde ser lido sem Kraken.
     pub custom_paths_need_kraken: bool,
+    /// `true` se o crc64 recomputado do índice bate com o armazenado (índice íntegro).
+    pub crc_ok: bool,
 }
 
 impl Archive {
@@ -310,6 +316,10 @@ impl Archive {
             }
         }
 
+        // crc64 do índice = Crc64.Compute sobre tudo APÓS o campo crc (counts + as 3 tabelas),
+        // i.e. index[16..]. Valida a integridade e prova o algoritmo contra dado real do jogo.
+        let crc_ok = crc64(&index[16..]) == crc;
+
         Ok(Archive {
             path: path.to_path_buf(),
             header,
@@ -321,6 +331,7 @@ impl Archive {
             dependencies,
             custom_paths,
             custom_paths_need_kraken,
+            crc_ok,
         })
     }
 

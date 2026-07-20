@@ -20,6 +20,28 @@ const ADDR_EXEC: u64 = 0x1_0217_3120; // executor universal (func, ctx, frame, r
 const ADDR_POOL_DEFAULT_ALLOC_ALIGNED: u64 = 0x1_0002_2808;
 /// PoolDefault::Free(red::memory::Block&) — Block = {ptr, size}. Libera o que AllocateAligned deu.
 const ADDR_POOL_DEFAULT_FREE: u64 = 0x1_0002_2cb0;
+/// `Handle<T>::Handle(T* aPtr)` — construtor UNIVERSAL de `ref<T>` do próprio motor (RE
+/// 2026-07-18, sessão `handle-ctor-re`, fechando o bloqueador nº2 de `cw-callback-handler`
+/// documentado em `register.rs::write_handle_ret`/HISTORICO cont.100). Achado por vizinhança:
+/// a rotina de RELEASE (teardown de locais `ref<>` compilados, já conhecida em `0x1021048c4`)
+/// tem essa função-companheira de CONSTRUÇÃO logo ANTES no mesmo objeto/arquivo — mesmo padrão
+/// `ldaddal` no mesmo campo (`block+4`), decoder completo em `0x102104788..0x102104864`.
+/// CONFIRMADO por 4045 call-sites reais (scan de `bl` no `__TEXT` inteiro) — o padrão em CADA
+/// um é idêntico ao de `0x10093f8c4`: `<constrói o objeto cru>; mov x1,x0 (raw ptr); add
+/// x0,sp,#N (slot de 16 bytes); bl 0x102104788`. ABI: `void Handle_ctor(void* aOutHandle /*x0,
+/// 16 bytes*/, void* aPtr /*x1*/)`. Semântica lida da disasm: sempre escreve `out[0]=aPtr`
+/// primeiro (+`out[8]=0`); se `aPtr==null` retorna aí — handle nulo válido. Senão consulta uma
+/// tabela de "weak owner" por PONTEIRO (`bl 0x102186638`): se já existe um refcount-block pra
+/// este objeto (outro Handle vivo apontando pra ele), REUSA o bloco e `ldaddal` +1 no contador
+/// (`block+0`, compartilhado — correto p/ múltiplos Handles ao MESMO objeto, ex. `self` sendo
+/// devolvido em cadeia); senão ALOCA 8 bytes do pool `red::memory::PoolStorageProxy<PoolRefCount>
+/// ::Allocate` (achado nos símbolos demangled — MESMO pool nomeado "PoolRefCount"), inicializa
+/// `{1,1}` (2×u32: campo+0=1, campo+4=1 — o `+4` bate EXATO com o offset que a rotina de release
+/// decrementa via `ldaddal`) e REGISTRA o par `(aPtr,bloco)` na tabela de weak-owner (`bl
+/// 0x1021868f8`) pra Handles futuros ao MESMO ponteiro reusarem o mesmo bloco. É a rotina REAL
+/// que o motor chama em TODO `new T()`/factory que devolve `ref<T>` — não uma reimplementação
+/// nossa do refcount.
+const ADDR_HANDLE_CTOR: u64 = 0x1_0210_4788;
 /// Tabela de handlers de opcode da VM redscript (__DATA.__common, preenchida em
 /// runtime). `OPCODE_TABLE[*code](ctx, frame, &out, 0)` lê UM valor do frame.
 /// Achado desmontando funcOperatorAdd<int> (lê 2 params via essa tabela).
@@ -123,6 +145,19 @@ unsafe fn type_inst_free(ty: *mut c_void, inst: *mut c_void, size: usize) {
 }
 
 unsafe fn read_params_inner(func: *mut c_void, frame: *mut c_void, consume: bool) -> Vec<(u64, u64)> {
+    read_params_inner_ext(func, frame, consume, None)
+}
+
+/// Núcleo de `read_params_inner` + captura OPCIONAL de valores `String` (2026-07-13, fecha
+/// `cw-utils` Hash.reds/Number.reds). `strings_out[i]` = `Some(texto)` se o param `i` é String
+/// e leu OK; senão `None`. Passar `None` (via `read_params_inner`) mantém o comportamento
+/// EXATO de antes — nenhum caller existente muda.
+unsafe fn read_params_inner_ext(
+    func: *mut c_void,
+    frame: *mut c_void,
+    consume: bool,
+    mut strings_out: Option<&mut Vec<Option<String>>>,
+) -> Vec<(u64, u64)> {
     if func.is_null() || frame.is_null() {
         return Vec::new();
     }
@@ -230,6 +265,10 @@ unsafe fn read_params_inner(func: *mut c_void, frame: *mut c_void, consume: bool
             0
         };
         out.push((raw, tc));
+        if let Some(strs) = strings_out.as_deref_mut() {
+            let s = if tc == cname("String") { read_cstring(pinst as *const u8) } else { None };
+            strs.push(s);
+        }
         type_inst_free(ptype, pinst, psize);
     }
     // CONSUME=false (hooks): restaura o frame pra a original re-ler os params intactos.
@@ -251,6 +290,51 @@ pub unsafe fn read_params(func: *mut c_void, frame: *mut c_void) -> Vec<(u64, u6
 /// Lê os params CONSUMINDO (frame avançado). P/ handler de NATIVE nosso (não há original p/ re-ler).
 pub unsafe fn read_params_consuming(func: *mut c_void, frame: *mut c_void) -> Vec<(u64, u64)> {
     read_params_inner(func, frame, true)
+}
+
+/// Como `read_params_consuming`, mas TAMBÉM extrai o texto de qualquer param `String` (via
+/// `read_cstring`) — o vetor devolvido tem o MESMO tamanho e índices do `Vec<(u64,u64)>`
+/// principal; `strings[i]` é `Some(texto)` só quando o param `i` é String. Usado pelos
+/// handlers de `cw-utils` Hash.reds/Number.reds (`FNV1a64(data: script_ref<String>, ...)`).
+pub unsafe fn read_params_consuming_with_strings(func: *mut c_void, frame: *mut c_void) -> (Vec<(u64, u64)>, Vec<Option<String>>) {
+    let mut strings = Vec::new();
+    let args = read_params_inner_ext(func, frame, true, Some(&mut strings));
+    (args, strings)
+}
+
+/// Lê o conteúdo de um `red::CString` (o `String` nativo do redscript) a partir do ponteiro pro
+/// objeto (`pinst` — 0x20 bytes, layout confirmado pelo RED4ext.SDK vendorizado neste projeto,
+/// `RED4ext.SDK/include/RED4ext/CString.hpp`+`CString-inl.hpp`, ambos C++ open-source da mesma
+/// engine, layout de dados idêntico entre Windows/macOS — só vtable/dtor-count difere, já
+/// documentado em [[cp77-macos-rtti-vtable-offsets]]): união SSO de 20 bytes em `+0x00`
+/// (`inline_str[0x14]` OU `{ptr:8, unk:8, capacity:4}`), `length` (u32, com a flag "não-inline"
+/// no bit 30 = `0x40000000`) em `+0x14`, `allocator` em `+0x18`. `IsInline()` = `length <
+/// 0x40000000`; `Length()` = `length & 0x3FFFFFFF`; `c_str()` = inline_str OU o ponteiro heap.
+/// Fecha a represa de leitura de String nativa (bloqueava `cw-utils` Hash.reds/Number.reds) —
+/// achado 2026-07-13, ainda SEM confirmação in-game (layout vem do SDK, não de dump ao vivo).
+pub unsafe fn read_cstring(pinst: *const u8) -> Option<String> {
+    const CSTRING_SIZE: usize = 0x20;
+    const NOT_INLINE_FLAG: u32 = 0x4000_0000;
+    const LENGTH_MASK: u32 = 0x3FFF_FFFF;
+    if pinst.is_null() || !crate::gum::is_readable(pinst as *const c_void, CSTRING_SIZE) {
+        return None;
+    }
+    let length_raw = (pinst.add(0x14) as *const u32).read_unaligned();
+    let length = (length_raw & LENGTH_MASK) as usize;
+    if length == 0 {
+        return Some(String::new());
+    }
+    let is_inline = length_raw < NOT_INLINE_FLAG;
+    let text_ptr = if is_inline {
+        pinst // union começa em +0x00; inline_str É o próprio início do objeto
+    } else {
+        rd_ptr(pinst) as *const u8 // union.str.ptr, também em +0x00
+    };
+    if text_ptr.is_null() || !crate::gum::is_readable(text_ptr as *const c_void, length) {
+        return None;
+    }
+    let bytes = std::slice::from_raw_parts(text_ptr, length);
+    Some(String::from_utf8_lossy(bytes).into_owned())
 }
 
 #[inline]
@@ -848,6 +932,22 @@ pub unsafe fn new_object(reg: &Registry, class_name: &str) -> *mut c_void {
     mem
 }
 
+/// Constrói um `ref<T>` REAL (16 bytes: `{instance, refCountBlock}`) a partir de um ponteiro de
+/// objeto cru, chamando a rotina do PRÓPRIO MOTOR (`ADDR_HANDLE_CTOR`, ver nota lá) — NÃO uma
+/// reimplementação nossa do refcount. `obj==null` produz um handle nulo válido (a própria rotina
+/// trata isso). Escreve diretamente em `out` (16 bytes; caller garante espaço, mesmo contrato de
+/// `write_handle_ret` que substitui) — usar em TODA função que devolve uma instância NOVA/self de
+/// classe forjada (ex.: `RegisterCallback` devolvendo o handler recém-criado; `AddTarget`/
+/// `SetLifetime`/etc. devolvendo `self` pra encadeamento — nesse caso a rotina acha o bloco JÁ
+/// existente do objeto via a tabela de weak-owner e só incrementa, não duplica).
+pub unsafe fn make_handle(out: *mut c_void, obj: *mut c_void) {
+    if out.is_null() {
+        return;
+    }
+    let ctor: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(crate::rebase(ADDR_HANDLE_CTOR));
+    ctor(out, obj);
+}
+
 /// True se `cls` (CClass*) deriva de IScriptable (tem o campo nativeType@0x30). Sobe a
 /// cadeia de parents (cls+0x10) comparando o nome do tipo. Evita corromper STRUCT puro.
 unsafe fn derives_from_iscriptable(cls: *mut c_void) -> bool {
@@ -1225,9 +1325,16 @@ pub enum Arg {
 
 /// Invoca `rf` com `ctx` e `args`. Monta locals + CProperty sintética por arg +
 /// bytecode (LocalVar 0x18 … ParamEnd 0x26) + o CScriptStackFrame, e chama o
-/// executor. Devolve os 16 bytes de retorno cru. `None` se algo estiver torto
+/// executor. Devolve os bytes de retorno cru. `None` se algo estiver torto
 /// (evita crashar o jogo — diferente do throw do JS dele).
-pub unsafe fn call_func(rf: &ResolvedFn, ctx: *mut c_void, args: &[Arg]) -> Option<[u8; 16]> {
+///
+/// Tentativa 12 (2026-07-13) — `res` era `[u8;16]` (dimensionado pro maior retorno já
+/// exercitado, Vector4=16B). Uma `String` (CString) de retorno tem 0x20 bytes — escrever isso
+/// no `res` de 16B TRANSBORDARIA o stack do Rust (achado ANTES de implementar qualquer
+/// trampolim de retorno-String, evitando o bug em vez de descobri-lo ao vivo). Alargado pra
+/// 0x20; todos os chamadores existentes só leem os primeiros 4-16 bytes, então continuam
+/// funcionando sem mudança (é puramente aditivo).
+pub unsafe fn call_func(rf: &ResolvedFn, ctx: *mut c_void, args: &[Arg]) -> Option<[u8; 0x20]> {
     let fb = rf.func as *const u8;
     let p_entries = rd_ptr(fb.add(0x28)) as *const u8;
     let p_count = rd_u32(fb.add(0x30));
@@ -1290,7 +1397,7 @@ pub unsafe fn call_func(rf: &ResolvedFn, ctx: *mut c_void, args: &[Arg]) -> Opti
     (fr.as_mut_ptr().add(0x18) as *mut *mut c_void).write_unaligned(locals.as_mut_ptr() as *mut c_void);
     (fr.as_mut_ptr().add(0x40) as *mut *mut c_void).write_unaligned(ctx);
 
-    let mut res = [0u8; 16];
+    let mut res = [0u8; 0x20];
     let exec: extern "C" fn(*mut c_void, *mut c_void, *mut c_void, *mut c_void, *mut c_void) =
         std::mem::transmute(rebase(ADDR_EXEC));
     exec(
@@ -1342,9 +1449,9 @@ pub unsafe fn from_tdbid(reg: &Registry, name: &str) -> Option<[u8; 16]> {
 
 /// Lê o FromTDBID capturado pela sonda em /tmp/cp77-fromtd.txt (fn/ctx/ret).
 unsafe fn read_fromtd() -> Option<(*mut c_void, *mut c_void, *mut c_void)> {
-    // Captura NATIVA (nativo): o hook do executor publica fn/ctx/ret do FromTDBID em
+    // Captura NATIVA (sem frida): o hook do executor publica fn/ctx/ret do FromTDBID em
     // atomics quando o jogo o chama. Antes vinha de /tmp/cp77-fromtd.txt escrito pela
-    // sonda antiga — endereço de OUTRA sessão (ASLR) = morto = crash.
+    // sonda frida — endereço de OUTRA sessão (ASLR) = morto = crash.
     use std::sync::atomic::Ordering;
     let c = crate::selfboot::FROMTD_CTX.load(Ordering::Relaxed);
     if c.is_null() {
@@ -1356,4 +1463,75 @@ unsafe fn read_fromtd() -> Option<(*mut c_void, *mut c_void, *mut c_void)> {
         return None;
     }
     Some((f, c, r))
+}
+
+#[cfg(test)]
+mod cstring_tests {
+    use super::read_cstring;
+
+    /// Monta um buffer de 0x20 bytes no layout do RED4ext::CString (SSO inline): os primeiros
+    /// `s.len()` bytes de `text.inline_str`, resto zerado, `length` (sem a flag 0x40000000) em
+    /// +0x14, `allocator` (irrelevante pra leitura) em +0x18.
+    fn make_inline_cstring(s: &str) -> [u8; 0x20] {
+        let mut buf = [0u8; 0x20];
+        let bytes = s.as_bytes();
+        assert!(bytes.len() <= 0x14, "teste só cobre o caso inline (<=20 bytes)");
+        buf[..bytes.len()].copy_from_slice(bytes);
+        buf[0x14..0x18].copy_from_slice(&(bytes.len() as u32).to_le_bytes()); // length, bit30=0
+        buf
+    }
+
+    /// Monta um buffer heap-alocado: `text.str.ptr` aponta pro `heap_buf` externo, `length` com
+    /// a flag 0x40000000 (não-inline) OR o tamanho real.
+    fn make_heap_cstring(heap_ptr: *const u8, len: usize) -> [u8; 0x20] {
+        let mut buf = [0u8; 0x20];
+        buf[0x00..0x08].copy_from_slice(&(heap_ptr as u64).to_le_bytes()); // text.str.ptr
+        let length_raw = 0x4000_0000u32 | (len as u32);
+        buf[0x14..0x18].copy_from_slice(&length_raw.to_le_bytes());
+        buf
+    }
+
+    #[test]
+    fn le_string_inline_curta() {
+        let buf = make_inline_cstring("oi");
+        unsafe {
+            assert_eq!(read_cstring(buf.as_ptr()), Some("oi".to_string()));
+        }
+    }
+
+    #[test]
+    fn le_string_inline_no_limite_20_bytes() {
+        let s = "12345678901234567890"[..20].to_string(); // exatamente 0x14 bytes
+        let buf = make_inline_cstring(&s);
+        unsafe {
+            assert_eq!(read_cstring(buf.as_ptr()), Some(s));
+        }
+    }
+
+    #[test]
+    fn le_string_heap_alocada_maior_que_sso() {
+        let heap_data = b"esta string e maior que 20 bytes com certeza".to_vec();
+        let buf = make_heap_cstring(heap_data.as_ptr(), heap_data.len());
+        unsafe {
+            assert_eq!(
+                read_cstring(buf.as_ptr()),
+                Some(String::from_utf8(heap_data).unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn string_vazia() {
+        let buf = make_inline_cstring("");
+        unsafe {
+            assert_eq!(read_cstring(buf.as_ptr()), Some(String::new()));
+        }
+    }
+
+    #[test]
+    fn ponteiro_nulo_e_seguro() {
+        unsafe {
+            assert_eq!(read_cstring(std::ptr::null()), None);
+        }
+    }
 }

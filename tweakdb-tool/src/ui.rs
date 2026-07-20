@@ -308,7 +308,7 @@ fn api_apply(st: &State, body: &str, is_yaml: bool, check_only: bool) -> String 
             Ok(o) => o,
             Err(e) => return jerror(&e),
         };
-        for r in crate::tweakxl::apply_ops(&mut model, &st.names, &ops) {
+        for r in crate::writer::apply_ops(&mut model, &st.names, &ops) {
             if r.ok {
                 ok += 1;
             } else {
