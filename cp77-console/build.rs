@@ -17,5 +17,15 @@ fn main() {
     // alinhamento (não são necessárias pra carregar).
     println!("cargo:rustc-link-arg=-Wl,-no_function_starts");
     println!("cargo:rustc-link-arg=-Wl,-no_data_in_code_info");
+    // Carimbo de build: identifica QUAL dylib está rodando. Sem isto, "o jogo pegou a versão
+    // nova?" só dá pra responder comparando timestamps por fora — e errar isso já custou várias
+    // rodadas de diagnóstico em cima de um binário velho. `rerun-if-changed` nos fontes garante
+    // que o carimbo muda sempre que o código muda.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    println!("cargo:rustc-env=BWMS_BUILD_STAMP={stamp}");
+    println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=build.rs");
 }

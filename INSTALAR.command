@@ -108,7 +108,9 @@ for c in \
   "$HOME/GOG Games/Cyberpunk 2077" \
   "/Applications/Cyberpunk 2077" \
   "/Users/Shared/Epic Games/Cyberpunk 2077" \
+  "/Users/Shared/Epic Games/Cyberpunk2077" \
   "$HOME/Library/Application Support/Epic/Cyberpunk 2077" \
+  "$HOME/Library/Application Support/Epic/Cyberpunk2077" \
   "$(cd "$HERE/.." 2>/dev/null && pwd)/Cyberpunk 2077" \
   "$(cd "$HERE/../.." 2>/dev/null && pwd)" ; do
   if is_game "$c"; then GAME="$c"; break; fi

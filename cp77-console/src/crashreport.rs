@@ -244,12 +244,15 @@ fn red4ext_dir() -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Linha "Game build: <Steam|GOG|Unknown> — v2.31 supported: <yes|no>". Reusa a detecção de build
-/// (prólogo do executor) e o gate golden de versão já existentes.
+/// Linha "Game build: <Steam|GOG|Epic|Unknown> — v2.31 supported: <yes|no>". Reusa a detecção de
+/// build (prólogo do executor) e o gate golden de versão já existentes.
 fn build_line() -> String {
     let build = match crate::game_build() {
         crate::GameBuild::Steam => "Steam",
         crate::GameBuild::Gog => "GOG",
+        // Epic: mapa PARCIAL (ver `steam_to_epic`) — o build é reconhecido, mas várias
+        // features ficam inertes. O sufixo evita ler o relatório como paridade completa.
+        crate::GameBuild::Epic => "Epic (partial map)",
         crate::GameBuild::Unknown => "Unknown",
     };
     let supported = if crate::build_supported() { "yes" } else { "no" };

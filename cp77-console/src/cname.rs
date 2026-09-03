@@ -46,7 +46,19 @@ pub fn resolve_cname(hash: u64) -> String {
     }
     unsafe {
         type Get = unsafe extern "C" fn(u64) -> *const i8;
-        let get: Get = core::mem::transmute(crate::rebase(VM_CNAMEPOOL_GET));
+        // `rebase` devolve NULL quando o vmaddr não está no mapa do build (GOG/Epic parcial).
+        // O contrato dele diz que "todo call-site trata null como não-instala", mas AQUI o
+        // ponteiro era transmutado e CHAMADO direto — num build sem `CNamePool::Get` mapeado
+        // isso é um `blr xzr`: SIGSEGV em 0x0. Confirmado no Epic (2026-09-01): crash em
+        // `resolve_cname` <- `resolve_global_function_robust` <- `register_all`, com a linha
+        // `[rebase] vmaddr 0x1034528e8 sem mapa Epic -> SKIP` imediatamente antes no log.
+        // Sem o pool, o nome simplesmente não é reversível — "" é a mesma resposta que já
+        // damos pra hash desconhecido, então degradar aqui é correto e não perde informação.
+        let f = crate::rebase(VM_CNAMEPOOL_GET);
+        if f.is_null() {
+            return String::new();
+        }
+        let get: Get = core::mem::transmute(f);
         let p = get(hash);
         if p.is_null() || !crate::gum::is_readable(p as *const std::ffi::c_void, 1) {
             return String::new();

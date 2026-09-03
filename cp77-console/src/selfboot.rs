@@ -1528,8 +1528,16 @@ unsafe fn diag_class_forge_prediction(reg: &rtti::Registry, tag: &str, class_nam
     let cls = reg.class_by_name(class_name);
     let igs = reg.class_by_name("IGameSystem");
     crate::log(&format!("[classval-probe] {tag} diag: {class_name}={cls:p} IGameSystem={igs:p}"));
-    let getter: extern "C" fn() -> *mut c_void = std::mem::transmute(crate::rebase(0x1_0223_809c));
-    let expected_base = getter(); // sempre IScriptable (universal, confirmado p/ Codeware)
+    // `rebase` devolve null quando o vmaddr não está no mapa do build (GOG/Epic parcial) —
+    // transmutar e chamar direto vira `blr xzr` (SIGSEGV em 0x0). Degradar pra base nula é
+    // seguro: a comparação abaixo simplesmente não casa e `found` fica false.
+    let gp = crate::rebase(0x1_0223_809c);
+    let expected_base = if gp.is_null() {
+        core::ptr::null_mut()
+    } else {
+        let getter: extern "C" fn() -> *mut c_void = std::mem::transmute(gp);
+        getter() // sempre IScriptable (universal, confirmado p/ Codeware)
+    };
     let mut cur = cls;
     let mut found = false;
     for depth in 0..16u32 {
@@ -1560,8 +1568,14 @@ unsafe fn diag_class_forge_prediction(reg: &rtti::Registry, tag: &str, class_nam
             crate::log(&format!("[classval-probe] {tag}: sem base declarada explícita (inesperado — o .reds tem extends)"));
         } else if crate::gum::is_readable(decl_base_desc.add(8) as *const c_void, 8) {
             let decl_cname = core::ptr::read_unaligned(decl_base_desc.add(8) as *const u64);
-            let getter2: extern "C" fn() -> *mut c_void = std::mem::transmute(crate::rebase(0x1_0218_85a0));
-            let singleton = getter2();
+            // guard de null: o `if !singleton.is_null()` logo abaixo já trata a degradação.
+            let g2 = crate::rebase(0x1_0218_85a0);
+            let singleton = if g2.is_null() {
+                core::ptr::null_mut()
+            } else {
+                let getter2: extern "C" fn() -> *mut c_void = std::mem::transmute(g2);
+                getter2()
+            };
             if !singleton.is_null() && crate::gum::is_readable(singleton as *const c_void, 8) {
                 let vt = core::ptr::read_unaligned(singleton as *const *mut u8);
                 if !vt.is_null() && crate::gum::is_readable(vt.add(0x108) as *const c_void, 8) {
@@ -2110,8 +2124,14 @@ unsafe extern "C" fn class_validate_probe_hook(
     if diag && name_hash == Some(cw_hash) {
         if let Some(reg) = crate::rtti::Registry::obtain() {
             let cw_cls = reg.class_by_name("Codeware");
-            let getter: extern "C" fn() -> *mut c_void = std::mem::transmute(crate::rebase(0x1_0223_809c));
-            let expected_base = getter();
+            // idem ao guard de `class_validate_probe_hook`: sem mapa, base nula em vez de blr xzr.
+            let gp = crate::rebase(0x1_0223_809c);
+            let expected_base = if gp.is_null() {
+                core::ptr::null_mut()
+            } else {
+                let getter: extern "C" fn() -> *mut c_void = std::mem::transmute(gp);
+                getter()
+            };
             let iscriptable = reg.class_by_name("IScriptable");
             crate::log(&format!(
                 "[classval-probe] IsKindOf diag: Codeware={cw_cls:p} expected_base(getter)={expected_base:p} IScriptable(by_name)={iscriptable:p} (bate={})",
@@ -2170,8 +2190,14 @@ unsafe extern "C" fn class_validate_probe_hook(
                     let decl_cname = core::ptr::read_unaligned(decl_base_desc.add(8) as *const u64);
                     let decl_name = crate::cname::resolve_cname(decl_cname);
                     crate::log(&format!("[classval-probe] base declarada: CName={decl_cname:#018x} nome='{decl_name}'"));
-                    let getter2: extern "C" fn() -> *mut c_void = std::mem::transmute(crate::rebase(0x1_0218_85a0));
-                    let singleton2 = getter2();
+                    // guard de null (idem acima): o `if !singleton2.is_null()` trata o resto.
+                    let g2b = crate::rebase(0x1_0218_85a0);
+                    let singleton2 = if g2b.is_null() {
+                        core::ptr::null_mut()
+                    } else {
+                        let getter2: extern "C" fn() -> *mut c_void = std::mem::transmute(g2b);
+                        getter2()
+                    };
                     if !singleton2.is_null() && crate::gum::is_readable(singleton2 as *const c_void, 8) {
                         let vt = core::ptr::read_unaligned(singleton2 as *const *mut u8);
                         if !vt.is_null() && crate::gum::is_readable(vt.add(0x108) as *const c_void, 8) {
@@ -3211,13 +3237,19 @@ unsafe extern "C" fn proc_requests_replacement(
         SAVE_ARM_IN.store(true, Ordering::Relaxed);
         let k = SAVE_ARM_FIRES.fetch_add(1, Ordering::Relaxed);
         let before = (svc.add(0x503) as *const u8).read();
-        let arm: unsafe extern "C" fn(*mut u8, u32) =
-            std::mem::transmute(crate::rebase(SAVE_ARM_FN_VM));
-        arm(svc, 2);
-        let after = (svc.add(0x503) as *const u8).read();
-        crate::log(&format!(
-            "[savearm] #{k} chamei 0x100d68c88(service,2) NO MENU tick={n} byte {before}->{after} (monta o scan)"
-        ));
+        // guard de null: sem mapa pro build, não há o que armar — pular em vez de blr xzr.
+        // (não é `return`: esta função devolve `usize` e o resto do tick ainda tem que rodar.)
+        let ap = crate::rebase(SAVE_ARM_FN_VM);
+        if ap.is_null() {
+            crate::log("[savearm] sem mapa pra SAVE_ARM_FN neste build -> pulando (inerte)");
+        } else {
+            let arm: unsafe extern "C" fn(*mut u8, u32) = std::mem::transmute(ap);
+            arm(svc, 2);
+            let after = (svc.add(0x503) as *const u8).read();
+            crate::log(&format!(
+                "[savearm] #{k} chamei 0x100d68c88(service,2) NO MENU tick={n} byte {before}->{after} (monta o scan)"
+            ));
+        }
         SAVE_ARM_IN.store(false, Ordering::Relaxed);
     }
     let orig = ORIG_PROC_REQUESTS.load(Ordering::Relaxed);

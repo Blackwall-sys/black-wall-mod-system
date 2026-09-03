@@ -42,6 +42,10 @@ extern "C" {
 #[link(name = "CoreGraphics", kind = "framework")]
 extern "C" {
     fn CGAssociateMouseAndMouseCursorPosition(connected: bool) -> i32;
+    /// Não existe getter pro estado de "associado"; a VISIBILIDADE do cursor é o proxy fiel:
+    /// no menu o jogo mostra o cursor (e o mantém acoplado), em gameplay ele esconde (e
+    /// desacopla p/ o mouse-look). Lido ANTES de mexermos, serve pra RESTAURAR no fechamento.
+    fn CGCursorIsVisible() -> bool;
 }
 
 #[inline]
@@ -254,6 +258,14 @@ fn letter_key(kc: u16) -> Option<imgui::Key> {
 }
 
 static ORIG_PRESENT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// Originais das VARIANTES de present. O jogo não usa só `presentDrawable:` — com frame
+/// pacing ligado ele chama `presentDrawable:afterMinimumDuration:` (confirmado ao vivo por
+/// breakpoint: `-[_MTLCommandBuffer presentDrawable:afterMinimumDuration:]` na thread
+/// `redDispatcher15`). Swizzlar só a variante simples faz o hook INSTALAR mas nunca DISPARAR:
+/// o overlay fica invisível enquanto o hook de input (sendEvent, separado) segue funcionando —
+/// o sintoma é "o cursor muda e o mouse do jogo trava, mas não aparece painel".
+static ORIG_PRESENT_AFTER_MIN: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static ORIG_PRESENT_AT_TIME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static ORIG_SENDEVENT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Injeta um key press (keyDown+keyUp) no app via NSEvent + sendEvent original — SEM acessibilidade,
@@ -494,6 +506,9 @@ pub unsafe fn inject_key(keycode: u16, chars: &str) {
 static LOGGED: AtomicBool = AtomicBool::new(false);
 static SHOW: AtomicBool = AtomicBool::new(false); // começa ESCONDIDO (` abre)
 static PREV_SHOW: AtomicBool = AtomicBool::new(false); // p/ detectar a borda fechar→devolver o mouse
+/// Estado do cursor ANTES de abrirmos o overlay, pra restaurar igual ao fechar.
+/// Ver `CGCursorIsVisible` acima: true = estávamos num menu (cursor livre), false = gameplay.
+static CURSOR_WAS_VISIBLE: AtomicBool = AtomicBool::new(false);
 /// `cet-lifecycle-events`: bordas abrir/fechar do overlay, sinalizadas AQUI (thread do render, via
 /// presentDrawable) mas consumidas+disparadas (`fire_event`) de dentro do `cp77_tick` (thread do
 /// jogo) — chamar a VM/redscript fora da thread do jogo é arriscado (lição desta sessão: 3ptest/
@@ -931,7 +946,7 @@ impl UiState {
         }
         let help_pushed = self.log_lines.len() - saved_log_len - 0; // linhas de help adicionadas
         let help_ok = help_pushed >= HELP_LINES.len()
-            && self.log_lines.iter().any(|l| l.contains("↑/↓ navegam o histórico"));
+            && self.log_lines.iter().any(|l| l.contains("↑/↓ browse the history"));
 
         let hist_ok = up1 == "give Items.wsp_smg 1"   // ↑ pega o MAIS RECENTE (último digitado)
             && up2 == "godmode"
@@ -1152,6 +1167,48 @@ unsafe fn init_renderer(dev: &metal::DeviceRef, pixfmt: u64) -> Option<Renderer>
     ctx.io_mut().config_mac_os_behaviors = true;
     apply_theme(ctx.style_mut(), load_theme());
 
+    // Fonte com cobertura ESTENDIDA. A default do imgui (ProggyClean) só cobre Latin-1, então
+    // qualquer idioma com Latin Extended-A saía com "?" no lugar da letra — em turco isso atinge
+    // ş/ı/ğ, e "Eşyalar" virava "E?yalar". O ■ do badge (U+25A0) caía no mesmo buraco.
+    // Carrega uma monoespaçada do sistema; se nenhuma abrir, o imgui monta a default sozinho e a
+    // UI continua funcionando (só volta a perder os acentos estendidos).
+    {
+        // Terminado em 0. Precisa cobrir TUDO que a UI escreve, não só as letras: o `help` usa
+        // setas (→ ↑ ↓) e as respostas de comando usam travessão (—). Faltando esses, a linha sai
+        // com "?" no meio e parece erro de execução, não de fonte.
+        const RANGES: &[u32] = &[
+            0x0020, 0x00FF, // Latin-1
+            0x0100, 0x017F, // Latin Extended-A (ş ı ğ Ş İ Ğ …)
+            0x2010, 0x203A, // pontuação geral (– — ' ' " ")
+            0x2190, 0x21FF, // setas (← ↑ → ↓)
+            0x25A0, 0x25FF, // formas geométricas (o ■ do badge)
+            0,
+        ];
+        const CANDIDATES: [&str; 3] = [
+            "/System/Library/Fonts/SFNSMono.ttf",
+            "/System/Library/Fonts/Supplemental/Andale Mono.ttf",
+            "/System/Library/Fonts/Supplemental/Courier New.ttf",
+        ];
+        let mut picked: Option<&str> = None;
+        for path in CANDIDATES {
+            let Ok(data) = std::fs::read(path) else { continue };
+            ctx.fonts().add_font(&[imgui::FontSource::TtfData {
+                data: &data,
+                size_pixels: 14.0,
+                config: Some(imgui::FontConfig {
+                    glyph_ranges: imgui::FontGlyphRanges::from_slice(RANGES),
+                    ..Default::default()
+                }),
+            }]);
+            picked = Some(path);
+            break;
+        }
+        match picked {
+            Some(p) => crate::log(&format!("[overlay] fonte: {p}")),
+            None => crate::log("[overlay] sem fonte de sistema — default do imgui (sem Latin Extended-A)"),
+        }
+    }
+
     // Atlas de fonte → textura Metal.
     let (tw, th, data) = {
         let atlas = ctx.fonts().build_rgba32_texture();
@@ -1262,16 +1319,25 @@ unsafe fn init_renderer(dev: &metal::DeviceRef, pixfmt: u64) -> Option<Renderer>
 /// Os 4 estilos estéticos do Cyberpunk 2077 como temas: nome + tagline.
 /// Texto do comando `help` — só os comandos PRÁTICOS de cheat (o que o hint do campo já anuncia),
 /// não a lista inteira de comandos internos de dev/RE (esses ficam em CODEBASE.md, não na UI).
-const HELP_LINES: [&str; 9] = [
-    "comandos: money N | give Items.X [N] | remove Items.X [N] | godmode [off] | heal | level N",
-    "          summon (chama veículo) | attrs/perks/relic N (pontos) | hasgod (consulta)",
-    "atalhos: ↑/↓ navegam o histórico de comandos já digitados nesta sessão.",
-    "'Items.X' = TweakDBID do item (ex: Items.money, Items.PreventionEliteBundle_Cyberware).",
+const HELP_LINES: [&str; 18] = [
+    "commands: money N | give Items.X [N] | remove Items.X [N] | godmode [off] | heal | level N",
+    "          summon (calls a vehicle) | attrs/perks/relic N (points) | hasgod (query)",
+    "          ram (refill cyberdeck RAM) | ram on|off (keep it full)",
+    "          cloak on|off (NPCs stop attacking you — they can still see you)",
+    "          ammo on|off (huge magazine + the ammo reserve kept topped up)",
+    "          se <Record> [on|off] (apply any status effect by name)",
+    "          se? <Record> (ask the game whether the effect is on you)",
+    "          stat <Name> [v] | statw <Name> [v] (stat modifier on you / on the held weapon)",
+    "          stat? <Name> | statw? <Name> (read it) | stat- <Name> (undo ours)",
+    "          funcs <Class> [filter] | findfunc <filter> (real RTTI names: class / global)",
+    "          se <Record> [off] | se? <Record> (status effects, by record name)",
+    "keys: ↑/↓ browse the history of commands typed this session.",
+    "'Items.X' = the item's TweakDBID (e.g. Items.money, Items.PreventionEliteBundle_Cyberware).",
     "",
-    "exemplos:",
-    "  money 5000            → dá 5000 eddies",
-    "  give Items.wsp_smg 1   → dá 1 unidade do item",
-    "  godmode                → liga o modo deus (godmode off desliga)",
+    "examples:",
+    "  money 5000             → gives 5000 eddies",
+    "  give Items.wsp_smg 1   → gives 1 unit of the item",
+    "  godmode                → turns god mode on (godmode off turns it back off)",
 ];
 
 const THEMES: [(&str, &str); 4] = [
@@ -1369,8 +1435,40 @@ fn apply_theme(style: &mut imgui::Style, idx: usize) {
     style.colors[TabActive as usize] = p[3];
 }
 
+/// Saída PRÓPRIA do console (aba Console), independente do `log()`.
+///
+/// POR QUE existe: as respostas de comando (`[console] ...`) saíam por `log()`, que é NO-OP no
+/// build público — então digitar `help` ou `give` não mostrava nada e a ferramenta parecia
+/// quebrada. Pior: a aba Console era sobrescrita com `tail_log(60)` a cada 30 frames, então
+/// mesmo o que o overlay escrevia direto (as linhas do `help`) sumia meio segundo depois.
+/// Agora a aba Console lê DAQUI (sempre ligado, limitado) e o log segue só pro K-LOG/arquivo.
+static CONSOLE_OUT: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+const CONSOLE_OUT_MAX: usize = 400;
+
+/// Empurra uma linha pra aba Console. Barato e sem alocação no caminho de render.
+pub fn console_out(line: &str) {
+    if let Ok(mut v) = CONSOLE_OUT.lock() {
+        v.push(line.to_string());
+        if v.len() > CONSOLE_OUT_MAX {
+            let drop = v.len() - CONSOLE_OUT_MAX;
+            v.drain(..drop);
+        }
+    }
+}
+
+/// Limpa a saída do console (botão/limpeza da view).
+pub fn console_out_clear() {
+    if let Ok(mut v) = CONSOLE_OUT.lock() {
+        v.clear();
+    }
+}
+
+fn console_out_lines() -> Vec<String> {
+    CONSOLE_OUT.lock().map(|v| v.clone()).unwrap_or_default()
+}
+
 /// Últimas `n` linhas do log do console (a saída pra aba Console).
-// Marca de "clear": a view do console só mostra as linhas APÓS este índice (ex.: esconde o
+// Marca de "limpar": a view do console só mostra as linhas APÓS este índice (ex.: esconde o
 // spam de boot na 1a abertura do overlay). O arquivo /tmp/cp77-console.log fica intacto (debug).
 static LINE_CLEAR: AtomicU32 = AtomicU32::new(0);
 pub fn clear_console_view() {
@@ -1636,7 +1734,7 @@ fn build_badge(ui: &imgui::Ui, ticks: u64) {
 
 /// Constrói a UI: abas Console (terminal) / Items (busca+pin) / Game cheats.
 fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
-    ui.window("BWMS  //  CP2077 console  ( ` alterna )")
+    ui.window(crate::i18n::t("hdr.title"))
         .size([660.0, 460.0], imgui::Condition::FirstUseEver)
         // longe do topo: em janela, a barra de título do macOS rouba o clique perto da borda.
         .position([60.0, 150.0], imgui::Condition::FirstUseEver)
@@ -1654,11 +1752,35 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                     ui.tooltip_text(tag);
                 }
             }
-            ui.text_disabled(format!("tema: {} - {}", THEMES[st.theme].0, THEMES[st.theme].1));
+            ui.text_disabled(format!("{}: {} - {}", crate::i18n::t("hdr.theme"), THEMES[st.theme].0, THEMES[st.theme].1));
+            // Seletor de idioma. O idioma da sessão já foi resolvido (OnceLock, ver `i18n`), então
+            // clicar aqui GRAVA o override e avisa que vale no próximo boot — em vez de trocar
+            // metade dos rótulos no meio do frame e parecer quebrado.
+            {
+                let cur = crate::i18n::lang();
+                ui.text_disabled(format!("{}:", crate::i18n::t("hdr.language")));
+                for l in crate::i18n::Lang::ALL {
+                    ui.same_line();
+                    let sel = l == cur;
+                    if sel {
+                        ui.text(l.label());
+                    } else if ui.button(format!("{}##lang{}", l.label(), l.code())) {
+                        crate::i18n::set_override(l);
+                    }
+                }
+                ui.same_line();
+                ui.text_disabled(format!("({})", crate::i18n::t("hdr.language_next_boot")));
+                // Carimbo do build. Existe porque "o jogo pegou a versão nova?" não era
+                // respondível de dentro: o dylib só é lido no arranque, então um teste feito
+                // logo depois de instalar pode estar rodando o binário ANTERIOR e parecer que a
+                // correção não funcionou. Agora dá pra conferir num relance.
+                ui.same_line();
+                ui.text_disabled(format!("| build {}", crate::build_stamp()));
+            }
             ui.separator();
             if let Some(_tb) = ui.tab_bar("##tabs") {
                 // ---- CONSOLE: terminal puro (saída em cima, comando embaixo) ----
-                if let Some(_t) = ui.tab_item("Console") {
+                if let Some(_t) = ui.tab_item(crate::i18n::t("tab.console")) {
                     ui.child_window("##out").size([0.0, -30.0]).build(|| {
                         for line in &st.log_lines {
                             ui.text_wrapped(line);
@@ -1692,6 +1814,7 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                         if !c.is_empty() {
                             if c.eq_ignore_ascii_case("help") {
                                 for line in HELP_LINES {
+                                    console_out(line);
                                     st.log_lines.push((*line).to_string());
                                 }
                             } else {
@@ -1707,10 +1830,10 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                     }
                 }
                 // ---- ITEMS: busca + Give + pin favorito ----
-                if let Some(_t) = ui.tab_item("Items") {
+                if let Some(_t) = ui.tab_item(crate::i18n::t("tab.items")) {
                     ui.set_next_item_width(330.0);
                     ui.input_text("##search", &mut st.search_buf)
-                        .hint("filtrar (ex: erebus, katana, money)")
+                        .hint(crate::i18n::t("items.filter"))
                         .build();
                     ui.same_line();
                     ui.set_next_item_width(80.0);
@@ -1727,7 +1850,7 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                         let mut shown = 0u32;
                         for row in catalog().iter() {
                             if shown >= 250 {
-                                ui.text_disabled("... refine a busca");
+                                ui.text_disabled(crate::i18n::t("items.refine"));
                                 break;
                             }
                             let [id, label, ty, _sheet] = *row;
@@ -1763,9 +1886,9 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                 }
                 // ---- FAVORITOS: itens pinados na aba Items. Os CHEATS foram removidos daqui
                 // (não duplicar) — vivem em Settings > Cheats (redscript/config). ----
-                if let Some(_t) = ui.tab_item("Favoritos") {
+                if let Some(_t) = ui.tab_item(crate::i18n::t("tab.favorites")) {
                     if !st.favorites.is_empty() {
-                        ui.text("Favoritos (pinados na aba Items):");
+                        ui.text(crate::i18n::t("fav.header"));
                         let mut remove = None;
                         for (i, (id, label)) in st.favorites.iter().enumerate() {
                             if ui.button(&format!("Give##f{i}")) {
@@ -1783,26 +1906,26 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                             st.fav_dirty = true;
                         }
                     } else {
-                        ui.text_disabled("Sem favoritos. Pinhe itens na aba Items (botao +) pra aparecerem aqui.");
+                        ui.text_disabled(crate::i18n::t("fav.empty"));
                     }
                     ui.separator();
-                    ui.text_disabled("Cheats (Godmode/Money/Perks/Level...) ficam em Settings > Cheats, sem duplicar.");
+                    ui.text_disabled(crate::i18n::t("mods.cheats_note"));
                 }
                 // ---- MODS: lista de mods BWMS instalados com toggle ativo/inativo ----
-                if let Some(_t) = ui.tab_item("Mods") {
+                if let Some(_t) = ui.tab_item(crate::i18n::t("tab.mods")) {
                     let mut badge_on = BADGE_ENABLED.load(Ordering::Relaxed);
-                    if ui.checkbox("Exibir badge (canto superior direito)", &mut badge_on) {
+                    if ui.checkbox(crate::i18n::t("klog.badge"), &mut badge_on) {
                         BADGE_ENABLED.store(badge_on, Ordering::Relaxed);
                     }
                     ui.separator();
                     let (n_active, n_inactive, n_problems) = crate::mod_scan::summary();
                     let total = n_active + n_inactive;
                     if total == 0 {
-                        if ui.button("Escanear") {
+                        if ui.button(crate::i18n::t("klog.scan")) {
                             crate::mod_scan::refresh_async();
                         }
                         ui.same_line();
-                        ui.text_disabled("Nenhum mod em BWMS/mods/ (ainda)");
+                        ui.text_disabled(crate::i18n::t("mods.empty"));
                     } else {
                         // Linha de resumo
                         ui.text(format!("{n_active} ativo{} · {n_inactive} inativo{} · {n_problems} problema{}",
@@ -1811,7 +1934,7 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                             if n_problems == 1 { "" } else { "s" },
                         ));
                         ui.same_line();
-                        if ui.button("Atualizar") {
+                        if ui.button(crate::i18n::t("mods.refresh")) {
                             crate::mod_scan::refresh_async();
                         }
                         if crate::mod_scan::NEEDS_RESTART.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1850,18 +1973,18 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                     }
                 }
                 // ---- K-LOG: captura de teclas (input/atalhos), fora do console ----
-                if let Some(_t) = ui.tab_item("K-LOG") {
+                if let Some(_t) = ui.tab_item(crate::i18n::t("tab.klog")) {
                     let mut cap = KEY_CAPTURE.load(Ordering::Relaxed);
-                    if ui.checkbox("capturar teclas (keyCode/char)", &mut cap) {
+                    if ui.checkbox(crate::i18n::t("klog.capture"), &mut cap) {
                         KEY_CAPTURE.store(cap, Ordering::Relaxed);
                     }
                     ui.same_line();
-                    if ui.button("limpar") {
+                    if ui.button(crate::i18n::t("klog.clear")) {
                         if let Ok(mut k) = KEY_LOG.lock() {
                             k.clear();
                         }
                     }
-                    ui.text_disabled("teclas capturadas com o overlay FECHADO (debug de input/atalho)");
+                    ui.text_disabled(crate::i18n::t("klog.capture_note"));
                     ui.separator();
                     ui.child_window("##klog").size([0.0, 0.0]).build(|| {
                         if let Ok(k) = KEY_LOG.lock() {
@@ -1872,7 +1995,7 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                         ui.set_scroll_here_y_with_ratio(1.0);
                     });
                 }
-                if let Some(_t) = ui.tab_item("LUT") {
+                if let Some(_t) = ui.tab_item(crate::i18n::t("tab.lut")) {
                     let cur = LUT_PRESET.load(Ordering::Relaxed);
                     ui.text(format!("Filtro ativo: {}", LUT_NAMES[cur as usize]));
                     ui.spacing();
@@ -1885,7 +2008,7 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                         }
                     }
                     ui.separator();
-                    ui.text("Efeitos (liga/desliga sobre a grade):");
+                    ui.text(crate::i18n::t("lut.effects"));
                     let mut fx = EFFECTS.load(Ordering::Relaxed);
                     for (b, name) in FX_NAMES.iter().enumerate() {
                         let bit = 1u32 << b;
@@ -1899,8 +2022,8 @@ fn build_ui(ui: &imgui::Ui, st: &mut UiState) {
                         }
                     }
                     ui.separator();
-                    ui.text_disabled("Grade (cor) + efeitos AO VIVO no frame; cada um liga/desliga.");
-                    ui.text_disabled("Em breve (precisa do upgrade do passe): Bloom, Aberracao cromatica, Barril.");
+                    ui.text_disabled(crate::i18n::t("lut.note"));
+                    ui.text_disabled(crate::i18n::t("lut.soon"));
                 }
             }
         });
@@ -1944,21 +2067,36 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
         .unwrap_or(false)
         || std::path::Path::new("/tmp/bwms-fire-start").exists();
     let boot = crate::selfboot::boot_splash_active() && (fire_start || !engagement_active());
-    if !show && !badge && !boot {
-        return;
-    }
     // Gestão do cursor: ABERTO = acopla (clicar no overlay). Ao FECHAR (borda de descida),
     // DESACOPLA p/ devolver a câmera ao jogo — sem isto o mouse-look trava depois do `,
     // porque o jogo só desacopla 1× ao entrar em gameplay e não "re-desacopla" sozinho.
+    //
+    // ORDEM IMPORTA (bug real, achado no Epic 2026-09-01): isto tem que rodar ANTES do
+    // early-return de "nada pra desenhar". Fechar o console é exatamente o caso `show=false`;
+    // se `badge` e `boot` também forem falsos, o return abaixo disparava PRIMEIRO e a borda de
+    // descida nunca era processada — o mouse ficava preso à câmera pra sempre e o mouse-look
+    // travava, embora o jogo continuasse rodando atrás. O comentário acima já descrevia esse
+    // sintoma; o que faltava era o desacople ser alcançável no frame em que o painel fecha.
     let prev_show = PREV_SHOW.swap(show, Ordering::Relaxed);
     if show {
-        CGAssociateMouseAndMouseCursorPosition(true);
         if !prev_show {
+            // ANTES de acoplar: guarda como o jogo estava, pra devolver igual no fechamento.
+            CURSOR_WAS_VISIBLE.store(CGCursorIsVisible(), Ordering::Relaxed);
             OVERLAY_OPEN_EDGE.store(true, Ordering::Relaxed); // `cet-lifecycle-events`: onOverlayOpen
         }
+        CGAssociateMouseAndMouseCursorPosition(true);
     } else if prev_show {
-        CGAssociateMouseAndMouseCursorPosition(false); // fechou agora → mouse volta pra câmera
+        // RESTAURA em vez de forçar `false`. Desacoplar sempre está certo em gameplay (mouse-look)
+        // mas ERRADO num menu: lá o cursor tem que andar livre, e forçar `false` prende ele no
+        // ponto onde estava — o item do menu fica "colado" e não dá pra navegar (achado ao vivo
+        // no Epic 2026-09-01, no menu principal). Como não há getter pro estado de acoplamento,
+        // usamos a visibilidade lida na abertura: visível = menu → re-acopla; escondido =
+        // gameplay → desacopla e a câmera volta a funcionar.
+        CGAssociateMouseAndMouseCursorPosition(CURSOR_WAS_VISIBLE.load(Ordering::Relaxed));
         OVERLAY_CLOSE_EDGE.store(true, Ordering::Relaxed); // `cet-lifecycle-events`: onOverlayClose
+    }
+    if !show && !badge && !boot {
+        return;
     }
     let w = msg_usize(tex_raw, sel("width")) as f32;
     let h = msg_usize(tex_raw, sel("height")) as f32;
@@ -1986,8 +2124,12 @@ unsafe fn render_imgui(cb_raw: Id, drawable: Id) {
     {
         FRAME_H.store(h.to_bits(), Ordering::Relaxed);
         rd.ui.frame = rd.ui.frame.wrapping_add(1);
+        // A aba Console mostra a saída PRÓPRIA do console (ver `console_out`). Antes isto
+        // sobrescrevia `log_lines` com `tail_log(60)` a cada 30 frames — o que apagava as linhas
+        // que o próprio overlay tinha acabado de escrever (o `help` sumia meio segundo depois) e,
+        // no build público, deixava a aba vazia porque o `log()` é no-op lá.
         if show && rd.ui.frame % 30 == 1 {
-            rd.ui.log_lines = tail_log(60);
+            rd.ui.log_lines = console_out_lines();
         }
         // `cet-console-history` self-test AUTOMATIZÁVEL no menu (sem HID): roda 1× no `cmd_history` REAL
         // do overlay, gate ~/.bwms-histtest (dev). Ver `run_history_selftest`.
@@ -2231,6 +2373,36 @@ extern "C" fn my_present(this: Id, cmd: Sel, drawable: Id) {
     }
 }
 
+/// `presentDrawable:afterMinimumDuration:` — o caminho que o jogo usa com frame pacing.
+/// Mesmo corpo do `my_present`, só muda a assinatura do original (recebe um `f64` a mais).
+extern "C" fn my_present_after_min(this: Id, cmd: Sel, drawable: Id, dur: f64) {
+    unsafe {
+        render_imgui(this, drawable);
+        #[cfg(feature = "capture")]
+        crate::capture::on_present(this, drawable);
+        let orig = ORIG_PRESENT_AFTER_MIN.load(Ordering::Relaxed);
+        if !orig.is_null() {
+            let f: extern "C" fn(Id, Sel, Id, f64) = std::mem::transmute(orig);
+            f(this, cmd, drawable, dur);
+        }
+    }
+}
+
+/// `presentDrawable:atTime:` — mesma ideia; ainda não observado neste build, mas é a terceira
+/// variante pública e custa duas linhas cobrir.
+extern "C" fn my_present_at_time(this: Id, cmd: Sel, drawable: Id, t: f64) {
+    unsafe {
+        render_imgui(this, drawable);
+        #[cfg(feature = "capture")]
+        crate::capture::on_present(this, drawable);
+        let orig = ORIG_PRESENT_AT_TIME.load(Ordering::Relaxed);
+        if !orig.is_null() {
+            let f: extern "C" fn(Id, Sel, Id, f64) = std::mem::transmute(orig);
+            f(this, cmd, drawable, t);
+        }
+    }
+}
+
 unsafe fn install_present_hook() {
     let dev = MTLCreateSystemDefaultDevice();
     if dev.is_null() {
@@ -2251,14 +2423,42 @@ unsafe fn install_present_hook() {
     let name = CStr::from_ptr(class_getName(cb_class))
         .to_string_lossy()
         .into_owned();
-    let m = class_getInstanceMethod(cb_class, sel("presentDrawable:"));
-    if m.is_null() {
-        crate::log(&format!("[overlay] sem presentDrawable: em {name}"));
-        return;
+    // Swizzla TODAS as variantes de present, não só a simples. Qual delas o jogo chama depende
+    // do caminho de apresentação (frame pacing/VSync), não do build da loja: neste Mac ele usa
+    // `presentDrawable:afterMinimumDuration:` (breakpoint ao vivo em
+    // `-[_MTLCommandBuffer presentDrawable:afterMinimumDuration:]`, thread `redDispatcher15`).
+    // Cobrindo as três, o overlay aparece independente do caminho escolhido.
+    let mut n = 0;
+    for (name_sel, slot, imp) in [
+        (
+            "presentDrawable:",
+            &ORIG_PRESENT,
+            my_present as Imp,
+        ),
+        (
+            "presentDrawable:afterMinimumDuration:",
+            &ORIG_PRESENT_AFTER_MIN,
+            my_present_after_min as Imp,
+        ),
+        (
+            "presentDrawable:atTime:",
+            &ORIG_PRESENT_AT_TIME,
+            my_present_at_time as Imp,
+        ),
+    ] {
+        let m = class_getInstanceMethod(cb_class, sel(name_sel));
+        if m.is_null() {
+            crate::log(&format!("[overlay] sem {name_sel} em {name}"));
+            continue;
+        }
+        slot.store(method_getImplementation(m) as *mut c_void, Ordering::Relaxed);
+        method_setImplementation(m, imp);
+        crate::log(&format!("[overlay] {name_sel} swizzlado em {name}"));
+        n += 1;
     }
-    ORIG_PRESENT.store(method_getImplementation(m) as *mut c_void, Ordering::Relaxed);
-    method_setImplementation(m, my_present as Imp);
-    crate::log(&format!("[overlay] presentDrawable: swizzlado em {name}"));
+    if n == 0 {
+        crate::log(&format!("[overlay] NENHUMA variante de present em {name} — overlay ficará invisível"));
+    }
 }
 
 pub fn start() {

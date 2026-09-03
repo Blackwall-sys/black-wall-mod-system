@@ -129,6 +129,45 @@ pub unsafe fn give(
     r
 }
 
+/// `give` sem log e com o `gameItemID` em cache. Existe pro caminho do TICK: `give` loga cinco
+/// linhas por chamada, o que afogaria o console em segundos, e `from_tdbid` é uma chamada RTTI
+/// que não precisa se repetir — o ItemID de um nome não muda durante a sessão.
+unsafe fn give_quiet(reg: &Registry, captured_player: *mut c_void, tx: *mut c_void, name: &str, qty: u32) {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<Vec<(String, [u8; 16])>>> =
+        std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(|| std::sync::Mutex::new(Vec::new()));
+    let item = {
+        let mut g = cache.lock().unwrap();
+        match g.iter().find(|(n, _)| n == name) {
+            Some((_, it)) => *it,
+            None => match rtti::from_tdbid(reg, name) {
+                Some(it) => {
+                    g.push((name.to_string(), it));
+                    it
+                }
+                None => return,
+            },
+        }
+    };
+    let owner = auth_or(reg, captured_player);
+    // `resolve_func` varre a tabela de funções da classe e a cadeia de pais A CADA chamada. No
+    // caminho do tick isso se repetiria quatro vezes por disparo sem nunca mudar de resposta.
+    static GIVE: std::sync::OnceLock<(usize, usize, bool)> = std::sync::OnceLock::new();
+    let cached = GIVE.get_or_init(|| match rtti::resolve_func(reg, "gameTransactionSystem", "GiveItem") {
+        Some(g) => (g.func as usize, g.ret_type as usize, g.is_static),
+        None => (0, 0, false),
+    });
+    if cached.0 == 0 {
+        return;
+    }
+    let gi = rtti::ResolvedFn {
+        func: cached.0 as *mut c_void,
+        ret_type: cached.1 as *mut c_void,
+        is_static: cached.2,
+    };
+    rtti::call_func(&gi, tx, &[Arg::Handle(owner, refcnt()), Arg::Item16(item), Arg::I32(qty)]);
+}
+
 /// Sistema scriptável pela via da VM: `GameInstance.GetScriptableSystemsContainer(gi).Get(CName)`.
 unsafe fn scriptable_system(
     reg: &Registry,
@@ -336,8 +375,11 @@ pub unsafe fn godmode(reg: &Registry, captured_player: *mut c_void, on: bool) ->
             return false;
         }
     };
-    // Invulnerable primeiro (dano zero); Immortal/Default como fallback.
-    for mem in ["Invulnerable", "Immortal", "Default"] {
+    // Os DOIS tipos, não o primeiro que resolver: `Invulnerable` é "não toma dano" e `Immortal`
+    // é "não morre". Parar no primeiro deixava um buraco de semântica — e, se o primeiro fosse o
+    // membro errado, o comando dizia ON tendo mandado outra coisa.
+    let mut sent = 0;
+    for mem in ["Invulnerable", "Immortal"] {
         if let Some(ev) = rtti::resolve_enum_value(reg, "gameGodModeType", mem) {
             crate::log(&format!("[god] {fname}({mem}={ev})"));
             rtti::call_func(
@@ -345,12 +387,24 @@ pub unsafe fn godmode(reg: &Registry, captured_player: *mut c_void, on: bool) ->
                 sys,
                 &[Arg::Raw(eid), Arg::Enum(ev), Arg::CName(cname("Console"))],
             );
-            crate::log(&format!("[god] godmode {} ({mem}) enviado", if on { "ON" } else { "OFF" }));
-            return true;
+            sent += 1;
         }
     }
-    crate::log("[god] nenhum membro de gameGodModeType resolveu");
-    false
+    if sent == 0 {
+        crate::log("[god] nenhum membro de gameGodModeType resolveu");
+        return false;
+    }
+    // O jogo responde: `HasGodMode` é a mesma leitura que o menu ESC usa pro rótulo.
+    crate::log(&format!(
+        "[god] {} enviado ({sent} tipo(s)) — jogo confirma: {}",
+        if on { "ON" } else { "OFF" },
+        match hasgod(reg, captured_player) {
+            Some(true) => "SIM",
+            Some(false) => "nao",
+            None => "?(HasGodMode não resolveu)",
+        }
+    ));
+    true
 }
 
 /// `redscript-cheat-effects-proof` (2026-07-13) — checagem READ-ONLY de `HasGodMode` (mesma
@@ -410,7 +464,10 @@ pub unsafe fn level(reg: &Registry, captured_player: *mut c_void, n: u32) -> boo
 }
 
 /// Cura a Health pro máximo via `gameStatPoolsSystem.RequestSettingStatPoolValue`.
-pub unsafe fn heal(reg: &Registry, captured_player: *mut c_void) -> bool {
+/// Escreve um StatPool do jogador (Health/Stamina/Memory) via
+/// `gameStatPoolsSystem::RequestSettingStatPoolValue`. Base compartilhada de `heal` e `ram`:
+/// os três pools usam a MESMA chamada, só muda o valor do enum `gamedataStatPoolType`.
+unsafe fn set_pool(reg: &Registry, captured_player: *mut c_void, pool: &str, value: f32, tag: &str) -> bool {
     let owner = auth_or(reg, captured_player);
     let gi = match get_gi(reg, owner) {
         Some(b) => b,
@@ -418,7 +475,7 @@ pub unsafe fn heal(reg: &Registry, captured_player: *mut c_void) -> bool {
     };
     let sps = system_flex(reg, owner, gi, "gameStatPoolsSystem", "GetStatPoolsSystem");
     if !rtti::sane(sps) {
-        crate::log("[heal] StatPoolsSystem inacessível");
+        crate::log(&format!("[{tag}] StatPoolsSystem inacessível"));
         return false;
     }
     let eid = match entity_id(reg, owner) {
@@ -428,32 +485,654 @@ pub unsafe fn heal(reg: &Registry, captured_player: *mut c_void) -> bool {
     let rs = match rtti::resolve_any(reg, &["gameStatPoolsSystem"], "RequestSettingStatPoolValue") {
         Some(g) => g,
         None => {
-            crate::log("[heal] RequestSettingStatPoolValue não resolvido");
+            crate::log(&format!("[{tag}] RequestSettingStatPoolValue não resolvido"));
             return false;
         }
     };
-    let hp = match rtti::resolve_enum_value(reg, "gamedataStatPoolType", "Health") {
+    let pv = match rtti::resolve_enum_value(reg, "gamedataStatPoolType", pool) {
         Some(v) => v,
         None => {
-            crate::log("[heal] enum gamedataStatPoolType::Health não resolvido");
+            crate::log(&format!("[{tag}] enum gamedataStatPoolType::{pool} não resolvido"));
             return false;
         }
     };
-    // (gameStatsObjectID eid, gamedataStatPoolType Health, Float 100, source null16, Bool, Bool)
+    // (gameStatsObjectID eid, gamedataStatPoolType pool, Float value, source null16, Bool, Bool)
     rtti::call_func(
         &rs,
         sps,
         &[
             Arg::Raw(eid),
-            Arg::Enum(hp),
-            Arg::F32(100.0),
+            Arg::Enum(pv),
+            Arg::F32(value),
             Arg::Raw([0u8; 16]),
             Arg::Bool(false),
             Arg::Bool(false),
         ],
     );
-    crate::log("[heal] Health=100 enviado");
     true
+}
+
+pub unsafe fn heal(reg: &Registry, captured_player: *mut c_void) -> bool {
+    let ok = set_pool(reg, captured_player, "Health", 100.0, "heal");
+    if ok {
+        crate::log("[heal] Health=100 enviado");
+    }
+    ok
+}
+
+/// "NPCs não te veem": aplica o efeito de camuflagem ÓPTICA do próprio jogo no jogador.
+///
+/// Cyberpunk já tem essa mecânica — o Optical Camo — e o estado dela é o status effect
+/// `BaseStatusEffect.Cloaked`, VERIFICADO como record existente no tweakdb.bin deste build (o
+/// TweakDBID bate na tabela de records). Usar o efeito do jogo em vez de mexer na percepção dos
+/// NPCs um a um significa que a IA continua se comportando como o jogo espera: quem trata
+/// "alvo camuflado" já está escrito e testado pela CDPR.
+///
+/// `ApplyStatusEffect(entityID, TweakDBID)` / `RemoveStatusEffect(entityID, TweakDBID)` no
+/// `gameStatusEffectSystem`. O nº de params é logado: se este build pedir mais, aparece no log em
+/// vez de falhar em silêncio.
+/// Aplica/remove um status effect do jogo no jogador, por nome de record.
+///
+/// Base de `cloak` e `infinite_ammo`: os dois são o MESMO mecanismo — um record que o jogo já
+/// define e cuja lógica a CDPR já escreveu. Usar o efeito pronto em vez de mexer no sistema por
+/// baixo (percepção dos NPCs, contador de munição) mantém a IA e o HUD coerentes.
+///
+/// Loga a aridade REAL e os tipos dos params, lidos da RTTI: mandar menos argumento do que a
+/// assinatura pede é a causa nº1 de "o comando diz ON e nada acontece", e isso vira um número na
+/// tela em vez de suposição.
+pub unsafe fn status_effect(
+    reg: &Registry,
+    captured_player: *mut c_void,
+    effect: &str,
+    on: bool,
+    tag: &str,
+) -> bool {
+    let owner = auth_or(reg, captured_player);
+    let gi = match get_gi(reg, owner) {
+        Some(b) => b,
+        None => return false,
+    };
+    let ses = system_flex(reg, owner, gi, "gameStatusEffectSystem", "GetStatusEffectSystem");
+    if !rtti::sane(ses) {
+        crate::log(&format!("[{tag}] StatusEffectSystem inacessível"));
+        return false;
+    }
+    let eid = match entity_id(reg, owner) {
+        Some(b) => b,
+        None => {
+            crate::log(&format!("[{tag}] GetEntityID falhou"));
+            return false;
+        }
+    };
+    let fname = if on { "ApplyStatusEffect" } else { "RemoveStatusEffect" };
+    let f = match rtti::resolve_any(reg, &["gameStatusEffectSystem"], fname) {
+        Some(g) => g,
+        None => {
+            crate::log(&format!("[{tag}] {fname} não resolvido"));
+            return false;
+        }
+    };
+    let tdbid = crate::cname::tweak_db_id(effect).to_le_bytes();
+    let np = rtti::param_count(&f) as usize;
+    // O tipo de RETORNO importa pra leitura do resultado: se for Void, o `01` que líamos como
+    // "deu certo" é lixo do buffer, não resposta. Logado uma vez, junto da assinatura.
+    let rty = rtti::fn_ret_type(f.func);
+    let rname = if rty.is_null() {
+        "Void".to_string()
+    } else {
+        crate::cname::resolve_cname(rtti::type_name_getname(rty))
+    };
+    let ptypes: Vec<String> = (0..np)
+        .map(|i| crate::cname::resolve_cname(rtti::fn_param_type(f.func, i)))
+        .collect();
+    crate::log(&format!(
+        "[{tag}] {fname}({}) -> {rname} params={np} static={} '{effect}' tdbid={:#018x}",
+        ptypes.join(", "),
+        f.is_static,
+        u64::from_le_bytes(tdbid)
+    ));
+    // Monta a lista com o TAMANHO pedido. Preenche por TIPO (não por posição), pra continuar
+    // valendo se outra assinatura aparecer.
+    //
+    // `instigator`: entEntityID que NÃO seja o 1o (o 1o é o alvo). Zerado = "ninguém"; vários
+    // sistemas do jogo descartam um efeito sem instigador.
+    let build_args = |instigator: [u8; 16], n: usize| -> Vec<Arg> {
+        let mut v: Vec<Arg> = vec![Arg::Raw(eid), Arg::Tdb(tdbid)];
+        for i in v.len()..n {
+            let ty = crate::cname::resolve_cname(rtti::fn_param_type(f.func, i));
+            v.push(match ty.as_str() {
+                "TweakDBID" => Arg::Tdb([0u8; 8]),
+                "Bool" => Arg::Bool(false),
+                // este Uint32 é a contagem de pilhas: 0 aplicaria "nenhuma".
+                "Uint32" => Arg::I32(1),
+                "Int32" => Arg::I32(0),
+                "entEntityID" => Arg::Raw(instigator),
+                _ => Arg::Raw([0u8; 16]), // Vector4 e afins: 16 bytes zerados
+            });
+        }
+        v
+    };
+    // Três formas plausíveis da MESMA chamada. O valor de retorno não é prova (pode ser Void),
+    // então cada uma é seguida de `HasStatusEffect` — o jogo respondendo se o efeito ESTÁ no
+    // jogador. É a única leitura que separa "não aplicou" de "aplicou e o record é inerte".
+    let variants: [(&str, Vec<Arg>); 3] = [
+        ("assinatura completa, instigator=0", build_args([0u8; 16], np)),
+        ("assinatura completa, instigator=player", build_args(eid, np)),
+        ("só os 2 obrigatórios (resto omitido)", build_args([0u8; 16], np.min(2))),
+    ];
+    let mut landed = false;
+    for (why, args) in variants {
+        let argc = args.len();
+        let r = rtti::call_func(&f, ses, &args);
+        let has = has_effect(reg, ses, eid, tdbid);
+        crate::log(&format!(
+            "[{tag}] {why}: argc={argc} ret={:02x?} has={}",
+            r.map(|v| v[0]),
+            match has {
+                Some(true) => "SIM",
+                Some(false) => "nao",
+                None => "?(HasStatusEffect não resolveu)",
+            }
+        ));
+        // Ligar: parar na 1a forma que o jogo confirma. Desligar: seguir até o efeito sumir.
+        if has == Some(on) {
+            landed = true;
+            break;
+        }
+    }
+    // DESLIGAR: cada `RemoveStatusEffect` tira UMA pilha. Rodar `cloak` várias vezes empilhou o
+    // efeito, então uma chamada só o deixa aplicado — foi o que prendeu o personagem invisível.
+    // Repete até o jogo dizer que sumiu, com teto pra nunca virar laço infinito no frame.
+    if !on && !landed {
+        let args = build_args([0u8; 16], np);
+        for i in 1..=32 {
+            rtti::call_func(&f, ses, &args);
+            if has_effect(reg, ses, eid, tdbid) == Some(false) {
+                crate::log(&format!("[{tag}] removido após {i} pilha(s)"));
+                landed = true;
+                break;
+            }
+        }
+        if !landed {
+            crate::log(&format!("[{tag}] 32 remoções e o jogo ainda diz has=SIM"));
+        }
+    }
+    crate::log(&format!(
+        "[{tag}] {} — jogo confirma: {}",
+        if on { "ON" } else { "OFF" },
+        if landed { "SIM" } else { "NAO (nenhuma forma pegou)" }
+    ));
+    landed
+}
+
+/// Pergunta ao jogo se o efeito ESTÁ no jogador. `None` = não deu pra perguntar (método não
+/// resolvido) — diferente de `Some(false)`, que é o jogo dizendo "não está".
+unsafe fn has_effect(
+    reg: &Registry,
+    ses: *mut c_void,
+    eid: [u8; 16],
+    tdbid: [u8; 8],
+) -> Option<bool> {
+    let f = rtti::resolve_any(reg, &["gameStatusEffectSystem"], "HasStatusEffect")?;
+    let np = rtti::param_count(&f) as usize;
+    let mut v: Vec<Arg> = vec![Arg::Raw(eid), Arg::Tdb(tdbid)];
+    v.truncate(np);
+    let r = rtti::call_func(&f, ses, &v)?;
+    Some(r[0] != 0)
+}
+
+/// Aplica/remove um efeito com UMA chamada (assinatura completa) e uma linha de log.
+///
+/// `status_effect` tenta três formas e mede com `HasStatusEffect`, o que é certo pra INVESTIGAR.
+/// Pra os efeitos instantâneos isso é ruído: eles rodam a lógica e não deixam camada, então
+/// `has` responde `nao` mesmo tendo funcionado — foi medido em jogo (`BlockTargetingPlayer`,
+/// `DontShootAtMe`, `SetFriendly` deram `has=nao` e os NPCs pararam de atacar). Aqui a chamada é
+/// uma só e o log diz o que foi ENVIADO, sem afirmar um resultado que esta leitura não sustenta.
+unsafe fn effect_once(reg: &Registry, captured_player: *mut c_void, effect: &str, on: bool, tag: &str) -> bool {
+    let owner = auth_or(reg, captured_player);
+    let gi = match get_gi(reg, owner) {
+        Some(b) => b,
+        None => return false,
+    };
+    let ses = system_flex(reg, owner, gi, "gameStatusEffectSystem", "GetStatusEffectSystem");
+    let eid = match entity_id(reg, owner) {
+        Some(b) => b,
+        None => return false,
+    };
+    if !rtti::sane(ses) {
+        return false;
+    }
+    let fname = if on { "ApplyStatusEffect" } else { "RemoveStatusEffect" };
+    let f = match rtti::resolve_any(reg, &["gameStatusEffectSystem"], fname) {
+        Some(g) => g,
+        None => return false,
+    };
+    let tdbid = crate::cname::tweak_db_id(effect).to_le_bytes();
+    let np = rtti::param_count(&f) as usize;
+    let mut v: Vec<Arg> = vec![Arg::Raw(eid), Arg::Tdb(tdbid)];
+    for i in v.len()..np {
+        let ty = crate::cname::resolve_cname(rtti::fn_param_type(f.func, i));
+        v.push(match ty.as_str() {
+            "TweakDBID" => Arg::Tdb([0u8; 8]),
+            "Bool" => Arg::Bool(false),
+            "Uint32" => Arg::I32(1),
+            "Int32" => Arg::I32(0),
+            _ => Arg::Raw([0u8; 16]),
+        });
+    }
+    let ok = rtti::call_func(&f, ses, &v).is_some();
+    crate::log(&format!("[{tag}] {} {effect}", if on { "aplicado:" } else { "removido:" }));
+    ok
+}
+
+/// `se <record> [on|off]` do console: aplica/remove QUALQUER status effect por nome. Existe pra
+/// que testar um candidato não custe recompilar e reiniciar o jogo — o ciclo caro aqui.
+pub unsafe fn status_effect_named(
+    reg: &Registry,
+    captured_player: *mut c_void,
+    effect: &str,
+    on: bool,
+) -> bool {
+    status_effect(reg, captured_player, effect, on, "se")
+}
+
+/// `se? <record>`: só pergunta, não aplica nada.
+pub unsafe fn status_effect_query(
+    reg: &Registry,
+    captured_player: *mut c_void,
+    effect: &str,
+) -> bool {
+    let owner = auth_or(reg, captured_player);
+    let gi = match get_gi(reg, owner) {
+        Some(b) => b,
+        None => return false,
+    };
+    let ses = system_flex(reg, owner, gi, "gameStatusEffectSystem", "GetStatusEffectSystem");
+    let eid = match entity_id(reg, owner) {
+        Some(b) => b,
+        None => return false,
+    };
+    if !rtti::sane(ses) {
+        crate::log("[se] StatusEffectSystem inacessível");
+        return false;
+    }
+    let tdbid = crate::cname::tweak_db_id(effect).to_le_bytes();
+    crate::log(&format!(
+        "[se] '{effect}' has={}",
+        match has_effect(reg, ses, eid, tdbid) {
+            Some(true) => "SIM",
+            Some(false) => "nao",
+            None => "?(HasStatusEffect não resolveu)",
+        }
+    ));
+    true
+}
+
+/// "Os NPCs te deixam em paz": três records de comportamento + o stat de visibilidade.
+///
+/// Limite honesto, porque o nome do comando promete mais: isto NÃO é invisibilidade. Os NPCs
+/// continuam ENXERGANDO o jogador; o que muda é que param de atacar (a polícia desce do carro e
+/// fica parada).
+///
+/// Vale registrar o que NÃO funciona, pra ninguém repetir o caminho: `BaseStatusEffect.Cloaked`
+/// entra no jogador (`HasStatusEffect` responde SIM) e a percepção não muda — é o efeito do lado
+/// dos NPCs (Oda/MaxTac). `OpticalCamoIsActive` aceita a escrita (0 -> 1 confirmado pelo jogo) e
+/// não liga nada: o jogo LÊ esse stat, não obedece a ele. `VisibilityReduction` idem.
+pub unsafe fn cloak(reg: &Registry, captured_player: *mut c_void, on: bool) -> bool {
+    // Os três records vêm de MEDIÇÃO em jogo, não de leitura de nome: com eles aplicados os NPCs
+    // continuam enxergando o jogador mas param de atacar, e a polícia desce do carro e fica
+    // parada. `Visibility` entra junto porque é o stat de que o jogo monta a detecção.
+    //
+    // O que NÃO entra, e por quê: `BaseStatusEffect.Cloaked` (entra no jogador, `has=SIM`, e não
+    // muda percepção — é o efeito do lado dos NPCs, Oda/MaxTac) e `OpticalCamoIsActive` (aceita a
+    // escrita, 0 -> 1 confirmado pelo jogo, e não liga nada — é um stat que o jogo LÊ).
+    const RECORDS: [&str; 3] = [
+        "BaseStatusEffect.BlockTargetingPlayer",
+        "BaseStatusEffect.DontShootAtMe",
+        "BaseStatusEffect.SetFriendly",
+    ];
+    if on {
+        for r in RECORDS {
+            effect_once(reg, captured_player, r, true, "cloak");
+        }
+        stat_mod(reg, captured_player, "Visibility", -1000.0, StatTarget::Player, "cloak");
+        crate::log("[cloak] ON (NPCs param de atacar; ainda podem ENXERGAR você)");
+        true
+    } else {
+        for r in RECORDS {
+            effect_once(reg, captured_player, r, false, "cloak");
+        }
+        stat_unmod(reg, captured_player, "Visibility", "cloak");
+        // Herança: o `BaseStatusEffect.Cloaked` das tentativas anteriores entra de verdade e vai
+        // pro SAVE junto, deixando o personagem invisível ao carregar. Desligar tem que limpá-lo.
+        status_effect(reg, captured_player, "BaseStatusEffect.Cloaked", false, "cloak");
+        crate::log("[cloak] OFF");
+        true
+    }
+}
+
+/// Munição infinita: o stat `MagazineAutoRefill` da ARMA — o carregador se reenche, então não há
+/// recarga nem consumo. Fica na arma, não no jogador; trocar de arma exige rodar de novo.
+///
+/// `GameplayRestriction.InfiniteAmmo` foi abandonado com medição: nas TRÊS formas da chamada o
+/// jogo respondeu `has=nao` — não é um record de status effect, então o sistema o descarta em
+/// silêncio. Era isso que fazia o comando dizer ON e a munição continuar caindo.
+pub unsafe fn infinite_ammo(reg: &Registry, captured_player: *mut c_void, on: bool) -> bool {
+    if on {
+        // MEDIDO em jogo: `MagazineCapacity` na arma resolve a recarga (o pente passa a durar
+        // centenas de tiros). `MagazineAutoRefill` foi aplicado e confirmado pelo jogo (0 -> 1) e
+        // mesmo assim não mudou nada — é um stat que o jogo LÊ, não um que aceita ordem.
+        let mag = stat_mod(reg, captured_player, "MagazineCapacity", 999.0, StatTarget::Weapon, "ammo");
+        // A reserva continua caindo, porque recarregar puxa dela. Repor a munição é o mesmo
+        // desenho já provado da RAM infinita: o jogo não expõe "custo zero", então o que o
+        // jogador percebe como munição que não acaba é a reserva sendo enchida de volta.
+        crate::set_ammo_infinite(true);
+        mag
+    } else {
+        crate::set_ammo_infinite(false);
+        stat_unmod(reg, captured_player, "MagazineCapacity", "ammo")
+    }
+}
+
+/// Tipos de munição deste build — os quatro confirmados na tabela de records.
+pub const AMMO_TYPES: [&str; 4] = [
+    "Ammo.HandgunAmmo",
+    "Ammo.RifleAmmo",
+    "Ammo.ShotgunAmmo",
+    "Ammo.SniperRifleAmmo",
+];
+
+/// Quantidade de um item no inventário do jogador. `None` se não deu pra perguntar — e aí o
+/// chamador repõe assim mesmo: é melhor uma notificação a mais do que um cheat que não repõe.
+unsafe fn item_quantity(reg: &Registry, captured_player: *mut c_void, tx: *mut c_void, name: &str) -> Option<i32> {
+    let f = rtti::resolve_any_name(reg, &["gameTransactionSystem"], &["GetItemQuantity"], "ammo")?;
+    let item = rtti::from_tdbid(reg, name)?;
+    let owner = auth_or(reg, captured_player);
+    let r = rtti::call_func(&f, tx, &[Arg::Handle(owner, refcnt()), Arg::Item16(item)])?;
+    Some(i32::from_le_bytes([r[0], r[1], r[2], r[3]]))
+}
+
+/// Repõe a reserva de munição. Chamada do tick enquanto `ammo on` está ligado. Silenciosa de
+/// propósito: uma linha de log por tipo a cada tick afogaria o console em segundos.
+pub unsafe fn refill_ammo(reg: &Registry, player: *mut c_void, tx: *mut c_void) {
+    for a in AMMO_TYPES {
+        // Só repõe o que FALTA. Dar munição a cada tick sem olhar quanto já existe enche a tela
+        // de "picked up ..." — cada GiveItem levanta a notificação de item recebido do jogo,
+        // mesmo com a reserva cheia. Perguntar a quantidade antes cala isso.
+        match item_quantity(reg, player, tx, a) {
+            Some(q) if q >= 100 => continue,
+            _ => give_quiet(reg, player, tx, a, 500),
+        }
+    }
+    // O modificador de pente vive na ARMA, então trocar de arma o deixaria pra trás e o cheat
+    // pareceria ter desligado sozinho. Remover e reaplicar na arma ATUAL é mais simples do que
+    // rastrear identidade de arma, e correto por construção. Mesma escolha feita no menu ESC.
+    stat_unmod_ex(reg, player, "MagazineCapacity", "ammo", false);
+    stat_mod_ex(reg, player, "MagazineCapacity", 999.0, StatTarget::Weapon, "ammo", false);
+}
+
+/// Alvo de um stat: o jogador ou a arma que ele tem na mão. São `StatsObjectID` diferentes —
+/// `MagazineAutoRefill` mora na ARMA, `OpticalCamoIsActive` mora no JOGADOR.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum StatTarget {
+    Player,
+    Weapon,
+}
+
+/// Arma ativa do jogador. Estático `GetActiveWeapon(GameObject)` — a assinatura está no bundle
+/// de redscript deste build. A classe dona não está no bundle, então tenta as candidatas e loga
+/// qual resolveu, em vez de fixar um palpite.
+unsafe fn active_weapon(reg: &Registry, owner: *mut c_void) -> Option<*mut c_void> {
+    // Nomes: o curto (caso seja nativa) e os MANGLED do bundle de redscript deste build —
+    // `GetActiveWeapon;GameObject` (estático, recebe o dono) e `GetActiveWeapon;` (sem args).
+    let f = rtti::resolve_any_name(
+        reg,
+        &["GameObject", "gameObject", "RPGManager", "gameRPGManager", "PlayerPuppet",
+          "gamePuppet", "ScriptedPuppet", "gameScriptedPuppet", "WeaponObject", "gameweaponObject"],
+        &["GetActiveWeapon;GameObject", "GetActiveWeapon;", "GetActiveWeapon"],
+        "stat",
+    )?;
+    let w = if f.is_static {
+        rtti::call_ptr(&f, std::ptr::null_mut(), &[Arg::Handle(owner, refcnt())])
+    } else {
+        rtti::call_ptr(&f, owner, &[])
+    };
+    if rtti::sane(w) {
+        crate::log(&format!("[stat] arma ativa = {w:p}"));
+        return Some(w);
+    }
+    crate::log("[stat] GetActiveWeapon resolveu mas devolveu nada (arma na mão?)");
+    None
+}
+
+/// Lê um stat do alvo. É a MEDIÇÃO que diz se o modificador pegou — sem ela, "apliquei" é
+/// palpite outra vez (foi exatamente o que custou as últimas rodadas com o status effect).
+unsafe fn stat_value(
+    reg: &Registry,
+    sts: *mut c_void,
+    target: [u8; 16],
+    stype: u64,
+) -> Option<f32> {
+    let f = rtti::resolve_any_name(
+        reg,
+        &["gameStatsSystem"],
+        &["GetStatValue", "GetStatValue;GameObjectStatsObjectIDgamedataStatType", "GetStatValue;GameObjectgamedataStatType"],
+        "stat",
+    )?;
+    let r = rtti::call_func(&f, sts, &[Arg::Raw(target), Arg::Enum(stype)])?;
+    Some(f32::from_le_bytes([r[0], r[1], r[2], r[3]]))
+}
+
+/// Aplica um modificador de stat — o mecanismo que o PRÓPRIO jogo usa pra ligar camuflagem
+/// óptica e recarga automática, em vez de um status effect que o sistema recusa em silêncio.
+///
+/// POR QUE ESTE CAMINHO: a medição com `HasStatusEffect` mostrou que
+/// `GameplayRestriction.InfiniteAmmo` NUNCA entra (`has=nao` nas três formas da chamada), e que
+/// `BaseStatusEffect.Cloaked` entra mas não muda a percepção dos NPCs — é o efeito do lado dos
+/// NPCs (Oda/Maxtac), não do jogador. O que o jogo usa pro jogador são STATS:
+/// `BaseStats.OpticalCamoIsActive` e `BaseStats.MagazineAutoRefill`, ambos confirmados na tabela
+/// de records deste build.
+///
+/// Loga o valor ANTES e DEPOIS: o jogo respondendo se o modificador pegou.
+pub unsafe fn stat_mod(
+    reg: &Registry,
+    captured_player: *mut c_void,
+    stat: &str,
+    value: f32,
+    target: StatTarget,
+    tag: &str,
+) -> bool {
+    stat_mod_ex(reg, captured_player, stat, value, target, tag, true)
+}
+
+/// `verbose=false` é o caminho do TICK: mesma aplicação, sem a linha de antes/depois. Aquela
+/// linha é a MEDIÇÃO — vale ouro quando se está investigando, e afoga o console se repetida de
+/// segundo em segundo.
+pub unsafe fn stat_mod_ex(
+    reg: &Registry,
+    captured_player: *mut c_void,
+    stat: &str,
+    value: f32,
+    target: StatTarget,
+    tag: &str,
+    verbose: bool,
+) -> bool {
+    let owner = auth_or(reg, captured_player);
+    let gi = match get_gi(reg, owner) {
+        Some(b) => b,
+        None => return false,
+    };
+    let sts = system_flex(reg, owner, gi, "gameStatsSystem", "GetStatsSystem");
+    if !rtti::sane(sts) {
+        crate::log(&format!("[{tag}] StatsSystem inacessível"));
+        return false;
+    }
+    let obj = match target {
+        StatTarget::Player => owner,
+        StatTarget::Weapon => match active_weapon(reg, owner) {
+            Some(w) => w,
+            None => return false,
+        },
+    };
+    let tid = match entity_id(reg, obj) {
+        Some(b) => b,
+        None => {
+            crate::log(&format!("[{tag}] GetEntityID do alvo falhou"));
+            return false;
+        }
+    };
+    let stype = match rtti::resolve_enum_value(reg, "gamedataStatType", stat) {
+        Some(v) => v,
+        None => {
+            crate::log(&format!("[{tag}] gamedataStatType::{stat} não existe neste build"));
+            return false;
+        }
+    };
+    // As duas leituras do stat são a MEDIÇÃO, não a ação: no caminho do tick elas seriam duas
+    // chamadas RTTI por segundo sem ninguém pra ler o resultado.
+    let before = if verbose { stat_value(reg, sts, tid, stype) } else { None };
+    // `Additive` soma ao valor base; pra um stat booleano (0/1) é o que liga.
+    let mtype = match rtti::resolve_enum_value(reg, "gameStatModifierType", "Additive") {
+        Some(v) => v,
+        None => {
+            crate::log(&format!("[{tag}] gameStatModifierType::Additive não resolveu"));
+            return false;
+        }
+    };
+    let cm = match rtti::resolve_any_name(
+        reg,
+        &["RPGManager", "gameRPGManager"],
+        &["CreateStatModifier;gamedataStatTypegameStatModifierTypeFloat", "CreateStatModifier"],
+        tag,
+    ) {
+        Some(f) => f,
+        None => return false,
+    };
+    // Devolve um `ref<gameStatModifierData>` = handle de 16B {ponteiro, refcount}.
+    let m = match rtti::call_func(&cm, std::ptr::null_mut(), &[Arg::Enum(stype), Arg::Enum(mtype), Arg::F32(value)]) {
+        Some(b) => trunc16(b),
+        None => {
+            crate::log(&format!("[{tag}] CreateStatModifier falhou"));
+            return false;
+        }
+    };
+    if u64::from_le_bytes(m[..8].try_into().unwrap()) == 0 {
+        crate::log(&format!("[{tag}] CreateStatModifier devolveu handle nulo"));
+        return false;
+    }
+    let add = match rtti::resolve_any_name(reg, &["gameStatsSystem"], &["AddModifier", "AddModifier;"], tag) {
+        Some(f) => f,
+        None => return false,
+    };
+    let np = rtti::param_count(&add) as usize;
+    rtti::call_func(&add, sts, &[Arg::Raw(tid), Arg::Raw(m)]);
+    // Guarda o handle: desligar é `RemoveModifier(mesmo alvo, MESMO handle)`. Sem isto, o único
+    // "off" possível seria empilhar um modificador negativo por cima — que zera o valor mas
+    // deixa lixo acumulado no alvo a cada liga/desliga.
+    applied().lock().unwrap().push((stat.to_string(), tid, m));
+    if !verbose {
+        return true;
+    }
+    let after = stat_value(reg, sts, tid, stype);
+    let moved = matches!((before, after), (Some(a), Some(b)) if (b - a).abs() > 0.0001);
+    crate::log(&format!(
+        "[{tag}] {stat} {} {:?} -> {:?} (AddModifier params={np}) | jogo confirma: {}",
+        if matches!(target, StatTarget::Weapon) { "na ARMA:" } else { "no JOGADOR:" },
+        before,
+        after,
+        if moved { "SIM" } else { "NAO (valor não mudou)" }
+    ));
+    moved
+}
+
+/// Modificadores que NÓS aplicamos, pra poder removê-los depois pelo handle exato.
+fn applied() -> &'static std::sync::Mutex<Vec<(String, [u8; 16], [u8; 16])>> {
+    static A: std::sync::OnceLock<std::sync::Mutex<Vec<(String, [u8; 16], [u8; 16])>>> =
+        std::sync::OnceLock::new();
+    A.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+}
+
+/// Remove os modificadores que aplicamos pra este stat. Só os nossos: um `RemoveModifier` com
+/// handle de terceiros mexeria em buff de perk/cyberware do jogador.
+pub unsafe fn stat_unmod(reg: &Registry, captured_player: *mut c_void, stat: &str, tag: &str) -> bool {
+    stat_unmod_ex(reg, captured_player, stat, tag, true)
+}
+
+pub unsafe fn stat_unmod_ex(reg: &Registry, captured_player: *mut c_void, stat: &str, tag: &str, verbose: bool) -> bool {
+    let owner = auth_or(reg, captured_player);
+    let gi = match get_gi(reg, owner) {
+        Some(b) => b,
+        None => return false,
+    };
+    let sts = system_flex(reg, owner, gi, "gameStatsSystem", "GetStatsSystem");
+    if !rtti::sane(sts) {
+        crate::log(&format!("[{tag}] StatsSystem inacessível"));
+        return false;
+    }
+    let rm = match rtti::resolve_any_name(reg, &["gameStatsSystem"], &["RemoveModifier", "RemoveModifier;"], tag) {
+        Some(f) => f,
+        None => return false,
+    };
+    let mut guard = applied().lock().unwrap();
+    let mut n = 0;
+    guard.retain(|(name, tid, m)| {
+        if name != stat {
+            return true;
+        }
+        rtti::call_func(&rm, sts, &[Arg::Raw(*tid), Arg::Raw(*m)]);
+        n += 1;
+        false
+    });
+    if verbose {
+        crate::log(&format!("[{tag}] {stat}: {n} modificador(es) removido(s)"));
+    }
+    n > 0
+}
+
+/// `stat?`/`statw?`: só lê, não aplica nada.
+pub unsafe fn stat_read(
+    reg: &Registry,
+    captured_player: *mut c_void,
+    stat: &str,
+    target: StatTarget,
+) -> bool {
+    let owner = auth_or(reg, captured_player);
+    let gi = match get_gi(reg, owner) {
+        Some(b) => b,
+        None => return false,
+    };
+    let sts = system_flex(reg, owner, gi, "gameStatsSystem", "GetStatsSystem");
+    if !rtti::sane(sts) {
+        crate::log("[stat] StatsSystem inacessível");
+        return false;
+    }
+    let obj = match target {
+        StatTarget::Player => owner,
+        StatTarget::Weapon => active_weapon(reg, owner).unwrap_or(std::ptr::null_mut()),
+    };
+    if !rtti::sane(obj) {
+        return false;
+    }
+    let tid = match entity_id(reg, obj) {
+        Some(b) => b,
+        None => return false,
+    };
+    let stype = match rtti::resolve_enum_value(reg, "gamedataStatType", stat) {
+        Some(v) => v,
+        None => {
+            crate::log(&format!("[stat] gamedataStatType::{stat} não existe neste build"));
+            return false;
+        }
+    };
+    crate::log(&format!("[stat] {stat} = {:?}", stat_value(reg, sts, tid, stype)));
+    true
+}
+
+/// RAM do cyberdeck (quickhacks). É o pool `Memory` — o mesmo mecanismo de Health/Stamina,
+/// confirmado no binário: `gamedataStatPoolType` só tem Health, Stamina e Memory.
+/// Enche até 100%; o "ilimitado" é isto reaplicado no tick (ver `RAM_INFINITE` em lib.rs).
+pub unsafe fn ram(reg: &Registry, captured_player: *mut c_void) -> bool {
+    set_pool(reg, captured_player, "Memory", 100.0, "ram")
 }
 
 /// DIAGNÓSTICO read-only (2026-08-06): lê Health/Stamina/Sprint (StaminaRegen/estado) direto do

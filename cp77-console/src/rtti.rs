@@ -1736,6 +1736,27 @@ pub unsafe fn resolve_enum_value(reg: &Registry, enum_type: &str, member: &str) 
     None
 }
 
+/// Lista os membros de um enum com os VALORES. Par de `funcs`/`findfunc` pro lado dos enums:
+/// `AddGodMode(Invulnerable=0)` no log é uma afirmação que ninguém conferiu, e um valor errado
+/// aqui manda "None" pro jogo e o cheat não faz nada — sem erro nenhum.
+pub unsafe fn list_enum(reg: &Registry, enum_type: &str) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    let en = reg.enum_by_name(enum_type) as *const u8;
+    if en.is_null() {
+        return out;
+    }
+    let hp = rd_ptr(en.add(0x28)) as *const u8;
+    let n = rd_u32(en.add(0x30));
+    let vp = rd_ptr(en.add(0x38)) as *const u8;
+    if hp.is_null() || vp.is_null() || n > 100_000 {
+        return out;
+    }
+    for i in 0..n as usize {
+        out.push((crate::cname::resolve_cname(rd_u64(hp.add(i * 8))), rd_u64(vp.add(i * 8))));
+    }
+    out
+}
+
 pub struct ResolvedFn {
     pub func: *mut c_void,
     pub ret_type: *mut c_void,
@@ -2096,6 +2117,134 @@ pub unsafe fn game_instance_vtable_dump(game: *mut c_void, n: usize) -> Vec<(usi
 }
 
 /// Resolve uma função RED por classe+método, subindo a cadeia de heranças.
+/// `true` só na PRIMEIRA vez que este par (tag, chave) aparece. Uma resolução que dá certo é
+/// notícia uma vez; repetida a cada tick vira ruído que esconde o resto do log — e o caminho do
+/// tick (munição infinita) chama isto de segundo em segundo.
+fn first_time(tag: &str, key: &str) -> bool {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    let seen = SEEN.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()));
+    seen.lock().unwrap().insert(format!("{tag}|{key}"))
+}
+
+/// Resolve tentando VÁRIOS nomes em várias classes. Existe porque as funções definidas em
+/// redscript não entram na RTTI com o nome curto: entram com a ASSINATURA colada
+/// (`CreateStatModifier;gamedataStatTypegameStatModifierTypeFloat`), enquanto as nativas do
+/// engine entram com o nome cru. Procurar só o nome curto acha as nativas e erra as scriptadas —
+/// foi exatamente o que fez `CreateStatModifier` e `GetActiveWeapon` "não resolverem".
+/// Loga qual par (classe, nome) pegou, pra o acerto ficar registrado em vez de ser refeito.
+pub unsafe fn resolve_any_name(
+    reg: &Registry,
+    classes: &[&str],
+    names: &[&str],
+    tag: &str,
+) -> Option<ResolvedFn> {
+    for c in classes {
+        let cls = reg.class_by_name(c);
+        if cls.is_null() {
+            continue;
+        }
+        for n in names {
+            if let Some(f) = resolve_in_class(cls, n) {
+                if first_time(tag, &format!("{c}.{n}")) {
+                    crate::log(&format!("[{tag}] resolvido: {c}.{n} (static={})", f.is_static));
+                }
+                return Some(f);
+            }
+        }
+    }
+    // Última tentativa: função GLOBAL. Statics de redscript nem sempre entram na tabela da
+    // classe — `funcs RPGManager Modifier` mostrou que `CreateStatModifier` não está lá — e o
+    // registro global é onde as declaradas em `.reds` costumam parar.
+    for n in names {
+        let g = resolve_global_function_robust(reg, n);
+        if !g.is_null() {
+            let gb = g as *const u8;
+            let rp = rd_ptr(gb.add(0x18));
+            let ret_type = if rp.is_null() { std::ptr::null_mut() } else { rd_ptr(rp as *const u8) };
+            if first_time(tag, n) {
+                crate::log(&format!("[{tag}] resolvido como função GLOBAL: {n}"));
+            }
+            return Some(ResolvedFn { func: g, ret_type, is_static: true });
+        }
+    }
+    crate::log(&format!(
+        "[{tag}] não resolveu: classes={classes:?} nomes={names:?} (nem como global)"
+    ));
+    None
+}
+
+/// Lista funções GLOBAIS cujo nome contém `filter`. Par de `list_functions` pro registro global —
+/// juntos respondem "como este método se chama de verdade" sem recompilar.
+pub unsafe fn list_global_functions(reg: &Registry, filter: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let (entries, n) = reg.get_global_functions();
+    if entries.is_null() || n == 0 || n > 200_000 || !crate::gum::is_readable(entries, 8) {
+        return out;
+    }
+    let base = entries as *const u8;
+    let f_lower = filter.to_lowercase();
+    for i in 0..n {
+        let slot = base.add(i * 8);
+        if !crate::gum::is_readable(slot as *const c_void, 8) {
+            break;
+        }
+        let f = rd_ptr(slot) as *const u8;
+        if f.is_null() || !crate::gum::is_readable(f as *const c_void, 0x20) {
+            continue;
+        }
+        for h in [rd_u64(f.add(0x10)), rd_u64(f.add(0x08))] {
+            if h == 0 {
+                continue;
+            }
+            let nm = crate::cname::resolve_cname(h);
+            if !nm.is_empty() && (f_lower.is_empty() || nm.to_lowercase().contains(&f_lower)) {
+                out.push(nm);
+            }
+        }
+    }
+    out
+}
+
+/// Lista os nomes das funções de uma classe (instância + estáticas, subindo os pais). Ferramenta
+/// de diagnóstico: "não resolveu" passa a ser uma pergunta respondível no console, em vez de uma
+/// recompilação pra descobrir como o método se chama de verdade.
+pub unsafe fn list_functions(cls0: *mut c_void, filter: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cls = cls0;
+    let mut guard = 0;
+    while !cls.is_null() && guard < 64 {
+        guard += 1;
+        if !crate::gum::is_readable(cls as *const c_void, 0x60) {
+            break;
+        }
+        let clsb = cls as *const u8;
+        for off in [0x48usize, 0x58usize] {
+            let fp = rd_ptr(clsb.add(off)) as *const u8;
+            let n = rd_u32(clsb.add(off + 8));
+            if fp.is_null() || n >= 20_000 || !crate::gum::is_readable(fp as *const c_void, 8) {
+                continue;
+            }
+            for i in 0..n as usize {
+                let slot = fp.add(i * 8);
+                if !crate::gum::is_readable(slot as *const c_void, 8) {
+                    break;
+                }
+                let f = rd_ptr(slot) as *const u8;
+                if f.is_null() || !crate::gum::is_readable(f as *const c_void, 0x20) {
+                    continue;
+                }
+                let nm = crate::cname::resolve_cname(rd_u64(f.add(0x10)));
+                if filter.is_empty() || nm.to_lowercase().contains(&filter.to_lowercase()) {
+                    out.push(format!("{}{nm}", if off == 0x58 { "static " } else { "" }));
+                }
+            }
+        }
+        cls = rd_ptr(clsb.add(0x10));
+    }
+    out
+}
+
 pub unsafe fn resolve_func(reg: &Registry, class_name: &str, method: &str) -> Option<ResolvedFn> {
     resolve_in_class(reg.class_by_name(class_name), method)
 }

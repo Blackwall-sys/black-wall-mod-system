@@ -24,6 +24,7 @@ mod crashreport;
 // efeito em runtime até alguém ligar os 3 pontos de integração documentados no arquivo.
 mod fnoverride;
 mod gum;
+mod i18n;
 // RASCUNHO (2026-08-11, prep CET `DumpVTablesTask`/`PENDENCIAS-UNIFICADAS.md` item `#44`): dump
 // de vtable→nome-de-classe por construção real de instância, versão BOUNDED/filtrada (não o
 // "tudo de uma vez" do CET original) — ver doc-comment no topo de `vtabledump.rs`. Compilado
@@ -96,11 +97,41 @@ pub(crate) fn game_base() -> usize {
 
 /// VM addr do binário (base 0x1_0000_0000) → endereço real em runtime.
 ///
-/// Os offsets estáticos do projeto são da build STEAM. No GOG (mesma versão, layout
-/// deslocado) traduz Steam-vmaddr → GOG-vmaddr via [`steam_to_gog`] ANTES de aplicar o
-/// slide. Steam/Unknown = identidade (comportamento histórico, byte-idêntico).
+/// Os offsets estáticos do projeto são da build STEAM. No GOG e no Epic (mesma versão,
+/// layout deslocado) traduz Steam-vmaddr → vmaddr do build via [`steam_to_gog`]/
+/// [`steam_to_epic`] ANTES de aplicar o slide. Steam/Unknown = identidade (comportamento
+/// histórico, byte-idêntico).
+/// True na PRIMEIRA vez que este vmaddr aparece; false depois.
+///
+/// Sem isto, um endereço não-mapeado que é consultado TODO TICK (o budget do watchdog do motor
+/// é o caso real) enche o log com a mesma linha milhares de vezes e — pior — inunda a view
+/// K-LOG do console in-game, que passa a ser inútil. O log de "sem mapa" é diagnóstico: a
+/// informação está na PRIMEIRA ocorrência, as repetições não acrescentam nada.
+fn first_time_unmapped(vmaddr: u64) -> bool {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static SEEN: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
+    SEEN.get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .map(|mut s| s.insert(vmaddr))
+        .unwrap_or(false)
+}
+
 pub(crate) fn rebase(vmaddr: u64) -> *mut c_void {
     let v = match game_build() {
+        // O mapa do Epic é PARCIAL de propósito (ver [`steam_to_epic`]): o `None` aqui é o
+        // caminho ESPERADO pra toda feature ainda não mapeada, não um erro.
+        GameBuild::Epic => match steam_to_epic(vmaddr) {
+            Some(v) => v,
+            None => {
+                if first_time_unmapped(vmaddr) {
+                    log(&format!(
+                        "[rebase] vmaddr {vmaddr:#x} sem mapa Epic -> SKIP (null; feature inerte)"
+                    ));
+                }
+                return core::ptr::null_mut();
+            }
+        },
         GameBuild::Gog => match steam_to_gog(vmaddr) {
             Some(v) => v,
             None => {
@@ -115,7 +146,11 @@ pub(crate) fn rebase(vmaddr: u64) -> *mut c_void {
                 // assinatura de patch aplicado em local errado, não de null-deref comum).
                 // Fix: nunca mais devolver o vmaddr cru — retorna null, que todo call-site já
                 // trata como "não instala" via `gum::is_readable` (retorna false pra null).
-                log(&format!("[rebase] vmaddr {vmaddr:#x} sem mapa GOG -> SKIP (null; nunca mais passthrough)"));
+                // 1x por vmaddr (ver `first_time_unmapped`): um endereço consultado todo tick
+                // repetiria esta linha milhares de vezes e inundaria o K-LOG do console.
+                if first_time_unmapped(vmaddr) {
+                    log(&format!("[rebase] vmaddr {vmaddr:#x} sem mapa GOG -> SKIP (null; nunca mais passthrough)"));
+                }
                 return core::ptr::null_mut();
             }
         },
@@ -135,20 +170,27 @@ pub(crate) fn un_rebase(ptr: *const c_void) -> u64 {
     (p - b) as u64 + LINK_BASE
 }
 
-/// Qual build do jogo. Steam e GOG = MESMA versão/instruções, layout diferente → os
+/// Qual build do jogo. Steam, GOG e Epic = MESMA versão/instruções, layout diferente → os
 /// vmaddr estáticos deslocam. Detectado 1x lendo o prólogo do executor; auto-validante.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum GameBuild {
     Steam,
     Gog,
+    Epic,
     Unknown,
 }
 
-/// Prólogo do executor (`stp x28,x27..; stp x26,x25..`). IGUAL nos 2 builds — só o
+/// Prólogo do executor (`stp x28,x27..; stp x26,x25..`). IGUAL nos 3 builds — só o
 /// ENDEREÇO muda → serve de assinatura pra identificar o build. (= selfboot::EXEC_PROLOGUE.)
 const DETECT_EXEC_PROLOGUE: u64 = 0xa901_67fa_a9ba_6ffc;
 const STEAM_EXEC_VM: u64 = 0x1_0217_3120;
 const GOG_EXEC_VM: u64 = 0x1_027b_a1b4;
+/// Epic (`com.cdprojektred.cyberpunk.egs`, 2.3.1 build 5314028). Achado por backtrace no
+/// `redDispatcher2` (breakpoint em `funcOperatorAdd<int>`): é o ÚNICO frame de 5 args da
+/// cadeia (`x0..x4` salvos no prólogo = func, ctx, frame, res, retType). O `DETECT_EXEC_PROLOGUE`
+/// acima casa byte-a-byte aqui — confirmação independente, já que o endereço NÃO foi achado
+/// por essa assinatura.
+const EPIC_EXEC_VM: u64 = 0x1_0422_5588;
 
 /// Build detectado (cacheado). Lê o prólogo do executor no vmaddr de cada build até casar.
 /// Unknown (nenhum casou) → tratado como Steam na tradução; os checks de prólogo por-hook
@@ -166,6 +208,8 @@ pub(crate) fn game_build() -> GameBuild {
             GameBuild::Steam
         } else if probe(GOG_EXEC_VM) {
             GameBuild::Gog
+        } else if probe(EPIC_EXEC_VM) {
+            GameBuild::Epic
         } else {
             GameBuild::Unknown
         };
@@ -178,7 +222,7 @@ pub(crate) fn game_build() -> GameBuild {
 pub(crate) static BUILD_UNSUPPORTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
-/// True se o build é reconhecido (Steam ou GOG). `Unknown` = versão do jogo que os nossos offsets
+/// True se o build é reconhecido (Steam, GOG ou Epic). `Unknown` = versão do jogo que os nossos offsets
 /// NÃO cobrem (auto-atualização além de 2.31, distribuição diferente) → aplicar os endereços
 /// Steam-identity num binário desconhecido lê/escreve memória errada e crasha. O gate no `on_load`
 /// usa isto pra NÃO instalar nenhum hook de endereço (o jogo boota vanilla), em vez de arriscar.
@@ -216,6 +260,68 @@ fn steam_to_gog(s: u64) -> Option<u64> {
         0x1_03f5_ec7c => 0x1_00a2_a7bc, // phase getter vizinha (+8, dev measure)
         0x1_0908_b798 => 0x1_08e8_c088, // OPCODE_TABLE (native-com-args; âncora funcOperatorAdd<int>)
         0x1_0900_3000 => 0x1_0910_6a88, // DEPOT_SINGLETON (dev; âncora depot-accessor)
+        _ => return None,
+    })
+}
+
+/// Mapa Steam-vmaddr → Epic-vmaddr (`com.cdprojektred.cyberpunk.egs`, 2.3.1 build 5314028).
+/// Mesma versão/instruções; o layout desloca porque o Epic linka `libGameServicesEpic`/EOS
+/// no lugar do Galaxy. O delta NÃO é uniforme — medido: `+0x29A8478`, `+0x271C804` e um
+/// NEGATIVO (`-0x1ADDCE4`) → é reordenação real por objeto, nenhum rebase único resolve.
+///
+/// PARCIAL (12 de 26 pares): só entram endereços VERIFICADOS. Todo o resto cai no `None` do
+/// [`rebase`], que devolve null → o call-site não instala o hook. Isso é seguro por desenho
+/// (mesma garantia que o GOG já usa desde o fix de 2026-07-31); o custo é que as features
+/// não-mapeadas (TweakDB, archives, depot, boot-phase) ficam INERTES no Epic, não que
+/// crashem.
+///
+/// Como cada par foi obtido (notes: `bwms-epic-re/findings.md`):
+///   - EXEC: backtrace do `redDispatcher2`; único frame de 5 args + `DETECT_EXEC_PROLOGUE`.
+///   - CRTTISystem::Get: previsto pela distância EXEC↔CRTTI (Steam `0x15d6c`, GOG `0x15d74`
+///     → mesmo objeto) e CONFIRMADO em runtime — chamado via lldb, a vtable do objeto
+///     devolvido tem 10/10 slots com código real (o candidato descartado tinha 1/10, o resto
+///     eram stubs `ret`).
+///   - GetFunction: lido direto do slot +0x30 dessa vtable viva.
+///   - bind*: `BINDSIG` achado por assinatura de prólogo em janela graduada; os outros por
+///     distância relativa a ele — `BIND_ORCH − CLASS_VALIDATE` bate EXATO (`0x8C4`) e as duas
+///     previsões caíram em entrada de função (prólogo logo depois de um `ret`).
+///   - Pool*/PoolArchive: símbolo (`nm` — o binário Epic NÃO é stripped, 68654 símbolos).
+///   - open-archive: vizinho de `PoolArchive::Allocate` (`0x5a8` de distância), hit exato.
+///   - OPCODE_TABLE: disasm de `funcOperatorAdd<int>`; as 7417 referências à página batem
+///     todas nesse mesmo endereço.
+fn steam_to_epic(s: u64) -> Option<u64> {
+    Some(match s {
+        0x1_0217_3120 => 0x1_0422_5588, // EXEC (executor universal)
+        0x1_0218_8e8c => 0x1_0423_b2c8, // CRTTISystem::Get
+        0x1_0219_5024 => 0x1_0424_7370, // GetFunction (vtbl+0x30)
+        0x1_021f_cee0 => 0x1_042a_e748, // bind orchestrator (resolve-log)
+        0x1_021e_897c => 0x1_0429_a1ec, // bind orch entry
+        0x1_021e_8c84 => 0x1_0429_a4f4, // bind resolve-loop
+        0x1_021f_c61c => 0x1_042a_de84, // class-validate (mesma âncora BINDSIG; a distância
+        // `BIND_ORCH − CLASS_VALIDATE` bate EXATA entre Steam e Epic: 0x8C4)
+        0x1_0002_2808 => 0x1_0002_21e8, // PoolDefault::AllocateAligned (símbolo)
+        0x1_0002_2cb0 => 0x1_0002_2690, // PoolDefault::Free (símbolo)
+        0x1_0001_d9a0 => 0x1_0001_d380, // PoolRoot::GetHandle (símbolo)
+        0x1_03e2_f17c => 0x1_0360_2724, // PoolArchive::Allocate (símbolo)
+        0x1_03e2_ebd4 => 0x1_0360_217c, // open-archive
+        0x1_0908_b798 => 0x1_090c_a9c8, // OPCODE_TABLE (âncora funcOperatorAdd<int>)
+        // CNamePool::Get — de longe o mais pedido em runtime (10371x num boot de 75s; o
+        // segundo colocado pede 2x). Achado pelo DADO, não por padrão de código: a string
+        // "gameStatsSystem" existe UMA vez no __cstring (0x106c6dca2); quem a referencia por
+        // adrp+add chama `CNamePool::Add(hash, name)` @ 0x100a5ccd4 com o hash literal em x0
+        // (0x761774a571cc8913 = cname("gameStatsSystem"), confere com o teste em cname.rs).
+        // Dentro do Add: `and x21,x19,#0x7ffff` + `adrp 0x107520000 + #0xac0` → a BASE do pool
+        // é 0x107520ac0. Só 7 funções referenciam essa base; 3 recebem hash em x0, e das 3 uma
+        // devolve bool (`cset w0,lo` = Exists) e duas devolvem `add x0,x8,#0x14` (ponteiro pra
+        // string DENTRO do nó — não pro __cstring, porque o Add copia). CONFIRMADO chamando a
+        // função no jogo vivo via lldb: os 3 vetores de teste de `cname.rs` devolvem a string
+        // certa. A outra sobrevivente (0x100a5cb10) devolve ponteiros IDÊNTICOS — são dois
+        // pontos de entrada da mesma busca; qualquer uma serve pro contrato `fn(u64)->*const i8`.
+        0x1_0345_28e8 => 0x1_00a5_c820, // CNamePool::Get
+        // NÃO mapeados ainda (ficam inertes, ver doc acima): CNamePool::Get, TweakDB::Get,
+        // TweakDB singleton, CreateRecord, RecordExists, InitializeArchives, RequestResource,
+        // depot vtable, DEPOT_SINGLETON, boot phase dispatcher, os 2 phase getters e RESLINK
+        // (candidato `0x1_0427_7c48` PROVÁVEL mas não confirmado — fica de fora de propósito).
         _ => return None,
     })
 }
@@ -280,7 +386,28 @@ pub(crate) fn log_anomaly(msg: &str) {
     }
 }
 
+/// Carimbo do build (epoch em segundos, injetado pelo build.rs). Muda a cada compilação, então
+/// serve pra confirmar QUAL dylib o jogo carregou — o arquivo em disco pode já ser o novo.
+pub(crate) fn build_stamp() -> &'static str {
+    env!("BWMS_BUILD_STAMP")
+}
+
 pub(crate) fn log(msg: &str) {
+    // A saída de COMANDO precisa aparecer na aba Console mesmo no build público, onde o resto
+    // desta função é no-op. Sem isto, digitar `help`/`give`/`money` não devolve NADA na tela e a
+    // ferramenta parece travada — o resultado só existia pra quem rodasse um build `devlog`.
+    // O log em si (arquivo/K-LOG) continua gateado por `devlog`, como era.
+    // Prefixos que o USUÁRIO age em cima (resposta de comando + diagnóstico dos cheats). Vão pra
+    // aba Console mesmo no build público, onde o resto desta função é no-op. Sem isto, um cheat
+    // que não funciona não tem NENHUM sinal na tela — foi exatamente o que aconteceu com o
+    // `cloak`: o comando dizia "ON" e o motivo real ficava num log que só existe em build dev.
+    const USER_FACING: [&str; 13] = [
+        "[console]", "[cloak]", "[ammo]", "[ram]", "[god]", "[heal]", "[give]", "[sig]",
+        "[level]", "[build]", "[se]", "[stat]", "[funcs]",
+    ];
+    if USER_FACING.iter().any(|p| msg.starts_with(p)) {
+        crate::overlay::console_out(msg);
+    }
     // Build PÚBLICO (sem feature `devlog`): silencioso — não escreve /tmp/cp77-console.log nem
     // trace.log (o usuário final não precisa dos diagnósticos; um mod escrevendo em /tmp a cada
     // frame é comportamento desnecessário). Dev liga via `devtools`. (As STRINGS de debug em si
@@ -872,6 +999,36 @@ unsafe impl Sync for SendReg {}
 static REG: std::sync::OnceLock<SendReg> = std::sync::OnceLock::new();
 /// player/tx atuais (a sonda captura, o cp77_tick publica; o Lua lê via Game.*).
 static CURRENT_PLAYER: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+/// RAM (pool `Memory`) infinita: reaplicada no tick enquanto ligada.
+///
+/// O jogo não expõe "custo zero" — o que existe é o POOL. Então "ilimitado" aqui é encher o pool
+/// de volta periodicamente, que é o que o jogador percebe como RAM que não acaba. Reaplicar a
+/// cada tick seria uma chamada RTTI por frame sem ganho nenhum (o pool não cai tão rápido), então
+/// vai a cada `RAM_EVERY_TICKS` — barato e imperceptível em jogo.
+static RAM_INFINITE: AtomicBool = AtomicBool::new(false);
+const RAM_EVERY_TICKS: u64 = 15;
+pub(crate) fn set_ram_infinite(on: bool) {
+    RAM_INFINITE.store(on, Ordering::Relaxed);
+}
+pub(crate) fn ram_infinite() -> bool {
+    RAM_INFINITE.load(Ordering::Relaxed)
+}
+
+/// Munição infinita: mesma forma da RAM. `MagazineCapacity` na arma já mata a recarga (medido em
+/// jogo), mas a RESERVA continua caindo, porque é dela que a recarga puxa. O jogo não expõe "não
+/// consumir", então o que o jogador percebe como munição infinita é a reserva reposta no tick.
+static AMMO_INFINITE: AtomicBool = AtomicBool::new(false);
+/// A cada ~2s a 60fps. O custo real deste caminho não é a matemática, é o `GiveItem`: cada um
+/// levanta os eventos de inventário do jogo. Quatro por disparo a cada meio segundo era gasto sem
+/// retorno — a reserva não cai nem perto dessa velocidade.
+const AMMO_EVERY_TICKS: u64 = 120;
+pub(crate) fn set_ammo_infinite(on: bool) {
+    AMMO_INFINITE.store(on, Ordering::Relaxed);
+}
+pub(crate) fn ammo_infinite() -> bool {
+    AMMO_INFINITE.load(Ordering::Relaxed)
+}
 static CURRENT_TX: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 pub(crate) fn registry() -> Option<&'static rtti::Registry> {
@@ -1219,6 +1376,23 @@ pub extern "C" fn cp77_tick() {
     // F-B: re-tenta registrar as nativas do BWMS se o selfboot pegou o RTTI cedo demais
     // (idempotente via REGISTERED). Garante BlackwallPing no RTTI p/ o bind do redscript.
     unsafe { crate::register::register_all() };
+    // RAM infinita (comando `ram on`): reenche o pool `Memory` de tempos em tempos. Fica AQUI,
+    // depois do gate de registry, porque precisa do `reg` e do player vivos.
+    if ram_infinite() && ticks() % RAM_EVERY_TICKS == 0 {
+        let p = current_player();
+        if !p.is_null() {
+            unsafe { crate::console::ram(reg, p) };
+        }
+    }
+    // Munição infinita (comando `ammo on`): repõe a reserva. Precisa do tx (transaction system)
+    // além do player, então só roda quando os dois estão publicados.
+    if ammo_infinite() && ticks() % AMMO_EVERY_TICKS == 0 {
+        let p = current_player();
+        let tx = current_tx();
+        if !p.is_null() && !tx.is_null() {
+            unsafe { crate::console::refill_ammo(reg, p, tx) };
+        }
+    }
     // TweakDB runtime: dump observe-only do singleton (gated ~/.bwms-tdbdump) p/ confirmar
     // o records-map in-vivo antes de registrar record novo (PASSO 0 do clone-runtime).
     unsafe { crate::tweakdb_rt::dump_once_if_marked() };
@@ -2411,9 +2585,14 @@ pub(crate) unsafe fn prove_loc() -> bool {
     // NÃO chamo GetText da thread do heartbeat: ela pega o LOCK do mapa de loc que o game thread
     // segura → DEADLOCK (travou a thread na v2, 0 [hb]). `c_str` é accessor puro (sem lock), safe.
     // Node: {next i32@+0, hash32 u32@+4, key u64@+8, value(CString)@+0x10}.
-    let cstr_data: unsafe extern "C" fn(*const u8) -> *const i8 =
-        core::mem::transmute(crate::rebase(0x1_0002_93f8));
+    // guard de null: sem mapa pro build, `rebase` devolve null e chamar isso seria blr xzr.
+    // `<null>` já é a resposta que o closure dá pra ponteiro inválido, então degradar é coerente.
+    let cstr_p = crate::rebase(0x1_0002_93f8);
     let read_cstr = |cs: *const u8| -> String {
+        if cstr_p.is_null() {
+            return "<null>".to_string();
+        }
+        let cstr_data: unsafe extern "C" fn(*const u8) -> *const i8 = core::mem::transmute(cstr_p);
         let p = cstr_data(cs);
         if !p.is_null() && crate::gum::is_readable(p as *const c_void, 1) {
             std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
@@ -3619,9 +3798,9 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
                     lua::run_event("onInit");
                 }
                 MODS_LOADED.fetch_add(1, Ordering::Relaxed);
-                log(&format!("[console] mod carregado: {}", path.trim()));
+                log(&format!("[console] mod loaded: {}", path.trim()));
             }
-            Err(e) => log(&format!("[console] loadmod erro: {e}")),
+            Err(e) => log(&format!("[console] loadmod error: {e}")),
         }
         return;
     }
@@ -5397,9 +5576,14 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
                 return;
             }
             log("[equiprawv3] chamando 0x103b1f624 direto via transmute...");
-            let tf: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(crate::rebase(0x1_03b1_f624u64));
-            tf(es_ptr, req_ptr);
-            log("[equiprawv3] transmute retornou — ZERO CRASH, via completa!");
+            let tp = crate::rebase(0x1_03b1_f624u64);
+            if tp.is_null() {
+                log("[equiprawv3] sem mapa pra 0x103b1f624 neste build -> pulando (inerte)");
+            } else {
+                let tf: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(tp);
+                tf(es_ptr, req_ptr);
+                log("[equiprawv3] transmute retornou — ZERO CRASH, via completa!");
+            }
         }
         return;
     }
@@ -5494,9 +5678,14 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
             // escrita de 8 bytes, offset fixo (não resolvível via RTTI — não é propriedade refletida).
             (req_ptr as *mut u8).add(0x40).cast::<*mut c_void>().write_unaligned(es_ptr);
             log(&format!("[equiprawv4] req+0x40={es_ptr:p} (fix do campo interno não-refletido) — req montado, chamando 0x103b1f624 direto..."));
-            let tf: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(crate::rebase(0x1_03b1_f624u64));
-            tf(es_ptr, req_ptr);
-            log("[equiprawv4] transmute retornou — ZERO CRASH, via completa!");
+            let tp = crate::rebase(0x1_03b1_f624u64);
+            if tp.is_null() {
+                log("[equiprawv4] sem mapa pra 0x103b1f624 neste build -> pulando (inerte)");
+            } else {
+                let tf: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(tp);
+                tf(es_ptr, req_ptr);
+                log("[equiprawv4] transmute retornou — ZERO CRASH, via completa!");
+            }
         }
         return;
     }
@@ -5599,9 +5788,14 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
                 "[equiprawv5] frame montado (fr={:p} bc={:p} locals={:p} cprop={:p} itype={:p}) — chamando 0x103b1f624(es_ptr, &frame)...",
                 fr.as_ptr(), bc.as_ptr(), locals.as_ptr(), cprop.as_ptr(), itype
             ));
-            let tf: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(crate::rebase(0x1_03b1_f624u64));
-            tf(es_ptr, fr.as_mut_ptr() as *mut c_void);
-            log("[equiprawv5] transmute retornou — ZERO CRASH, via completa (frame real)!");
+            let tp = crate::rebase(0x1_03b1_f624u64);
+            if tp.is_null() {
+                log("[equiprawv5] sem mapa pra 0x103b1f624 neste build -> pulando (inerte)");
+            } else {
+                let tf: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(tp);
+                tf(es_ptr, fr.as_mut_ptr() as *mut c_void);
+                log("[equiprawv5] transmute retornou — ZERO CRASH, via completa (frame real)!");
+            }
         }
         return;
     }
@@ -5741,9 +5935,14 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
                 return;
             }
             log("[equiprawv2] chamando 0x103b1f624 direto via transmute, DIRETO de run_cmd (zero aninhamento)");
-            let f: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(crate::rebase(0x1_03b1_f624u64));
-            f(es_ptr, req_ptr);
-            log("[equiprawv2] transmute retornou — zero crash até aqui!");
+            let fp = crate::rebase(0x1_03b1_f624u64);
+            if fp.is_null() {
+                log("[equiprawv2] sem mapa pra 0x103b1f624 neste build -> pulando (inerte)");
+            } else {
+                let f: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(fp);
+                f(es_ptr, req_ptr);
+                log("[equiprawv2] transmute retornou — zero crash até aqui!");
+            }
         }
         return;
     }
@@ -8768,13 +8967,111 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         let r = unsafe { console::give(reg, player, tx, &name, n) };
         match r {
             Some(res) if res[0] != 0 => log(&format!("[console] CET '{cmd}' -> give {name} x{n} OK")),
-            _ => log(&format!("[console] CET '{cmd}' -> give {name} x{n} FALHOU")),
+            _ => log(&format!("[console] CET '{cmd}' -> give {name} x{n} FAILED")),
         }
         return;
     }
     let r = unsafe {
         match parts.as_slice() {
             ["money", n] => console::give(reg, player, tx, "Items.money", n.parse().unwrap_or(1)),
+            // RAM do cyberdeck. `ram` enche uma vez; `ram on|off` mantém cheia (ver RAM_INFINITE).
+            // "NPC'ler görmesin": camuflagem óptica do jogo (BaseStatusEffect.Cloaked).
+            ["cloak"] | ["cloak", "on"] => {
+                let ok = console::cloak(reg, player, true);
+                log(&format!("[console] 'cloak' -> {}", if ok { "ON" } else { "FAILED" }));
+                return;
+            }
+            ["cloak", "off"] => {
+                let ok = console::cloak(reg, player, false);
+                log(&format!("[console] 'cloak off' -> {}", if ok { "OFF" } else { "FAILED" }));
+                return;
+            }
+            // Munição infinita (sem recarregar): GameplayRestriction.InfiniteAmmo.
+            ["ammo"] | ["ammo", "on"] => {
+                let ok = console::infinite_ammo(reg, player, true);
+                log(&format!("[console] 'ammo' -> {}", if ok { "ON" } else { "FAILED" }));
+                return;
+            }
+            ["ammo", "off"] => {
+                let ok = console::infinite_ammo(reg, player, false);
+                log(&format!("[console] 'ammo off' -> {}", if ok { "OFF" } else { "FAILED" }));
+                return;
+            }
+            // `enumv <Enum>`: membros + VALORES. Um valor errado vira uma chamada silenciosa
+            // que não faz nada — foi exatamente a suspeita sobre `gameGodModeType`.
+            ["enumv", name] => {
+                unsafe {
+                    let v = crate::rtti::list_enum(reg, name);
+                    if v.is_empty() {
+                        log(&format!("[funcs] enum '{name}' não existe ou está vazio"));
+                    } else {
+                        log(&format!("[funcs] {name}: {} membro(s)", v.len()));
+                        for (n, val) in v.iter().take(40) {
+                            log(&format!("[funcs]   {n} = {val}"));
+                        }
+                    }
+                }
+                return;
+            }
+            // `findfunc <filtro>`: procura no registro GLOBAL de funções. Par de `funcs`, que
+            // olha dentro de uma classe — juntos cobrem os dois lugares onde um método pode estar.
+            ["findfunc", filter] => { list_global_funcs(reg, filter); return; }
+            // `funcs <Classe> [filtro]`: lista os nomes REAIS das funções de uma classe na
+            // RTTI. Existe porque "não resolveu" custava uma recompilação pra descobrir como o
+            // método se chama — as funções de redscript entram com a assinatura colada no nome.
+            ["funcs", class] | ["funcs", class, ""] => { list_class_funcs(reg, class, ""); return; }
+            ["funcs", class, filter] => { list_class_funcs(reg, class, filter); return; }
+            // `stat`/`statw <Nome> [valor]`: modificador de stat no JOGADOR ou na ARMA ativa,
+            // com leitura antes/depois. É o mecanismo por trás de `cloak` e `ammo` — exposto
+            // cru pra testar um stat candidato sem recompilar.
+            ["stat", name] => { console::stat_mod(reg, player, name, 1.0, console::StatTarget::Player, "stat"); return; }
+            ["stat", name, v] => {
+                let val: f32 = v.parse().unwrap_or(1.0);
+                console::stat_mod(reg, player, name, val, console::StatTarget::Player, "stat");
+                return;
+            }
+            ["statw", name] => { console::stat_mod(reg, player, name, 1.0, console::StatTarget::Weapon, "stat"); return; }
+            ["statw", name, v] => {
+                let val: f32 = v.parse().unwrap_or(1.0);
+                console::stat_mod(reg, player, name, val, console::StatTarget::Weapon, "stat");
+                return;
+            }
+            ["stat?", name] => { console::stat_read(reg, player, name, console::StatTarget::Player); return; }
+            ["statw?", name] => { console::stat_read(reg, player, name, console::StatTarget::Weapon); return; }
+            ["stat-", name] => { console::stat_unmod(reg, player, name, "stat"); return; }
+            // `se <record> [on|off]` / `se? <record>`: status effect ARBITRÁRIO por nome.
+            // Testar um candidato passa a custar uma linha digitada em vez de recompilar +
+            // reiniciar o jogo, que é o ciclo caro deste port.
+            ["se", name] | ["se", name, "on"] => {
+                console::status_effect_named(reg, player, name, true);
+                return;
+            }
+            ["se", name, "off"] => {
+                console::status_effect_named(reg, player, name, false);
+                return;
+            }
+            ["se?", name] | ["sehas", name] => {
+                console::status_effect_query(reg, player, name);
+                return;
+            }
+            ["ver"] | ["version"] => {
+                log(&format!("[build] stamp={} (compare com o do instalador)", build_stamp()));
+                return;
+            }
+            ["ram"] => {
+                let ok = console::ram(reg, player);
+                log(&format!("[console] 'ram' -> {}", if ok { "OK (Memory=100)" } else { "FAILED" }));
+                return;
+            }
+            ["ram", sw @ ("on" | "off")] => {
+                let on = *sw == "on";
+                set_ram_infinite(on);
+                if on {
+                    console::ram(reg, player);
+                }
+                log(&format!("[console] 'ram {sw}' -> unlimited RAM {}", if on { "ON" } else { "OFF" }));
+                return;
+            }
             ["give", name] => console::give(reg, player, tx, name, 1),
             ["give", name, n] => console::give(reg, player, tx, name, n.parse().unwrap_or(1)),
             ["remove", name] => console::remove(reg, player, tx, name, 1),
@@ -8800,11 +9097,26 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
     };
     match r {
         Some(res) if res[0] != 0 => log(&format!("[console] '{cmd}' -> OK (GiveItem ret={})", res[0])),
-        Some(res) => log(&format!(
-            "[console] '{cmd}' -> NO-OP (GiveItem retornou {} — owner/tx errado?)",
-            res[0]
-        )),
-        None => log(&format!("[console] '{cmd}' -> FALHOU (resolve/from_tdbid/call)")),
+        Some(res) => {
+            // `GiveItem` devolvendo 0 quase sempre é o ID e não o contexto. O caso mais comum é o
+            // usuário escrever o nome sem o namespace (`give money`, `give katana`) — TweakDBID é
+            // o hash do nome INTEIRO, então `money` simplesmente não existe e o engine devolve 0
+            // sem erro. Culpar "owner/tx" mandava o usuário procurar no lugar errado; dizer o que
+            // provavelmente está errado e como escrever certo resolve na primeira leitura.
+            let name = parts.get(1).copied().unwrap_or("");
+            let hint = if !name.is_empty() && !name.contains('.') {
+                format!(" - '{name}' has no namespace; try 'Items.{name}'")
+            } else if !name.is_empty() {
+                format!(" - is '{name}' a record in this build's TweakDB?")
+            } else {
+                String::new()
+            };
+            log(&format!(
+                "[console] '{cmd}' -> NO-OP (GiveItem returned {}){hint}",
+                res[0]
+            ))
+        }
+        None => log(&format!("[console] '{cmd}' -> FAILED (resolve/from_tdbid/call)")),
     }
 }
 
@@ -9126,5 +9438,46 @@ mod null_vtable_guard_tests {
     #[test]
     fn struct_puro_com_primeira_word_nao_zerada_tambem_nao_e_anomalia() {
         assert!(!null_vtable_is_anomalous(false, 0x3f80_0000));
+    }
+}
+
+
+/// Imprime no console os nomes das funções de uma classe (filtro opcional por substring).
+/// Suporte de `funcs <Classe> [filtro]`; corta em 60 linhas pra não afogar o buffer.
+fn list_class_funcs(reg: &crate::rtti::Registry, class: &str, filter: &str) {
+    unsafe {
+        let cls = reg.class_by_name(class);
+        if cls.is_null() {
+            log(&format!("[funcs] classe '{class}' não existe na RTTI"));
+            return;
+        }
+        let mut v = crate::rtti::list_functions(cls, filter);
+        v.sort();
+        v.dedup();
+        log(&format!("[funcs] {class}: {} função(ões){}", v.len(),
+            if filter.is_empty() { String::new() } else { format!(" com '{filter}'") }));
+        for n in v.iter().take(60) {
+            log(&format!("[funcs]   {n}"));
+        }
+        if v.len() > 60 {
+            log(&format!("[funcs]   ... e mais {} (use um filtro)", v.len() - 60));
+        }
+    }
+}
+
+
+/// Imprime funções GLOBAIS cujo nome contém `filter`. Suporte de `findfunc <filtro>`.
+fn list_global_funcs(reg: &crate::rtti::Registry, filter: &str) {
+    unsafe {
+        let mut v = crate::rtti::list_global_functions(reg, filter);
+        v.sort();
+        v.dedup();
+        log(&format!("[funcs] globais com '{filter}': {}", v.len()));
+        for n in v.iter().take(60) {
+            log(&format!("[funcs]   {n}"));
+        }
+        if v.len() > 60 {
+            log(&format!("[funcs]   ... e mais {} (refine o filtro)", v.len() - 60));
+        }
     }
 }

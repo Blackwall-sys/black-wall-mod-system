@@ -1,6 +1,131 @@
-Items.money	Eddies (dinheiro)	MONEY	MISC
-Ammo.HandgunAmmo	Munição de pistola	AMMO	AMMO
-Ammo.RifleAmmo	Munição de rifle	AMMO	AMMO
-Ammo.ShotgunAmmo	Munição de escopeta	AMMO	AMMO
-Ammo.SniperRifleAmmo	Munição de sniper	AMMO	AMMO
-Ammo.Grenade	Granadas	AMMO	AMMO
+Items.money	Eddies (money)	MONEY	MISC
+Ammo.HandgunAmmo	Handgun ammo	AMMO	AMMO
+Ammo.RifleAmmo	Rifle ammo	AMMO	AMMO
+Ammo.ShotgunAmmo	Shotgun ammo	AMMO	AMMO
+Ammo.SniperRifleAmmo	Sniper ammo	AMMO	AMMO
+Items.GrenadeBiohazardHoming	Grenade Biohazard Homing	GRENADE	AMMO
+Items.GrenadeBiohazardLegendary	Grenade Biohazard Legendary	GRENADE	AMMO
+Items.GrenadeBiohazardRegular	Grenade Biohazard Regular	GRENADE	AMMO
+Items.GrenadeBiohazardRegularHack	Grenade Biohazard Regular Hack	GRENADE	AMMO
+Items.GrenadeCuttingRegular	Grenade Cutting Regular	GRENADE	AMMO
+Items.GrenadeEMPLegendary	Grenade EMPLegendary	GRENADE	AMMO
+Items.GrenadeEMPRare	Grenade EMPRare	GRENADE	AMMO
+Items.GrenadeEMPRegular	Grenade EMPRegular	GRENADE	AMMO
+Items.GrenadeEMPRegularHack	Grenade EMPRegular Hack	GRENADE	AMMO
+Items.GrenadeEMPSticky	Grenade EMPSticky	GRENADE	AMMO
+Items.GrenadeEMPUncommon	Grenade EMPUncommon	GRENADE	AMMO
+Items.GrenadeFlashEpic	Grenade Flash Epic	GRENADE	AMMO
+Items.GrenadeFlashHoming	Grenade Flash Homing	GRENADE	AMMO
+Items.GrenadeFlashLegendary	Grenade Flash Legendary	GRENADE	AMMO
+Items.GrenadeFlashRegular	Grenade Flash Regular	GRENADE	AMMO
+Items.GrenadeFlashUncommon	Grenade Flash Uncommon	GRENADE	AMMO
+Items.GrenadeFragEpic	Grenade Frag Epic	GRENADE	AMMO
+Items.GrenadeFragLegendary	Grenade Frag Legendary	GRENADE	AMMO
+Items.GrenadeFragRegular	Grenade Frag Regular	GRENADE	AMMO
+Items.GrenadeFragRegularHack	Grenade Frag Regular Hack	GRENADE	AMMO
+Items.GrenadeFragSticky	Grenade Frag Sticky	GRENADE	AMMO
+Items.GrenadeFragUncommon	Grenade Frag Uncommon	GRENADE	AMMO
+Items.GrenadeIncendiaryLegendary	Grenade Incendiary Legendary	GRENADE	AMMO
+Items.GrenadeIncendiaryRare	Grenade Incendiary Rare	GRENADE	AMMO
+Items.GrenadeIncendiaryRegular	Grenade Incendiary Regular	GRENADE	AMMO
+Items.GrenadeIncendiaryRegularHack	Grenade Incendiary Regular Hack	GRENADE	AMMO
+Items.GrenadeIncendiarySticky	Grenade Incendiary Sticky	GRENADE	AMMO
+Items.GrenadeOzobsNose	Grenade Ozobs Nose	GRENADE	AMMO
+Items.GrenadeReconLegendary	Grenade Recon Legendary	GRENADE	AMMO
+Items.GrenadeReconRare	Grenade Recon Rare	GRENADE	AMMO
+Items.GrenadeReconRegular	Grenade Recon Regular	GRENADE	AMMO
+Items.GrenadeReconSticky	Grenade Recon Sticky	GRENADE	AMMO
+Items.GrenadeSmokeEpic	Grenade Smoke Epic	GRENADE	AMMO
+Items.GrenadeSmokeLegendary	Grenade Smoke Legendary	GRENADE	AMMO
+Items.GrenadeSmokeRare	Grenade Smoke Rare	GRENADE	AMMO
+Items.GrenadeSmokeRegular	Grenade Smoke Regular	GRENADE	AMMO
+Items.Preset_Achilles_Nash_Epic	Achilles Nash Epic	WEAPON	WEAPON
+Items.Preset_Achilles_Nash_Legendary	Achilles Nash Legendary	WEAPON	WEAPON
+Items.Preset_Ajax_Moron	Ajax Moron	WEAPON	WEAPON
+Items.Preset_Ajax_Moron_Legendary	Ajax Moron Legendary	WEAPON	WEAPON
+Items.Preset_Baseball_Bat_Denny_Epic	Baseball Bat Denny Epic	WEAPON	WEAPON
+Items.Preset_Baseball_Bat_Denny_Legendary	Baseball Bat Denny Legendary	WEAPON	WEAPON
+Items.Preset_Baton_Tinker_Bell_Epic	Baton Tinker Bell Epic	WEAPON	WEAPON
+Items.Preset_Baton_Tinker_Bell_Legendary	Baton Tinker Bell Legendary	WEAPON	WEAPON
+Items.Preset_Burya_Comrade	Burya Comrade	WEAPON	WEAPON
+Items.Preset_Burya_Comrade_Legendary	Burya Comrade Legendary	WEAPON	WEAPON
+Items.Preset_Butchers_Knife_Iconic_Epic	Butchers Knife Iconic Epic	WEAPON	WEAPON
+Items.Preset_Butchers_Knife_Iconic_Legendary	Butchers Knife Iconic Legendary	WEAPON	WEAPON
+Items.Preset_Cane_Fingers_Epic	Cane Fingers Epic	WEAPON	WEAPON
+Items.Preset_Cane_Fingers_Legendary	Cane Fingers Legendary	WEAPON	WEAPON
+Items.Preset_Carnage_Edgerunners_Legendary	Carnage Edgerunners Legendary	WEAPON	WEAPON
+Items.Preset_Carnage_Mox_Epic	Carnage Mox Epic	WEAPON	WEAPON
+Items.Preset_Carnage_Mox_Legendary	Carnage Mox Legendary	WEAPON	WEAPON
+Items.Preset_Copperhead_Genesis	Copperhead Genesis	WEAPON	WEAPON
+Items.Preset_Copperhead_Genesis_Epic	Copperhead Genesis Epic	WEAPON	WEAPON
+Items.Preset_Copperhead_Genesis_Legendary	Copperhead Genesis Legendary	WEAPON	WEAPON
+Items.Preset_Dian_Yinglong	Dian Yinglong	WEAPON	WEAPON
+Items.Preset_Dildo_Stout_Epic	Dildo Stout Epic	WEAPON	WEAPON
+Items.Preset_Dildo_Stout_Legendary	Dildo Stout Legendary	WEAPON	WEAPON
+Items.Preset_Grad_Buck_Legendary	Grad Buck Legendary	WEAPON	WEAPON
+Items.Preset_Grad_Panam_Epic	Grad Panam Epic	WEAPON	WEAPON
+Items.Preset_Grad_Panam_Legendary	Grad Panam Legendary	WEAPON	WEAPON
+Items.Preset_Igla_Sovereign	Igla Sovereign	WEAPON	WEAPON
+Items.Preset_Igla_Sovereign_Legendary	Igla Sovereign Legendary	WEAPON	WEAPON
+Items.Preset_Katana_Cocktail_Epic	Katana Cocktail Epic	WEAPON	WEAPON
+Items.Preset_Katana_Cocktail_Legendary	Katana Cocktail Legendary	WEAPON	WEAPON
+Items.Preset_Katana_GoG_Crafted	Katana Go G Crafted	WEAPON	WEAPON
+Items.Preset_Katana_GoG_Epic	Katana Go G Epic	WEAPON	WEAPON
+Items.Preset_Katana_GoG_Legendary	Katana Go G Legendary	WEAPON	WEAPON
+Items.Preset_Katana_Hiromi_Epic	Katana Hiromi Epic	WEAPON	WEAPON
+Items.Preset_Katana_Hiromi_Legendary	Katana Hiromi Legendary	WEAPON	WEAPON
+Items.Preset_Katana_Saburo_Epic	Katana Saburo Epic	WEAPON	WEAPON
+Items.Preset_Katana_Saburo_Legendary	Katana Saburo Legendary	WEAPON	WEAPON
+Items.Preset_Katana_Surgeon_Epic	Katana Surgeon Epic	WEAPON	WEAPON
+Items.Preset_Katana_Surgeon_Legendary	Katana Surgeon Legendary	WEAPON	WEAPON
+Items.Preset_Katana_Takemura_Legendary	Katana Takemura Legendary	WEAPON	WEAPON
+Items.Preset_Katana_Wakako_Legendary	Katana Wakako Legendary	WEAPON	WEAPON
+Items.Preset_Kenshin_Frank_Legendary	Kenshin Frank Legendary	WEAPON	WEAPON
+Items.Preset_Kenshin_Royce_Epic	Kenshin Royce Epic	WEAPON	WEAPON
+Items.Preset_Kenshin_Royce_Legendary	Kenshin Royce Legendary	WEAPON	WEAPON
+Items.Preset_Knife_Stinger_Epic	Knife Stinger Epic	WEAPON	WEAPON
+Items.Preset_Knife_Stinger_Legendary	Knife Stinger Legendary	WEAPON	WEAPON
+Items.Preset_Kolac_Tiny_Mike_Legendary	Kolac Tiny Mike Legendary	WEAPON	WEAPON
+Items.Preset_Lexington_Wilson_Epic	Lexington Wilson Epic	WEAPON	WEAPON
+Items.Preset_Lexington_Wilson_Legendary	Lexington Wilson Legendary	WEAPON	WEAPON
+Items.Preset_Lexington_Wilson_Rare	Lexington Wilson Rare	WEAPON	WEAPON
+Items.Preset_Liberty_Dex_Epic	Liberty Dex Epic	WEAPON	WEAPON
+Items.Preset_Liberty_Dex_Legendary	Liberty Dex Legendary	WEAPON	WEAPON
+Items.Preset_Liberty_Padre_Legendary	Liberty Padre Legendary	WEAPON	WEAPON
+Items.Preset_Liberty_Yorinobu_Epic	Liberty Yorinobu Epic	WEAPON	WEAPON
+Items.Preset_Liberty_Yorinobu_Legendary	Liberty Yorinobu Legendary	WEAPON	WEAPON
+Items.Preset_Nekomata_Breakthrough	Nekomata Breakthrough	WEAPON	WEAPON
+Items.Preset_Nekomata_Breakthrough_Legendary	Nekomata Breakthrough Legendary	WEAPON	WEAPON
+Items.Preset_Neurotoxin_Knife_Iconic_Epic	Neurotoxin Knife Iconic Epic	WEAPON	WEAPON
+Items.Preset_Neurotoxin_Knife_Iconic_Legendary	Neurotoxin Knife Iconic Legendary	WEAPON	WEAPON
+Items.Preset_Nova_Doom_Doom_Epic	Nova Doom Doom Epic	WEAPON	WEAPON
+Items.Preset_Nova_Doom_Doom_Legendary	Nova Doom Doom Legendary	WEAPON	WEAPON
+Items.Preset_Nue_Jackie_Epic	Nue Jackie Epic	WEAPON	WEAPON
+Items.Preset_Nue_Jackie_Legendary	Nue Jackie Legendary	WEAPON	WEAPON
+Items.Preset_Nue_Maiko_Epic	Nue Maiko Epic	WEAPON	WEAPON
+Items.Preset_Nue_Maiko_Legendary	Nue Maiko Legendary	WEAPON	WEAPON
+Items.Preset_Omaha_Suzie_Epic	Omaha Suzie Epic	WEAPON	WEAPON
+Items.Preset_Omaha_Suzie_Legendary	Omaha Suzie Legendary	WEAPON	WEAPON
+Items.Preset_Overture_Cassidy_Legendary	Overture Cassidy Legendary	WEAPON	WEAPON
+Items.Preset_Overture_Kerry_Epic	Overture Kerry Epic	WEAPON	WEAPON
+Items.Preset_Overture_Kerry_Legendary	Overture Kerry Legendary	WEAPON	WEAPON
+Items.Preset_Overture_River_Legendary	Overture River Legendary	WEAPON	WEAPON
+Items.Preset_Pulsar_Buzzsaw	Pulsar Buzzsaw	WEAPON	WEAPON
+Items.Preset_Pulsar_Buzzsaw_Epic	Pulsar Buzzsaw Epic	WEAPON	WEAPON
+Items.Preset_Pulsar_Buzzsaw_Legendary	Pulsar Buzzsaw Legendary	WEAPON	WEAPON
+Items.Preset_Punk_Knife_Iconic_Epic	Punk Knife Iconic Epic	WEAPON	WEAPON
+Items.Preset_Punk_Knife_Iconic_Legendary	Punk Knife Iconic Legendary	WEAPON	WEAPON
+Items.Preset_Saratoga_Maelstrom_Epic	Saratoga Maelstrom Epic	WEAPON	WEAPON
+Items.Preset_Saratoga_Maelstrom_Legendary	Saratoga Maelstrom Legendary	WEAPON	WEAPON
+Items.Preset_Saratoga_Raffen_Epic	Saratoga Raffen Epic	WEAPON	WEAPON
+Items.Preset_Saratoga_Raffen_Legendary	Saratoga Raffen Legendary	WEAPON	WEAPON
+Items.Preset_Sidewinder_Divided_Epic	Sidewinder Divided Epic	WEAPON	WEAPON
+Items.Preset_Sidewinder_Divided_Legendary	Sidewinder Divided Legendary	WEAPON	WEAPON
+Items.Preset_Tactician_Dino_Legendary	Tactician Dino Legendary	WEAPON	WEAPON
+Items.Preset_Tactician_Headsman	Tactician Headsman	WEAPON	WEAPON
+Items.Preset_Tactician_Headsman_Legendary	Tactician Headsman Legendary	WEAPON	WEAPON
+Items.Preset_Tanto_Saburo_Retrofix	Tanto Saburo Retrofix	WEAPON	WEAPON
+Items.Preset_V_Unity	V Unity	WEAPON	WEAPON
+Items.Preset_V_Unity_Cutscene	V Unity Cutscene	WEAPON	WEAPON
+Items.Preset_Yukimura_Kiji_Legendary	Yukimura Kiji Legendary	WEAPON	WEAPON
+Items.Preset_Zhuo_Eight_Star	Zhuo Eight Star	WEAPON	WEAPON
