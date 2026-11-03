@@ -6,16 +6,9 @@ version = 3
 name = "bwms"
 version = "0.1.0"
 dependencies = [
- "bwms-core",
+ "bwms-primitives",
 ]
 
 [[package]]
-name = "bwms-core"
-version = "0.1.0"
-dependencies = [
- "bwms-hashes",
-]
-
-[[package]]
-name = "bwms-hashes"
+name = "bwms-primitives"
 version = "0.1.0"

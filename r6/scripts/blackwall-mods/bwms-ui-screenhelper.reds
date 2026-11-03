@@ -1,9 +1,5 @@
-// bwms-ui-screenhelper.reds — reimplementação PRÓPRIA do helper de tela (catálogo Codeware #112).
-//
-// POR QUE ESTE ARQUIVO EXISTE: a versão anterior foi removida em 2026-08-22 pela auditoria de
-// originalidade (corpo copiado de framework de terceiro). A capacidade é real e desejada, então
-// ela volta REESCRITA a partir do COMPORTAMENTO — nunca da fonte alheia. Só a API pública é
-// reconhecível, porque o nome que um mod chama é a forma do plugue e não é de ninguém.
+// bwms-ui-screenhelper.reds — reimplementação PRÓPRIA do helper de tela (catálogo Codeware #112), escrita a partir do COMPORTAMENTO,
+// nunca da fonte alheia. Só a API pública é reconhecível, porque o nome que um mod chama é a forma do plugue e não é de ninguém.
 //
 // DEPENDÊNCIAS, todas confirmadas por grep em `cp77-symbols/redscript-all.reds` ANTES de escrever:
 //   - `GameInstance.GetSettingsSystem(self) -> ref<UserSettings>`      (`:14212`, native vanilla)
@@ -27,6 +23,9 @@ public struct BwmsScreenSize {
     // `false` quando a leitura falhou e os campos são o fallback — deixa o chamador decidir se
     // aceita o palpite ou se prefere não desenhar nada.
     public let IsValid: Bool;
+    // A mesma medida em `Float`, com os nomes que os mods do Windows leem do `Vector2` (`ScreenHelper.GetScreenSize(game).X`).
+    public let X: Float;
+    public let Y: Float;
 }
 
 public abstract class ScreenHelper {
@@ -59,6 +58,8 @@ public abstract class ScreenHelper {
         out.Width = 1920;
         out.Height = 1080;
         out.IsValid = false;
+        out.X = 1920.0;
+        out.Y = 1080.0;
 
         if StrLen(text) == 0 {
             return out;
@@ -75,6 +76,8 @@ public abstract class ScreenHelper {
         }
         out.Width = w;
         out.Height = h;
+        out.X = Cast<Float>(w);
+        out.Y = Cast<Float>(h);
         out.IsValid = true;
         return out;
     }

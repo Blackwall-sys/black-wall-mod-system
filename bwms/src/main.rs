@@ -1,14 +1,19 @@
 //! bwms — CLI única do Black Wall Mod System.
 //!
-//! Uma porta de entrada. Os comandos de MOD rodam in-process via `bwms-core`
-//! (a mesma lógica que o mod-manager usa — sem duplicar, sem shellar). As
-//! ferramentas de DADOS (tweak/archive), que carregam C++/ooz e têm build.rs
-//! próprio, ficam como binários standalone e a `bwms` as front-enda.
-//!
-//! Mapa de onde cada função vive: `BWMS-MAPA.md` (ou `bwms map`).
+//! Uma porta de entrada. Os comandos de MOD (`classify`, `suggest`, `xl`) rodam in-process via `bwms_primitives::instalacao`; o
+//! `bwms mods checar` (módulo `mods`) checa os scripts do jogo. Mod entra no jogo pela pasta `Mods/` ou pelo mod.io, não por aqui. O
+//! `bwms tweak` (tweakdb.bin) é o módulo `tweak`, o `bwms archive` (.archive/CR2W) é o módulo `archive` e o `bwms input`
+//! (keybinds de mod) é o módulo `input`, todos in-process. O `bwms comentarios` (corte de comentário do pacote público) é o módulo
+//! `comentarios`.
 
-use bwms_core::{apply, classify, theme};
-use std::path::{Path, PathBuf};
+mod archive;
+mod comentarios;
+mod input;
+mod mods;
+mod tweak;
+
+use bwms_primitives::instalacao::{classify, theme};
+use std::path::Path;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
@@ -16,18 +21,19 @@ fn main() -> ExitCode {
     let cmd = args.first().map(String::as_str).unwrap_or("help");
     let rest: &[String] = if args.len() > 1 { &args[1..] } else { &[] };
     match cmd {
-        // --- mods: in-process via bwms-core ---
+        // --- mods: in-process via bwms_primitives::instalacao ---
         "classify" => cmd_classify(rest),
         "suggest" => cmd_suggest(rest),
-        "list" => cmd_list(rest),
-        "apply" => cmd_apply(rest),
         "xl" => cmd_xl(rest),
-        // --- ferramentas de dados: front-end dos binários standalone ---
-        "tweak" => exec_tool("tweakdb-tool", "tweakdb-tool", rest),
-        "archive" => exec_tool("archive-tool", "archive-tool", rest),
-        "mods" => exec_tool("cp77-mods", "mac-mod-manager", rest),
+        // o `bwms mods` lê o subcomando em args[1], como o argv de um binário: recebe `args` com o "mods" na frente
+        "mods" => mods::run(&args),
+        // --- ferramentas de dados, in-process ---
+        "tweak" => tweak::run(rest),
+        "archive" => archive::run(rest),
+        "input" => input::run(rest),
+        // --- empacotamento ---
+        "comentarios" => comentarios::run(rest),
         // --- meta ---
-        "map" => cmd_map(),
         "help" | "-h" | "--help" => {
             usage();
             ExitCode::SUCCESS
@@ -51,7 +57,7 @@ fn cmd_classify(args: &[String]) -> ExitCode {
     println!("compat:   {:?}", r.compat);
     println!("arquivos: {}", r.files.len());
     let s = theme::suggest(&r);
-    println!("tema:     {} ({}%) — {}", theme::category_label(&s.category), s.confidence, s.reason);
+    println!("tema:     {} (palavras casadas: {}) — {}", theme::category_label(&s.category), s.matched_words, s.reason);
     if !r.deps.is_empty() {
         println!("deps:");
         for d in &r.deps {
@@ -64,16 +70,16 @@ fn cmd_classify(args: &[String]) -> ExitCode {
             println!("  ! {x}");
         }
     }
-    if !r.notes.is_empty() {
+    if !r.notes.is_empty() || !r.avisos_do_xl.is_empty() {
         println!("notas:");
-        for n in &r.notes {
+        for n in r.notes.iter().chain(&r.avisos_do_xl) {
             println!("  • {n}");
         }
     }
     ExitCode::SUCCESS
 }
 
-/// `xl <arquivo.xl>` — parseia um `.xl` do ArchiveXL e imprime o resumo tipado (via bwms-core).
+/// `xl <arquivo.xl>` — parseia um `.xl` do ArchiveXL e imprime o resumo tipado (via `bwms_primitives::instalacao::xl`).
 fn cmd_xl(args: &[String]) -> ExitCode {
     let Some(path) = args.first() else {
         eprintln!("uso: bwms xl <arquivo.xl>");
@@ -86,20 +92,20 @@ fn cmd_xl(args: &[String]) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match bwms_core::xl::parse_xl(&text) {
+    match bwms_primitives::instalacao::xl::parse_xl(&text) {
         Ok(xl) => {
             // `bwms xl <file> reslink [out]` — emite os pares link/copy que o runtime lê em
             // <jogo>/red4ext/bwms-reslink.txt. Sem 'reslink' = só o summary.
             if args.get(1).map(String::as_str) == Some("reslink") {
-                let plan = bwms_core::apply_xl::build_apply_plan(&xl);
-                let out = bwms_core::apply_xl::emit_reslink(&xl);
-                eprintln!(
-                    "[xl] {} link + {} copy → {} redirect(s); nao-suportado: {}",
-                    plan.links,
-                    plan.copies,
-                    plan.redirects.len(),
-                    if plan.unsupported.is_empty() { "nenhum".to_string() } else { plan.unsupported.join(", ") }
-                );
+                let plan = bwms_primitives::instalacao::tabelas_de_runtime::build_apply_plan(&xl);
+                let out = bwms_primitives::instalacao::tabelas_de_runtime::emit_reslink_do_plano(&plan);
+                eprintln!("[xl] {} link + {} copy", plan.mapa_links.len(), plan.mapa_copies.len());
+                if !plan.cyclic_links.is_empty() {
+                    eprintln!("[xl] link em ciclo, fora da tabela (corrija o .xl): {}", plan.cyclic_links.join(", "));
+                }
+                for a in &plan.avisos {
+                    eprintln!("[xl] {a}");
+                }
                 return match args.get(2) {
                     Some(outp) => match std::fs::write(outp, &out) {
                         Ok(_) => {
@@ -134,136 +140,26 @@ fn cmd_suggest(args: &[String]) -> ExitCode {
     };
     let r = classify::classify(Path::new(dir));
     let s = theme::suggest(&r);
-    println!("{} ({}%) — {}", theme::category_label(&s.category), s.confidence, s.reason);
+    println!("{} (palavras casadas: {}) — {}", theme::category_label(&s.category), s.matched_words, s.reason);
     ExitCode::SUCCESS
-}
-
-fn cmd_list(args: &[String]) -> ExitCode {
-    let Some(game) = args.first() else {
-        eprintln!("uso: bwms list <pasta-do-jogo>");
-        return ExitCode::FAILURE;
-    };
-    let states = apply::reconcile(Path::new(game));
-    if states.is_empty() {
-        println!("(nenhum mod em staging — esperado em <jogo>/BWMS/mods/<tema>/<mod>/)");
-        return ExitCode::SUCCESS;
-    }
-    for m in &states {
-        let mark = if m.active { "[x]" } else { "[ ]" };
-        let fav = if m.favorite { " *" } else { "" };
-        println!("{mark} {:14} {}{}", theme::category_label(&m.category), m.name, fav);
-    }
-    ExitCode::SUCCESS
-}
-
-fn cmd_apply(args: &[String]) -> ExitCode {
-    let Some(game) = args.first() else {
-        eprintln!("uso: bwms apply <pasta-do-jogo>");
-        return ExitCode::FAILURE;
-    };
-    match apply::apply(Path::new(game)) {
-        Ok((added, removed)) => {
-            println!("apply ok: {added} .archive ativos no content, {removed} removidos");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("apply falhou: {e}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-/// Acha o binário de uma ferramenta standalone: ao lado da `bwms`, em
-/// `<crate>/target/release/<bin>` subindo a árvore (a partir do exe e do CWD),
-/// senão deixa o PATH resolver.
-fn find_tool(bin: &str, crate_dir: &str) -> PathBuf {
-    let rel = format!("{crate_dir}/target/release/{bin}");
-    let mut cands: Vec<PathBuf> = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(d) = exe.parent() {
-            cands.push(d.join(bin));
-        }
-        for a in exe.ancestors() {
-            cands.push(a.join(&rel));
-        }
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        for a in cwd.ancestors() {
-            cands.push(a.join(&rel));
-        }
-    }
-    for c in cands {
-        if c.is_file() {
-            return c;
-        }
-    }
-    PathBuf::from(bin) // fallback: PATH
-}
-
-fn exec_tool(bin: &str, crate_dir: &str, args: &[String]) -> ExitCode {
-    let path = find_tool(bin, crate_dir);
-    match std::process::Command::new(&path).args(args).status() {
-        Ok(st) => ExitCode::from(st.code().unwrap_or(1).clamp(0, 255) as u8),
-        Err(e) => {
-            eprintln!("bwms: não consegui executar '{bin}' ({e}).");
-            eprintln!("      compile: (cd {crate_dir} && cargo build --release)  ou ponha no PATH.");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn cmd_map() -> ExitCode {
-    // Acha o BWMS-MAPA.md subindo a árvore a partir do exe e do CWD.
-    let mut found = None;
-    let probe = |start: &Path, found: &mut Option<PathBuf>| {
-        for a in start.ancestors() {
-            let p = a.join("BWMS-MAPA.md");
-            if p.is_file() {
-                *found = Some(p);
-                break;
-            }
-            let p2 = a.join("mods-research").join("BWMS-MAPA.md");
-            if p2.is_file() {
-                *found = Some(p2);
-                break;
-            }
-        }
-    };
-    if let Ok(exe) = std::env::current_exe() {
-        probe(&exe, &mut found);
-    }
-    if found.is_none() {
-        if let Ok(cwd) = std::env::current_dir() {
-            probe(&cwd, &mut found);
-        }
-    }
-    match found {
-        Some(p) => {
-            println!("{}", p.display());
-            ExitCode::SUCCESS
-        }
-        None => {
-            eprintln!("bwms: BWMS-MAPA.md não encontrado por perto.");
-            ExitCode::FAILURE
-        }
-    }
 }
 
 fn usage() {
     println!("bwms — Black Wall Mod System (CLI unificada)\n");
     println!("USO: bwms <comando> [args]\n");
-    println!("  Mods (in-process, via bwms-core):");
+    println!("  Mods (in-process, via bwms-primitives):");
     println!("    classify <pasta>    analisa um mod (classe, compat, arquivos, tema, deps, riscos)");
     println!("    suggest  <pasta>    sugere o tema (Roupas/Veículos/LUT/...)");
-    println!("    list     <jogo>     lista os mods em staging (BWMS/mods/) e o estado");
-    println!("    apply    <jogo>     sincroniza os .archive ativos pro content do jogo");
     println!("    xl       <arq.xl>   le um .xl do ArchiveXL (factories/patch/link/...) e resume");
+    println!("    mods checar [jogo]  compila os scripts do jogo sem tocar no cache e aponta native func sem registro");
     println!();
-    println!("  Ferramentas de dados (front-end):");
-    println!("    tweak    [args]     -> tweakdb-tool (le/edita tweakdb.bin)");
-    println!("    archive  [args]     -> archive-tool (le/extrai .archive)");
-    println!("    mods     [args]     -> cp77-mods (gerenciador completo / TUI)");
+    println!("  Ferramentas de dados:");
+    println!("    tweak    [args]     le/edita tweakdb.bin (bwms tweak help)");
+    println!("    archive  [args]     le/extrai .archive (bwms archive help)");
+    println!("    input    [args]     mescla keybinds de mods (r6/input/*.xml) (bwms input --help)");
     println!();
-    println!("    map                 caminho do BWMS-MAPA.md (onde agir em cada funcao)");
+    println!("  Empacotamento:");
+    println!("    comentarios <entrada> <saida>  tira os comentários dos .reds e dos roteiros (.sh/.command) do pacote público");
+    println!();
     println!("    help                esta ajuda");
 }

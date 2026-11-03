@@ -1,10 +1,9 @@
-// bwms-ui-button.reds — botão de mod (catálogo Codeware #99), REESCRITO em 2026-08-22 depois
-// que a versão anterior saiu na auditoria de originalidade. Construído sobre `BwmsUIController`.
+// bwms-ui-button.reds — botão de mod (catálogo Codeware #99), construído sobre `BwmsUIController`.
 //
 // O QUE ENTREGA: um botão que um mod monta em duas linhas, com estado visual de hover/press e um
 // callback de clique — sem o mod ter que saber como a engine roteia evento de widget.
 //
-// A ARMADILHA QUE ISTO EVITA (bug real, corrigido em 2026-08-21): callback registrado no game
+// A ARMADILHA QUE ISTO EVITA (bug real): callback registrado no game
 // controller em vez de no WIDGET nunca dispara, e não há erro no log. Aqui os quatro eventos
 // (`OnEnter`/`OnLeave`/`OnPress`/`OnRelease` — nomes confirmados no código do jogo) são ligados
 // pelo `BwmsUIController.OnSelf`, que garante o alvo certo e ainda enfileira se a raiz ainda não

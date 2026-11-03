@@ -1,8 +1,39 @@
 #!/usr/bin/env bash
-# INSTALAR.command — Black Wall Mod System (bwms) 0.1.4 — double-click in Finder.
+# INSTALAR.command — Black Wall Mod System (bwms) 0.1.5 — double-click in Finder.
 # Finds Cyberpunk 2077 (or you drag the game icon/folder), removes quarantine, installs.
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
+
+#
+# Guard added in 0.1.4 after issue #2: people were cloning the GitHub repository (or downloading
+# its "Code -> Download ZIP") and running this script from there. That tree is SOURCE CODE — it has
+# no `engine/` folder, no compiled `bwms-helper` and no `extras/`, because those are build outputs
+# and binaries do not belong in a source repository. The script then died with a bare
+# "No such file or directory", which says nothing about what to do next.
+#
+# So: check first, and say plainly what happened and where the ready-made package is.
+if [ ! -f "$HERE/engine/bwms-install.sh" ] || [ ! -f "$HERE/engine/libcp77_console.dylib" ]; then
+  echo
+  echo "  This folder is the SOURCE CODE, not the installable package."
+  echo
+  echo "  You are most likely running this from a git clone or from GitHub's"
+  echo "  \"Code -> Download ZIP\". That tree has no engine/ folder, no compiled"
+  echo "  helper and no extras/ — those are build outputs, and binaries are not"
+  echo "  kept in a source repository."
+  echo
+  echo "  Download the ready-made package instead:"
+  echo "    the .zip attached to the latest release, under Releases on the"
+  echo "    GitHub page, or the same file on Nexus Mods."
+  echo
+  echo "  Unzip it and double-click INSTALAR.command from INSIDE that folder."
+  echo "  It contains engine/ and extras/ next to it, which is what this script needs."
+  echo
+  echo "  If you actually want to build from source, the README has the steps;"
+  echo "  the build produces the same layout under dist/."
+  echo
+  printf "  Press Enter to close this window. "; read -r _; exit 1
+fi
+
 
 # 0) remove macOS "quarantine" from this kit (anything from the internet gets it;
 #    without removing it macOS blocks the scripts and the dylib).
@@ -38,7 +69,7 @@ resolve_game(){
 }
 
 # --- language pick ---------------------------------------------------------
-printf '\n  Black Wall Mod System (bwms) 0.1.4\n\n'
+printf '\n  Black Wall Mod System (bwms) 0.1.5\n\n'
 printf '  Language — type a number, then press Enter:\n'
 printf '    1) English  (default)\n'
 printf '    2) Português\n'
@@ -53,42 +84,42 @@ esac
 
 case "$LC" in
   pt)
-    M_TITLE="Black Wall Mod System (bwms) 0.1.4 — beta"
+    M_TITLE="Black Wall Mod System (bwms) 0.1.5 — beta"
     M_NOTFOUND="Não achei o Cyberpunk 2077 automaticamente."
     M_DRAG="ARRASTE para esta janela o ícone 'Cyberpunk2077' do jogo (ou a pasta 'Cyberpunk 2077') e tecle Enter:"
     M_INVALID="Não reconheci como Cyberpunk 2077:"
     M_NEEDFOLDER="(arraste o ícone 'Cyberpunk2077' ou a pasta do jogo)."
     M_CLOSE="Tecle Enter para fechar."
     M_FOUND="Jogo encontrado:"
-    M_DONE="TUDO PRONTO. Abra o Cyberpunk 2077 pela sua loja (Steam / GOG / Epic)."
+    M_DONE="TUDO PRONTO. Abra o Cyberpunk 2077 pela Steam."
     M_INGAME='No jogo: a tecla  `  abre o console; ESC > Configurações > Mods tem os cheats.'
     M_PROBLEM="A instalação encontrou um problema (código"
     M_SEEABOVE="Veja as mensagens acima."
     M_CLOSEWIN="Tecle Enter para fechar esta janela."
     ;;
   zh)
-    M_TITLE="Black Wall Mod System (bwms) 0.1.4 — 测试版"
+    M_TITLE="Black Wall Mod System (bwms) 0.1.5 — 测试版"
     M_NOTFOUND="未能自动找到 Cyberpunk 2077。"
     M_DRAG="请把游戏的 'Cyberpunk2077' 图标（或 'Cyberpunk 2077' 文件夹）拖到此窗口，然后按回车："
     M_INVALID="无法识别为 Cyberpunk 2077："
     M_NEEDFOLDER="（请拖入 'Cyberpunk2077' 图标或游戏文件夹）。"
     M_CLOSE="按回车键关闭。"
     M_FOUND="已找到游戏："
-    M_DONE="全部完成。请通过你的商店（Steam / GOG / Epic）启动 Cyberpunk 2077。"
+    M_DONE="全部完成。请通过 Steam 启动 Cyberpunk 2077。"
     M_INGAME='游戏中：按  `  键打开控制台；ESC > 设置 > Mods 里有作弊选项。'
     M_PROBLEM="安装遇到问题（代码"
     M_SEEABOVE="请查看上方的信息。"
     M_CLOSEWIN="按回车键关闭此窗口。"
     ;;
   *)
-    M_TITLE="Black Wall Mod System (bwms) 0.1.4 — beta"
+    M_TITLE="Black Wall Mod System (bwms) 0.1.5 — beta"
     M_NOTFOUND="Couldn't find Cyberpunk 2077 automatically."
     M_DRAG="DRAG the game's 'Cyberpunk2077' icon (or the 'Cyberpunk 2077' folder) onto this window and press Enter:"
     M_INVALID="Didn't recognize that as Cyberpunk 2077:"
     M_NEEDFOLDER="(drag the 'Cyberpunk2077' icon or the game folder)."
     M_CLOSE="Press Enter to close."
     M_FOUND="Game found:"
-    M_DONE="ALL DONE. Launch Cyberpunk 2077 from your store (Steam / GOG / Epic)."
+    M_DONE="ALL DONE. Launch Cyberpunk 2077 from Steam."
     M_INGAME='In game: the  `  key opens the console; ESC > Settings > Mods has the cheats.'
     M_PROBLEM="The install hit a problem (code"
     M_SEEABOVE="See the messages above."

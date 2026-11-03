@@ -1,15 +1,10 @@
-// bwms-ui-popup.reds — diálogo modal de mod (catálogo Codeware #102/#103/#105/#106/#108/#111),
+// bwms-ui-popup.reds — diálogo modal de mod (catálogo Codeware #102/#103/#105/#106/#108/#111). Seis itens do catálogo saem deste arquivo.
 //
-// CORREÇÃO 2026-08-22 (crash real, 2 boots): guardar `array<ref<T>>` num `ScriptableSystem` faz o
-// motor tratar esses objetos como posse DELE. No world-swap do autocontinue (`phase=-1`) ele
-// destrói o sistema e tenta liberar o que está dentro — e crashou em
-// `red::memory::Free<PoolEngine>` com null deref, na GameThread, 2 vezes seguidas.
-// Referência FRACA (`wref`) resolve na raiz: o sistema passa a observar, nunca a possuir. Quem
-// criou o objeto continua dono dele — que é a semântica correta de qualquer jeito.
-// REESCRITO em 2026-08-22 depois que a versão anterior saiu na auditoria de originalidade.
-// Seis itens do catálogo saem deste arquivo.
+// Os objetos ficam em `array<wref<T>>` no `ScriptableSystem`, nunca `array<ref<T>>`: com `ref`, o motor trata os objetos como posse
+// do sistema e, ao destruí-lo no world-swap do autocontinue (`phase=-1`), tenta liberá-los — crash em `red::memory::Free<PoolEngine>`,
+// null deref na GameThread. Com `wref` o sistema só observa; quem criou o objeto continua dono dele.
 //
-// A ESTRUTURA, e por que é uma só: a camada anterior tinha um tipo por combinação (popup de
+// A ESTRUTURA, e por que é uma só: o Codeware tem um tipo por combinação (popup de
 // jogo, popup de menu, conteúdo, cabeçalho, rodapé...). Isso multiplica arquivo sem multiplicar
 // capacidade — as diferenças reais entre eles são o texto e quais botões aparecem. Aqui é UM
 // popup com três faixas (cabeçalho, corpo, rodapé) e uma pilha que sabe qual está por cima.

@@ -1,23 +1,55 @@
 //! CName do CP2077 = FNV1a64 do nome flat (ASCII). Idêntico ao RED4ext/CET/
-//! redscript — e ao `fnv1a64` do nosso tweakdb-tool. É como se resolve um tipo
-//! ou função RED por nome em runtime (IRTTISystem::GetClass(CName), etc.).
+//! redscript — e ao `fnv1a64` do `bwms-primitives`, o mesmo do tweakdb-tool. É como se resolve um tipo
+//! ou função RED por nome em runtime (IRTTISystem::GetClass(CName), etc.). Os tipos [`CName`] e
+//! [`ResourcePathHash`] separam esses ids nas fronteiras com `u64` de espécies misturadas.
 
-pub const FNV1A64_OFFSET: u64 = 0xCBF2_9CE4_8422_2325;
-pub const FNV1A64_PRIME: u64 = 0x0000_0100_0000_01B3;
-
-/// CName(nome) = FNV1a64(nome). `"None"`/vazio → 0 no engine (tratado pelo caller).
-pub fn cname(name: &str) -> u64 {
-    let mut h = FNV1A64_OFFSET;
-    for &b in name.as_bytes() {
-        h ^= u64::from(b);
-        h = h.wrapping_mul(FNV1A64_PRIME);
-    }
-    h
+/// CName(nome) = FNV1a64(nome), pela fonte única `bwms-primitives`. `"None"`/vazio → 0 no engine (tratado pelo caller).
+pub const fn cname(name: &str) -> u64 {
+    bwms_primitives::fnv1a64(name.as_bytes())
 }
 
-/// Pool de nomes (hash→string) pra `NameToString` reverter — espelha o CNamePool do
-/// engine no lado Lua. Populado por `CName.add`/`ToCName`/`StringToName`. (Não escreve
-/// no pool nativo do jogo; é o nosso espelho pra labels/lookups dos mods CET.)
+/// `CName` nas assinaturas que recebem vários `u64` de espécies diferentes (entidade, hash de item, `NodeRef`, máscara, caminho): trocar a ordem
+/// vira erro de compilação. Só nessas fronteiras; o resto do crate segue com o `u64` cru.
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct CName(u64);
+
+impl CName {
+    /// O hash de `nome` ([`cname`]).
+    pub(crate) const fn cname(nome: &str) -> Self {
+        Self(cname(nome))
+    }
+
+    /// O valor que veio pronto da memória do motor ou do frame de script, sem recalcular.
+    pub(crate) const fn lido_do_motor(hash: u64) -> Self {
+        Self(hash)
+    }
+
+    pub(crate) const fn valor(self) -> u64 {
+        self.0
+    }
+}
+
+/// Hash de caminho de recurso (`bwms_primitives::resource_path_hash`) nas mesmas fronteiras do [`CName`].
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ResourcePathHash(u64);
+
+impl ResourcePathHash {
+    /// O valor que veio pronto da memória do motor ou do frame de script, sem recalcular.
+    pub(crate) const fn lido_do_motor(hash: u64) -> Self {
+        Self(hash)
+    }
+
+    pub(crate) const fn valor(self) -> u64 {
+        self.0
+    }
+}
+
+/// Pool de nomes (hash→string) pra `name_of`/`espelhado` reverterem — espelha o CNamePool do
+/// engine. Populado por `intern`: o lado Lua (`CName.add`/`ToCName`/`StringToName`) e o Rust
+/// que monta CName pro motor (`tipos_do_motor`, `aparencia`, `register`). (Não escreve
+/// no pool nativo do jogo; isso é o `registrar_no_pool`.)
 static POOL: std::sync::Mutex<Option<std::collections::HashMap<u64, String>>> =
     std::sync::Mutex::new(None);
 
@@ -35,7 +67,7 @@ pub fn intern(name: &str) -> u64 {
 /// CNamePool::Get(hash) → char* (C-string null-terminated) no engine. Reverte qualquer
 /// CName, não só os internados por nós. Endereço sem símbolo (inlined) → VERSIONADO,
 /// validar com um hash conhecido no boot. ⚠️ muda por patch do jogo.
-const VM_CNAMEPOOL_GET: u64 = 0x1_0345_28e8;
+const VM_CNAMEPOOL_GET: u64 = 0x1_04e3_8560;
 
 /// Resolve um CName (hash FNV1a64) → nome via pool NATIVO do engine. "" se desconhecido,
 /// "None" se hash 0. Variante C-string (lê só x0 e varre até o NUL) p/ robustez de ABI.
@@ -48,22 +80,36 @@ pub fn resolve_cname(hash: u64) -> String {
         type Get = unsafe extern "C" fn(u64) -> *const i8;
         let get: Get = core::mem::transmute(crate::rebase(VM_CNAMEPOOL_GET));
         let p = get(hash);
-        if p.is_null() || !crate::gum::is_readable(p as *const std::ffi::c_void, 1) {
+        if p.is_null() || !crate::memoria::is_readable(p as *const std::ffi::c_void, 1) {
             return String::new();
         }
         std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
     }
 }
 
+/// `CName(const char*)` do motor que registra o texto no pool (`0x104e389d0`): mede, calcula o FNV-1a64 e grava hash, texto e tamanho antes de devolver o
+/// hash. Depois dele o `CNamePool::Get` resolve o nome. Texto vazio, `None` ou com NUL devolvem 0 sem registrar.
+const VM_CNAME_REGISTRAR: u64 = 0x1_04e3_89d0;
+
+/// Registra `nome` no pool NATIVO do motor e devolve o hash (o `CNamePool::Add` da referência). Só depois do motor no ar.
+pub fn registrar_no_pool(nome: &str) -> u64 {
+    let Ok(texto) = std::ffi::CString::new(nome) else { return 0 };
+    unsafe {
+        let registrar: unsafe extern "C" fn(*const i8) -> u64 = core::mem::transmute(crate::rebase(VM_CNAME_REGISTRAR));
+        registrar(texto.as_ptr())
+    }
+}
+
+/// Nome que o BWMS internou (`intern`), sem tocar o pool do motor.
+pub fn espelhado(hash: u64) -> Option<String> {
+    POOL.lock().ok()?.as_ref()?.get(&hash).cloned()
+}
+
 /// Reverte um hash pro nome: primeiro o espelho interno (intern), senão o pool NATIVO
 /// (resolve_cname). None se nenhum resolver.
 pub fn name_of(hash: u64) -> Option<String> {
-    if let Ok(g) = POOL.lock() {
-        if let Some(m) = g.as_ref() {
-            if let Some(s) = m.get(&hash) {
-                return Some(s.clone());
-            }
-        }
+    if let Some(s) = espelhado(hash) {
+        return Some(s);
     }
     let s = resolve_cname(hash);
     if s.is_empty() {
@@ -73,24 +119,6 @@ pub fn name_of(hash: u64) -> Option<String> {
     }
 }
 
-/// CRC-32 IEEE (mesmo do tweakdb-tool). Usado no TweakDBID.
-pub fn crc32(bytes: &[u8]) -> u32 {
-    let mut crc = 0xFFFF_FFFF_u32;
-    for &b in bytes {
-        crc ^= u32::from(b);
-        for _ in 0..8 {
-            let mask = (crc & 1).wrapping_neg();
-            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
-        }
-    }
-    !crc
-}
-
-/// TweakDBID de um nome: `CRC32(nome) | (len << 32)` (8 bytes LE).
-pub fn tweak_db_id(name: &str) -> u64 {
-    u64::from(crc32(name.as_bytes())) | ((name.len() as u64) << 32)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,7 +126,7 @@ mod tests {
     #[test]
     fn vetor_padrao_fnv() {
         // Vetores canônicos do FNV-1a 64.
-        assert_eq!(cname(""), FNV1A64_OFFSET);
+        assert_eq!(cname(""), bwms_primitives::FNV1A64_OFFSET);
         assert_eq!(cname("a"), 0xaf63_dc4c_8601_ec8c);
     }
 

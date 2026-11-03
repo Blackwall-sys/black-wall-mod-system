@@ -1,12 +1,8 @@
-// bwms-ui-resolutionwatcher.reds — reage a mudança de resolução (catálogo Codeware #113),
+// bwms-ui-resolutionwatcher.reds — reage a mudança de resolução (catálogo Codeware #113). Depende de `bwms-ui-screenhelper.reds`.
 //
-// CORREÇÃO 2026-08-22 (crash real, 2 boots): guardar `array<ref<T>>` num `ScriptableSystem` faz o
-// motor tratar esses objetos como posse DELE. No world-swap do autocontinue (`phase=-1`) ele
-// destrói o sistema e tenta liberar o que está dentro — e crashou em
-// `red::memory::Free<PoolEngine>` com null deref, na GameThread, 2 vezes seguidas.
-// Referência FRACA (`wref`) resolve na raiz: o sistema passa a observar, nunca a possuir. Quem
-// criou o objeto continua dono dele — que é a semântica correta de qualquer jeito.
-// REESCRITO em 2026-08-22. Depende de `bwms-ui-screenhelper.reds`.
+// Os objetos ficam em `array<wref<T>>` no `ScriptableSystem`, nunca `array<ref<T>>`: com `ref`, o motor trata os objetos como posse
+// do sistema e, ao destruí-lo no world-swap do autocontinue (`phase=-1`), tenta liberá-los — crash em `red::memory::Free<PoolEngine>`,
+// null deref na GameThread. Com `wref` o sistema só observa; quem criou o objeto continua dono dele.
 //
 // PARA QUE SERVE: UI de mod é montada com tamanhos calculados na resolução do momento. Quando o
 // jogador muda a resolução (ou alterna janela/tela cheia), esses números ficam errados e o mod

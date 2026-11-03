@@ -23,7 +23,7 @@ transliterated or adapted into it.
 
 ## How that is enforced, not just claimed
 
-`dist/auditoria-originalidade.py` runs as a mandatory gate in **both** the packaging script and
+`bwms/examples/originalidade.rs` runs as a mandatory gate in **both** the packaging script and
 the public-export script. It compares every published `.reds` against the vendored third-party
 sources and **fails the build** if any file contains a contiguous block of copied *body*.
 
@@ -37,22 +37,16 @@ Two deliberate choices in that check:
 The gate was validated in both directions: it passes on what ships, and it correctly flags a
 known-copied set when pointed at one.
 
-## What was removed, and why
+## Scope of the rule
 
-In August 2026 an audit of this kind found 31 redscript files in the release candidate that were
-literal ports of a third-party framework (MIT-licensed). Rather than ship them with attribution,
-they were **removed** — the project's rule is that third-party code does not travel in it, license
-permitting or not. Some capability was lost with them; that was the accepted cost. Anything
-rewritten later will be written from the behaviour, not from the source.
+The rule is that third-party code does not **live** here — not merely that it does not ship. The
+gate runs against the working tree as well as against the published one, because a file kept
+around "for reference" is one refactor away from being shipped by accident.
 
-That first pass cleaned the release. It did not clean the workbench: running the same gate against
-the development tree the next day found **29 more files still there**, renamed and regrouped rather
-than removed, three of them under names that read as this project's own. They were removed too, and
-the gate is now run against the working tree, not only against what leaves it. The rule is that
-third-party code does not live here — not merely that it does not ship.
-
-Two of the capability gaps this project tracks had been closed inside those files. They were
-reopened. Work that cannot ship is not work that is done.
+Where a capability would require someone else's implementation to exist, it is written from the
+behaviour instead — from what the thing does, not from how they did it. Only the public API is
+allowed to look familiar: the name a PC mod calls is the shape of the plug, and that belongs to
+nobody.
 
 ## Game content
 

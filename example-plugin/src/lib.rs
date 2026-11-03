@@ -112,9 +112,9 @@ pub struct BwmsApi {
     pub log_level: unsafe extern "C" fn(u8, *const c_char),
     pub semver_satisfies: unsafe extern "C" fn(*const c_char, *const c_char) -> bool,
     pub register_draw_callback: unsafe extern "C" fn(extern "C" fn()) -> bool,
-    pub imgui_begin: unsafe extern "C" fn(*const c_char) -> bool,
-    pub imgui_text: unsafe extern "C" fn(*const c_char),
-    pub imgui_end: unsafe extern "C" fn(),
+    pub janela_abrir: unsafe extern "C" fn(*const c_char) -> bool,
+    pub janela_texto: unsafe extern "C" fn(*const c_char),
+    pub janela_fechar: unsafe extern "C" fn(),
     pub scripts_add: unsafe extern "C" fn(*const c_char) -> bool,
     /// v12: registra callbacks de lifecycle de estado de jogo (red4ext-gamestates-add).
     /// state_type: 2=Running, 3=Shutdown. on_enter/update/exit são Optional.
@@ -360,8 +360,8 @@ unsafe extern "C" fn example_onupdate_handler(_ctx: *mut c_void, _frame: *mut c_
     }
 }
 
-/// `cet-imgui-thirdparty`: desenha a PRÓPRIA janela ImGui, de um dylib de 3o-autor genuíno, SEM
-/// linkar imgui-rs/cimgui — só os 3 wrappers finos (`imgui_begin`/`imgui_text`/`imgui_end`) da
+/// Desenha a PRÓPRIA janela, de um dylib de 3o-autor genuíno, sem linkar nenhuma biblioteca de
+/// interface — só as 3 funções da C-ABI (`janela_abrir`/`janela_texto`/`janela_fechar`) da
 /// API pública. Chamado 1x/frame pelo core, dentro do onDraw (overlay BWMS aberto).
 extern "C" fn example_draw_callback() {
     let api = API_PTR.load(std::sync::atomic::Ordering::Relaxed);
@@ -369,11 +369,11 @@ extern "C" fn example_draw_callback() {
         return;
     }
     unsafe {
-        let title = CString::new("Example Plugin (3rd-party, no imgui-rs link)").unwrap();
-        ((*api).imgui_begin)(title.as_ptr());
-        let text = CString::new("Hello from example-plugin! (cet-imgui-thirdparty)").unwrap();
-        ((*api).imgui_text)(text.as_ptr());
-        ((*api).imgui_end)();
+        let title = CString::new("Example Plugin (3rd-party, links nothing)").unwrap();
+        ((*api).janela_abrir)(title.as_ptr());
+        let text = CString::new("Hello from example-plugin! (window via BwmsApi)").unwrap();
+        ((*api).janela_texto)(text.as_ptr());
+        ((*api).janela_fechar)();
     }
     unsafe { late_registration_probe_once(api) };
 }
@@ -600,7 +600,7 @@ pub unsafe extern "C" fn bwms_plugin_main(api: *const BwmsApi) -> i32 {
     )) {
         ((*api).log)(msg.as_ptr());
     }
-    // v10: registra o draw callback (cet-imgui-thirdparty) — a janela some se rodar ANTES do
+    // v10: registra o draw callback (janela do plugin) — a janela some se rodar ANTES do
     // overlay estar pronto (in_draw() sempre false até lá); registrar 1x aqui e o core chama
     // TODO frame daí em diante já é suficiente.
     let dok = ((*api).register_draw_callback)(example_draw_callback);

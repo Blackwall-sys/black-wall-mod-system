@@ -1,17 +1,12 @@
 // bwms-ui-themecolors.reds — reimplementação PRÓPRIA das cores de tema (catálogo Codeware #114).
 //
-// POR QUE ESTE ARQUIVO EXISTE: a versão anterior saiu em 2026-08-22 na auditoria de originalidade.
-// A capacidade volta REESCRITA do comportamento — e, no caminho, melhor do que era.
-//
-// A MUDANÇA DE ABORDAGEM, e por que ela é a certa:
-// a implementação antiga devolvia ~9 `HDRColor` com componentes HARDCODADOS. Isso tem dois
-// problemas que não são de licença, são de qualidade:
+// A cor NÃO é um número guardado aqui. Componentes fixos de `HDRColor` teriam dois problemas:
 //   1. **Envelhece calado.** Se um patch do jogo (ou um mod de tema) mexer na paleta, as cores
 //      fixas passam a destoar do resto da UI e ninguém percebe até ver na tela.
-//   2. **Vários dos nomes não existem no jogo.** Grepando o código do próprio jogo, a paleta real
+//   2. **O nome tem que existir no jogo.** Grepando o código do próprio jogo, a paleta real
 //      é `MainColors.Red`/`Blue`/`PanelRed`/`PanelDarkRed`/`SupBlue`/`MildRed`/`ActiveBlue`/
 //      `ActiveRed`/`ActiveGreen`/`ActiveYellow`/`DarkRed`/`Purple`/`Grey` — nomes como
-//      "ElectricBlue" eram invenção da camada de terceiro, não cor do Cyberpunk.
+//      "ElectricBlue" não são cor do Cyberpunk.
 //
 // Então aqui a cor NÃO é um número que a gente guarda: é resolvida pelo MOTOR, em runtime, pelo
 // mesmo mecanismo que o jogo usa na própria UI (`BindProperty(n"tintColor", n"MainColors.X")` —
@@ -69,8 +64,10 @@ public abstract class ThemeColors {
     // Devolve o `HDRColor` que o tema resolve para essa cor, usando o widget dado como contexto
     // de estilo. O widget precisa estar na árvore — ver a nota de honestidade no topo.
     //
-    // Preserva a cor original: aplica o binding, lê o resultado e restaura o que estava lá. Um
-    // helper de leitura não pode deixar rastro no widget de quem chamou.
+    // Preserva a cor original: aplica o binding, lê o resultado, desfaz o binding e restaura o que
+    // estava lá. Um helper de leitura não pode deixar rastro no widget de quem chamou — sem o
+    // `UnbindProperty`, a próxima atualização de estilo repintaria o widget com a cor lida.
+    // Limite: se a tinta do widget já estava ligada a um estilo, essa ligação sai junto.
     public static func ResolveFrom(widget: ref<inkWidget>, color: CName) -> HDRColor {
         let fallback: HDRColor;
         fallback.Red = 1.0;
@@ -85,6 +82,7 @@ public abstract class ThemeColors {
             return fallback;
         }
         let resolved: HDRColor = widget.GetTintColor();
+        widget.UnbindProperty(n"tintColor");
         widget.SetTintColor(original);
         return resolved;
     }

@@ -1,0 +1,16 @@
+# Como o GitHub deve contar as linguagens deste repositório: o código do projeto é Rust.
+#
+# Os arquivos abaixo existem no repositório e são lidos normalmente; só ficam fora da contagem.
+
+# Ponte FFI de 16 linhas para o decodificador Kraken: cola de linkagem, o decodificador em si é dependência externa.
+*.cpp linguist-vendored
+
+# Página estática de uma ferramenta de linha de comando local (inspeção de TweakDB).
+*.html linguist-detectable=false
+
+# Redscript é a linguagem de script do próprio Cyberpunk 2077: o jogo compila estes arquivos, que são a interface do mod com ele.
+*.reds linguist-detectable=false
+
+# Instalador e roteiros de build.
+*.sh linguist-detectable=false
+*.command linguist-detectable=false

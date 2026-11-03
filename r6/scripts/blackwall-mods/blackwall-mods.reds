@@ -1,11 +1,45 @@
-// blackwall-mods.reds — passo 2: pagina de cheats IN-LOCO na lista do menu de pausa.
-// Reusa Clear/AddMenuItem/Refresh herdados de gameuiMenuItemListGameController (texto limpo).
-// Zero CET, zero hook de runtime. So menu de PAUSA (precisa de player vivo).
+// blackwall-mods.reds — o botão MODS e a página de cheats na lista do menu de pausa, e a entrada do V no jogo (`BwmsAoEntrarNoJogo`).
+// A página reusa Clear/AddMenuItem/Refresh herdados de gameuiMenuItemListGameController (texto limpo), sem CET e sem hook de runtime;
+// só no menu de PAUSA (precisa de player vivo).
 //
 // Modo Imortal le o ESTADO REAL do God Mode via GodModeSystem.HasGodMode (sem campo proprio
 // que reseta). Precedente vanilla: cyberpunk/UI/Player/healthbar.script:683.
 
 @addField(PauseMenuGameController) let m_bwInModsPage: Bool;
+
+// Desliga o God Mode do BWMS: a fonte atual e as antigas (`BlackwallMods` do botão MODS e `Console` do terminal até a 0.1.5). O jogo grava o
+// GodModeSystem no save, então um save antigo traz essas entradas e tirar só a `BWMS` deixa o V invulnerável. A chave `godmode` da config externa
+// zera junto: o `BwmsAoEntrarNoJogo` religa por ela na carga, e o OFF de qualquer caminho tem de valer no próximo save carregado.
+public func BwmsGodModeDesligar(sys: ref<GodModeSystem>, id: EntityID) -> Void {
+  let fontes: array<CName> = [n"BWMS", n"BlackwallMods", n"Console"];
+  for fonte in fontes {
+    let voltas: Int32 = 0;
+    while voltas < 8 && sys.RemoveGodMode(id, gameGodModeType.Invulnerable, fonte) {
+      voltas += 1;
+    };
+  };
+  BwmsConfigSet("godmode", "0");
+}
+
+// Entrada no jogo: o Rust chama isto uma vez por player de gameplay real (fim do load), com a GameInstance do próprio player. Disparador
+// único do que o produto faz com o V vivo; pelo tick e não por wrapper de `OnGameAttached`, que também recebe o player do menu.
+public func BwmsAoEntrarNoJogo(game: GameInstance) -> Void {
+  let pp: ref<PlayerPuppet> = GameInstance.GetPlayerSystem(game).GetLocalPlayerControlledGameObject() as PlayerPuppet;
+  if !IsDefined(pp) {
+    return;
+  };
+  // ArchiveXL #29: o PuppetStateHandler do V (estado de braços e pés para os sufixos de aparência).
+  pp.BwmsAlwaysRun_estado_do_boneco();
+  // God Mode ligado na config externa (fora do save) volta. O save pode já trazer a entrada `BWMS`: só põe sem invulnerabilidade, para não
+  // duplicar a fonte.
+  let cfgGod: String = BwmsConfigGet("godmode");
+  if Equals(cfgGod, "1") {
+    let gms: ref<GodModeSystem> = GameInstance.GetGodModeSystem(game);
+    if !gms.HasGodMode(pp.GetEntityID(), gameGodModeType.Invulnerable) {
+      gms.AddGodMode(pp.GetEntityID(), gameGodModeType.Invulnerable, n"BWMS");
+    };
+  };
+}
 
 // i18n: mesma deteccao do bwms-settings-poc (idioma do jogo via /language OnScreen, default EN).
 @addMethod(PauseMenuGameController)
@@ -73,9 +107,10 @@ protected cb func OnMenuItemActivated(index: Int32, target: ref<ListItemControll
     if IsDefined(owner) {
       let sys: ref<GodModeSystem> = GameInstance.GetGodModeSystem(owner.GetGame());
       if sys.HasGodMode(owner.GetEntityID(), gameGodModeType.Invulnerable) {
-        sys.RemoveGodMode(owner.GetEntityID(), gameGodModeType.Invulnerable, n"BlackwallMods");
+        BwmsGodModeDesligar(sys, owner.GetEntityID());
       } else {
-        sys.AddGodMode(owner.GetEntityID(), gameGodModeType.Invulnerable, n"BlackwallMods");
+        sys.AddGodMode(owner.GetEntityID(), gameGodModeType.Invulnerable, n"BWMS");
+        BwmsConfigSet("godmode", "1");
       };
     };
     this.BWShowModsPage(); return true;

@@ -1,0 +1,129 @@
+# Censo de 112 mods do Nexus: mods-research/tmp/censo-de-mods-20260927/tabela.tsv, coluna 1, na mesma ordem.
+# Colunas separadas por TAB: nome, categoria e os arquivos que resultado.json (campo o_que_traz) cita para o
+# mod, zero ou mais. O teste monta cada arquivo no caminho escrito aqui.
+# - .archive: só o nome. Nomes com "..." são abreviação do próprio censo. "-PinkJudy.archive" aparece lá como
+#   sufixo de "###-PreemHair" e vai inteiro aqui.
+# - .xl, .reds, .lua, .yaml, .yml e .tweak: o caminho como o censo escreve, com a pasta quando ele dá
+#   ("r6/scripts/LHUD/modules/worldMarkersEnemy.reds"). Ficam de fora pedaço sem nome (".archive.xl",
+#   ".dll/.lua") e curinga ("r6/scripts/VirtualCarDealer/*.reds").
+# - Os outros tipos (.dll, .ini, .xml, .toml, .json...) ficam de fora: o censo os cita junto de fonte do
+#   repositório (.cpp, Cargo.toml), download (.zip, .exe) e arquivo gerado em uso (db.sqlite3).
+# A categoria é a que bwms_primitives::instalacao::theme::suggest dá para o nome mais os arquivos. Para regenerar a coluna,
+# rodar `cargo test --offline censo` em bwms-primitives: o teste `censo_de_112_mods_da_a_categoria_do_fixture`
+# lista cada linha divergente com a categoria de agora. Mudança de palavra-chave ou de regra que mexa numa
+# linha atualiza a linha na mesma mudança, com o porquê.
+# A coluna NÃO é o rótulo certo do mod.
+# TODO(dono): rótulo esperado de cada mod. Onde ele discordar desta coluna, a coluna passa a ser o rótulo
+# dele e a palavra-chave é consertada até o teste passar.
+Cyber Engine Tweaks	outros
+ArchiveXL	outros
+RED4ext	outros
+redscript	outros
+TweakXL	outros
+Codeware	outros
+Mod Settings	outros	ModSettings.archive	ModSettings.archive.xl
+Native Settings UI	interface
+Virtual Atelier	outros	VirtualAtelier.archive	VirtualAtelier.archive.xl	SetupNewSite.reds
+Equipment-EX	outros	EquipmentEx.archive	EquipmentEx.archive.xl	EquipmentEx.reds	EquipmentEx.Global.reds
+Input Loader	outros
+Browser Extension	outros	browserController.overrides.reds	BrowserExtension.Classes.reds	BrowserExtension.DataStructures.reds	BrowserExtension.System.reds	HomePagePagination.reds	BlockByAddress.reds
+Material and Texture Override	visual	###_nim_material_override.archive
+Immersive First Person v2.0 - Native Height and Camera Rework	outros	ImmersiveFirstPersonHeight.archive	init.lua	Modules/CameraCore.lua	Config.lua	GameSession.lua	NativeCameraCurve.lua	NativeCameraSampler.lua	RuntimeHeight.lua	Vars.lua	r6/scripts/ImmersiveFirstPerson/LookAt.reds
+Virtual Car Dealer	veiculos	VirtualCarDealer.archive	VirtualCarDealer.archive.xl	Cheat.reds	Config.reds	Utils.reds
+Cyberware-EX	gameplay
+Deceptious Quest Core	outros
+Romance Hangouts Enhanced	outros	BB5_RomanceHangoutsEnhanced.archive	RomanceHangoutsEnhanced.archive
+ACU - Character Preset Manager	outros	r6/scripts/appearanceChangeUnlocker/mirrorUnlocker.reds	bin/x64/plugins/cyber_engine_tweaks/mods/AppearanceChangeUnlocker/init.lua
+No Intro Videos	outros	basegame_no_intro_videos.archive	r6/scripts/NoIntroVideos.reds
+Reset Attributes always available - Redscript	outros	r6/scripts/ResetAttributesAlwaysAvailable.reds
+Nova LUT 4.0 (AgX - New HDR)	lut	###-NovaLUT4.archive
+Panam Romanced Enhanced	npc	PanamPrivacy.archive	PanamRomancedEnhanced.archive	archive/pc/mod/PanamPrivacy.archive.xl	r6/scripts/PanamPrivacy/PanamPrivacy.reds	r6/scripts/PanamRomancedEnhanced/PanamRomancedEnhanced.reds
+Always First Equip	outros	AlwaysFirstEquip.archive	r6/scripts/alwaysFirstEquip.reds	archive/pc/mod/AlwaysFirstEquip.archive.xl
+-KS- UV Texture Framework	visual
+Audioware	audio
+WINGDEER HAIR COLLECTION	cabelos
+Native Interactions Framework	outros	nativeInteractions.archive	init.lua	r6/scripts/nativeInteractions.reds
+Better Vehicle Handling	veiculos
+Judy Romanced Enhanced	npc
+Save Editor (Project CyberCAT-SimpleGUI)	outros
+Simple Menu - An In-Game UI including Hotkeys	interface	init.lua
+cybercmd	outros
+JB - TPP MOD WIP third person	interface	jb_tpp_mod_1.archive	init.lua	JB.lua	GameUI.lua	GameSession.lua	GameSettings.lua	Cron.lua	Attachment.lua
+Redscript Configuration Framework	outros
+City of Dreams Overhaul	gameplay
+LUT Switcher 3 (Realtime - Scanner - Weather - Menu)	lut
+ReLUX (Lighting Redux - Accurate Lighting - AIO)	clima
+Cyberpunk 2077 HD Reworked Project	visual	HD Reworked Project.archive
+Better Loot Markers	gameplay	init.lua
+Appearance Menu Mod (AMM)	interface	AMM_PlayerBodyTag.xl
+CCXL (Character Creator XL, recurso do ArchiveXL)	outros
+RadioExt	outros	init.lua
+RedFileSystem	outros
+RedData	outros
+RedHttpClient	outros
+Phone Extension	outros
+VendorsXL	outros
+Night City Interactions - Core	interface	NightCityInteractions.archive	NightCityInteractions.archive.xl	NightCityInteractions.reds	NightCityInteractions.yaml	GameUI.lua	init.lua	loc.lua	saving.lua
+Multilayer Material Xtender	visual	zz_NeuroMultilayerMaterialXtender-2.2.archive
+Zenitex Core Dependency (5.0)	outros	#_scorpion_zenitex_core_dependency.archive	#_scorpion_zenitex_core_dependency.xl	#_scorpion_zenitex_core_dependency.yaml
+Trigger Mode Control	audio	TriggerModeControl.archive	TriggerModeControl.archive.xl	TriggerModeControl.reds	AudioFixes.reds	config.reds	TriggerModeControl.yaml
+PhotoMode-EX	outros	Scripts/PhotoModeEx.Global.reds	Scripts/PhotoModeEx.reds	Facade.reds	Utils.reds
+Native Settings UI Side Menu Add-on	interface	init.lua	Ref.lua
+RedFunctions	outros
+Perk Addition Framework	gameplay	r6/scripts/PerkAdditionFramework/Logger.reds	PerkAdditionFramework.reds
+Custom Perk Framework	interface	Config.reds	CustomPerkTree.reds	Registry.reds	UI/CharacterScreenButton.reds	UI/Popup.reds	LocalizationProvider.reds	bin/x64/plugins/cyber_engine_tweaks/mods/CustomPerkFramework/init.lua
+WolvenKit	outros
+The Community Palette Project	outros	TheCommunityPaletteProject_MLTemplateResource.archive
+VTK Vanilla HD Body for FemV	visual	vtk_VanillaHD_Body_xBaebsae.xl
+Enhanced Big Breasts (EBB) - BODY MOD	outros
+VTK Hyst - Angel - Big Breasts Body mod	outros
+ANGEL Body - Full Vanilla Refit	outros	ANGEL_Body_VanillaRefits_xBaebsae.archive
+spawn0 - BODY MOD 2.0	outros
+Gymfiend - Body Mod - Male V - VTK	outros
+Vanilla Clothes Refits for Enhanced Big Breast	outros
+UNIVERSAL SKIN TONE - 72 skin tone - VTK KSUV	estetica	###_..._FaceDetails_Realistic_01.archive	##_..._SkinMaterial_WarmSmooth.archive	##_Arkhe_UniversalSkinTone_BODY_PALE.archive	##_Arkhe_UniversalSkinTone_Microdetails_Realistic.archive	..._Microdetails_Realistic_VTK.archive	x_..._VTK_HEADFILE_BugFix.archive
+8k-4k skin texture and material for female and male	visual	00_Skin_TEX.archive	00_Skin_material.archive	1_Z_Skin_HEAD.archive
+Peachu - Hair Collection - CCXL	cabelos	Peachu - Sunny Buns Hair - CCXL.archive	peachu_wavylong_CCXL.archive	peachu_wavylong_CCXL.xl	peachu_sunnybuns_CCXL.xl
+ALMOST PERFECT COLLECTION - CCXL HAIR	cabelos	MELUMINARY - CCXL - HARPY MESSY PONY.archive	MELUMINARY - DEATH STRANDING - AMELIE.archive
+Hair Color Profiles CCXL	cabelos	id_hair_profiles_ccxl.archive	archive/pc/mod/id_hair_profiles_ccxl.xl	r6/tweaks/id_hair_profiles_ccxl/id_hair_profiles_ccxl_OptionsIcons.yaml
+Multicolored Hair CCXL - Core - Resources	cabelos	mch_id_hair_profiles_compatibility.archive	mch_multicolored_hair_core.archive	mch_multicolored_hair_core.xl	r6/scripts/ccxl_multicoloredhair.reds
+Wolfcut Hair Collection - CCXL	cabelos	NUT_messywolf_ccxl.archive	NUT_wolfcut_messy_ccxl.xl
+Undercut Hair Collection - CCXL - Masc	cabelos	HALK_CCXL_Hair_ManBunUndercut.archive	HALK_CCXL_Hair_SideWaveUndercut.archive	HALK_CCXL_Hair_SlickBackBraidsUndercut.archive	HALK_Hair_SlickBackUndercut.archive
+Preem Hair (Optional Judy Hair Colors)	npc	###-PreemHair.archive	###-PreemHair-PinkJudy.archive
+Heterochromia Eyes - CCXL	estetica	CCXL_icxrus_Heterochromia.archive	CCXL_icxrus_Heterochromia.xl	r6/tweaks/icxrus_heterochromia_CCXL/icxrus_heterochromia_OptionsIcons.yaml
+Beautiful EYEBROWS - CCXL - BOTH V	estetica	Arkhe_Beautiful_Eyebrows_01_DEFAULT_CCXL.archive	Arkhe_Beautiful_Eyebrows_01_FULLER_CCXL.archive
+Nola Dreamer's archive XL clothes for fem V (pack 1)	outros	ND_Meredith_heels_XL.archive	ND_crop_sweater_FemV.archive	ND_ninja_boots_f_XL.archive	nd_crop_sweater.xl	nd_crop_sweater.yaml	nd_meredith_heels_XL.xl
+Nola Dreamer Virtual Boutique	outros	ND_female_virtual_boutique.archive	r6/scripts/ND_female_virtual_boutique.reds	r6/scripts/ND_male_virtual_boutique.reds
+Hyst Atelier Store - Virtual Atelier	outros	Hyst_Atelier_Store.archive	r6/scripts/HystAtelierStore-atelier-store.reds
+VEEGEE SHOP 3	outros	Veegee Shop 3.archive	Veegee Shop 3/r6/scripts/veegee_shop_3.reds
+Beanie's Closet - SFW	outros	xl_bby_<peça>.archive
+Military Combat Jacket - ArchiveXL (2.0) [Zenitex]	roupas	0_..._addon_garment_support.archive	0_scorpion_zenitex_combat_jacket_addon_alt_colors.archive	scorpion_zenitex_combat_jacket.archive	archive/pc/mod/scorpion_zenitex_combat_jacket.xl	r6/tweaks/scorpiontank/scorpion_zenitex_combat_jacket.yaml
+Goth Full Outfit Pt2 - Archive XL	roupas	Goth Full Outfit Pt2.archive	archive/pc/mod/veegee_goth_full_outfit_pt2.xl	r6/tweaks/Goth Full Outfit Pt2/veegee_goth_full_outfit_pt2.yaml
+Nola Dreamer x Aquelyras - goth outfit - Archive XL	roupas	ND_Aquelyras_goth_outfit_FemV.archive	archive/pc/mod/nd_aquelyras_goth_outfit.xl	r6/tweaks/nola_dreamer/nd_aquelyras_goth_outfit.yaml
+Better Sleeves	interface	BetterSleeves - Archive Fixes.archive	bin/x64/plugins/cyber_engine_tweaks/mods/BetterSleeves/init.lua	BetterUI.lua	Scheduler.lua
+Autoloot	interface	init.lua	modules/logic.lua	modules/ui_new.lua	modules/config.lua	modules/jmels.lua	lib/Ref.lua
+Custom Quickslots (Consumables Grenades and Cyberware Abilities)	interface	init.lua	GameUI.lua	GameSettings.lua	hotkey_item_controller.reds	player_puppet.reds	config.reds	hotkeys_widget_controller.reds	other_buttons.reds	natives.reds
+Damage Scaling and Balance (Formerly Level Scaling)	interface	basegame_proper_level_scaling.archive	init.lua	GameUI.lua	GameSettings.lua	r6/scripts/DamageScalingAndBalance/DamageScalingAndBalance.reds
+Stealth Finishers (ZKV_Takedowns)	outros	bin/x64/plugins/cyber_engine_tweaks/mods/ZKVTakedowns2/init.lua	r6/scripts/ZKVTakedowns2/ZKV_StealthFinishers.reds	r6/scripts/ZKVTakedowns2/ZKV_Takedowns_Utils.reds
+New Game Plus - Native	outros
+Deceptious Bug Fixes	outros	#DeceptiousBugFixes.archive	#DeceptiousBugFixes.archive.xl	r6/scripts/#DeceptiousBugFixes/DeceptiousBugFixes.reds	r6/tweaks/#DeceptiousBugFixes/DeceptiousBugFixes.yaml
+Quickhack Fixes	animacoes	Quickhack_Fixes.archive	Quickhack_Fixes.archive.xl	speculation_recirculation_fix.reds	system_collapse_anim.reds	upload_speed_hud_z_fixes.reds	overheat_tooltip.reds
+Fighting Gangs Allowed - Reasonable Police	outros	r6/scripts/FightingGangsAllowed.reds
+Fixed NPC Vehicle Reactions	npc	r6/tweaks/NPCVehicleReactionsFixed/NPCVehicleReactionsFixed.yaml
+They Will Remember	outros	they_will_remember.archive	they_will_remember.xl	r6/tweaks/they_will_remember/twr_tutorial_images.yaml
+Reinforcements System	outros	ReinforcementsMod.archive	archive/pc/mod/ReinforcementsMod.xl	Settings.reds	TweakLoader.reds	TickSystem.reds	ReinforcementSystem.reds
+New Level Cap	outros	r6/tweaks/new_level_cap/new_level_cap.yaml
+Simple XP Multiplier	interface	init.lua	GameUI.lua	GameSettings.lua	r6/scripts/simple_xp_multilier.reds
+Let There Be Flight	outros	let_there_be_flight.archive	packed.reds	module.reds	let_there_be_flight.archive.xl	let_there_be_flight.tweak	let_there_be_flight.yaml
+Car Modification Shop	veiculos	cmsgarage.archive	init.lua
+Cyber Vehicle Overhaul	veiculos	init.lua	modules/functions/main_functions.lua	cvo_template_tweak.lua
+Vehicle Summon Tweaks	veiculos	VehicleSummonTweaksDismiss.archive	r6/tweaks/VehicleSummonTweaks/repairCostMultiplier.yaml	summonDistance.yaml	r6/scripts/vehicleSummonTweaks.reds	vehicleSorting.reds	vehicleSummonTweaksDismiss.reds
+Auto Drive Enhanced	veiculos	auto_drive_enhanced.archive	auto_drive_enhanced.archive.xl	r6/tweaks/auto_drive_enhanced/main.yaml	restrict_vehicles.yaml	bin/x64/plugins/cyber_engine_tweaks/mods/auto_drive_enhanced/init.lua	debug.lua
+Vehicle Exit Fix for 2.3	veiculos	r6/scripts/vehicleexitfix/vehicleexitfix.reds
+Limited HUD	interface	LimitedHUD.archive	basegame_hud_minimap_scanner_tweak.archive	LimitedHUD.archive.xl	config.reds
+Stash and Backpack Search	outros	r6/scripts/stashSearch.reds	r6/scripts/backpackSearch.reds
+Revised Backpack	outros	RevisedBackpack.archive	RevisedBackpack.archive.xl	r6/scripts/RevisedBackpack/RevisedBackpack.reds
+Quickhack Hotkeys	outros	QuickhackHotkeys.archive	r6/scripts/quickhackHotkeys.reds
+Inventory Adjustments Hub	outros	config.reds	core.reds	colors.reds	enums.reds	localization.reds	utils.reds	r6/tweaks/InventoryAdjustmentsHub.yaml
+Disappearing Enemy Health Bar Fix	interface	r6/scripts/Z_BetterEnemyHealthBar.reds	r6/scripts/Z_ShowPlayerHPScanner.reds	r6/scripts/LHUD/modules/worldMarkersEnemy.reds
+Realistic Map	visual	RealisticMap4K.archive

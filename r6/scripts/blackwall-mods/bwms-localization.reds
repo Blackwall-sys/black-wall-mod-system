@@ -1,13 +1,9 @@
 // bwms-localization.reds — localização de mod com variante por gênero (catálogo Codeware
+// #34/#35/#36/#38/#40). Cinco itens do catálogo dependem só deste arquivo.
 //
-// CORREÇÃO 2026-08-22 (crash real, 2 boots): guardar `array<ref<T>>` num `ScriptableSystem` faz o
-// motor tratar esses objetos como posse DELE. No world-swap do autocontinue (`phase=-1`) ele
-// destrói o sistema e tenta liberar o que está dentro — e crashou em
-// `red::memory::Free<PoolEngine>` com null deref, na GameThread, 2 vezes seguidas.
-// Referência FRACA (`wref`) resolve na raiz: o sistema passa a observar, nunca a possuir. Quem
-// criou o objeto continua dono dele — que é a semântica correta de qualquer jeito.
-// #34/#35/#36/#38/#40), REESCRITO em 2026-08-22 depois que a versão anterior saiu na auditoria
-// de originalidade. Cinco itens do catálogo dependem só deste arquivo.
+// Os objetos ficam em `array<wref<T>>` no `ScriptableSystem`, nunca `array<ref<T>>`: com `ref`, o motor trata os objetos como posse
+// do sistema e, ao destruí-lo no world-swap do autocontinue (`phase=-1`), tenta liberá-los — crash em `red::memory::Free<PoolEngine>`,
+// null deref na GameThread. Com `wref` o sistema só observa; quem criou o objeto continua dono dele.
 //
 // O PROBLEMA REAL: português, espanhol, francês, polonês e russo flexionam adjetivo e particípio
 // por gênero. "Você está pronto/pronta" não é detalhe cosmético — é a diferença entre um mod que
@@ -56,6 +52,18 @@ public abstract class BwmsLocProvider extends IScriptable {
     // O padrão delega ao neutro, então implementar isto é opcional.
     public func GetTextForGender(key: CName, gender: CName) -> String {
         return this.GetText(key);
+    }
+
+    // Todas as chaves que este provider conhece. O padrão é VAZIO de propósito: um provider que
+    // só sabe responder por chave (o contrato mínimo acima) continua válido e simplesmente não
+    // contribui para a exportação em lote — melhor do que forçar todo provider a enumerar.
+    //
+    // Existe por causa do `GetOnScreenEntries` abaixo. O Codeware resolve isso enumerando as
+    // entradas de um "package"; o BWMS não tem package, tem provider que responde por chave. Sem
+    // um jeito de LISTAR, não há como montar a tabela on-screen — esta é a peça que faltava.
+    public func GetKeys() -> array<CName> {
+        let vazio: array<CName>;
+        return vazio;
     }
 }
 
@@ -136,6 +144,43 @@ public class BwmsLocalization extends ScriptableSystem {
 
     // `true` se alguém sabe traduzir a chave — deixa o mod escolher outro caminho sem depender
     // de comparar contra o texto de fallback.
+    // Exporta tudo que os providers registrados conhecem no formato NATIVO de texto on-screen
+    // (`localizationPersistenceOnScreenEntry`, declarado em `ponte-onscreenentries.reds`).
+    // É a ponte entre a camada de localização do BWMS e o sistema de texto on-screen do jogo.
+    //
+    // Devolve quantas entradas foram escritas. Um provider que não implementa `GetKeys()`
+    // contribui com zero e não atrapalha os outros.
+    //
+    // Ordem: a mesma da lista de providers. Chave duplicada entre providers NÃO é deduplicada de
+    // propósito — quem consome decide o desempate, e esconder a duplicata aqui tiraria a
+    // informação de que ela existe.
+    public func GetOnScreenEntries(out entries: array<localizationPersistenceOnScreenEntry>) -> Int32 {
+        let escritas: Int32 = 0;
+        let i: Int32 = 0;
+        while i < ArraySize(this.m_providers) {
+            let p: wref<BwmsLocProvider> = this.m_providers[i];
+            if IsDefined(p) {
+                let chaves: array<CName> = p.GetKeys();
+                let k: Int32 = 0;
+                while k < ArraySize(chaves) {
+                    let chave: CName = chaves[k];
+                    let e: localizationPersistenceOnScreenEntry;
+                    // `primaryKey` é 0 no caminho de mod — o jogo usa esse campo para as entradas
+                    // COOKED dele. É o mesmo valor que o Codeware escreve.
+                    e.primaryKey = 0ul;
+                    e.secondaryKey = NameToString(chave);
+                    e.femaleVariant = p.GetTextForGender(chave, n"Female");
+                    e.maleVariant = p.GetTextForGender(chave, n"Male");
+                    ArrayPush(entries, e);
+                    escritas += 1;
+                    k += 1;
+                };
+            };
+            i += 1;
+        };
+        return escritas;
+    }
+
     public func HasText(key: CName) -> Bool {
         let gender: CName = this.CurrentGender();
         let i: Int32 = ArraySize(this.m_providers) - 1;

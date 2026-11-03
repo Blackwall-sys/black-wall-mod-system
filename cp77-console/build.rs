@@ -1,9 +1,8 @@
-// Runtime 100% nosso — hook e sonda de memória são Rust nativo (src/gum.rs).
+// Runtime 100% nosso — hook e sonda de memória são Rust nativo (src/ganchos e src/memoria).
 // Nenhuma lib de instrumentação de terceiros é linkada. Só os frameworks de
 // janela/overlay (Metal/QuartzCore/objc) + Foundation/AppKit.
 fn main() {
-    // libc++ (imgui é C++) + resolv (presentes no link original).
-    println!("cargo:rustc-link-lib=c++");
+    // resolv (presente no link original).
     println!("cargo:rustc-link-lib=resolv");
     println!("cargo:rustc-link-lib=framework=Foundation");
     println!("cargo:rustc-link-lib=framework=AppKit");

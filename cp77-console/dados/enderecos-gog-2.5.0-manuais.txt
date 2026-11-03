@@ -1,0 +1,4 @@
+# Pares Steam 2.5.0 -> GOG 2.5.0 que a assinatura não acha: corpo de instância de template repetido no __text (12 e 14 cópias iguais).
+# Achados por bwms-primitives/examples/achar_em_outro_build, pelos chamadores: o `bl` no mesmo ponto da vizinhança única de cada chamador.
+0x10156e184 0x1016d67f4
+0x101c6e2e4 0x1016c9df0

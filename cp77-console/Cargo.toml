@@ -1,6 +1,6 @@
 [package]
 name = "cp77-console"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 
 # .dylib carregada pelo jogo (LC_LOAD_DYLIB). Hooks via biblioteca de
@@ -9,22 +9,19 @@ edition = "2021"
 name = "cp77_console"
 crate-type = ["cdylib"]
 
-# `dev-gadget`: build da trilha de DEV — adiciona a checagem de injetor externo
-# (pra coexistir com a ferramenta de dev sem duplicar o hook). FORA do default:
-# o build PÚBLICO 0.1.0 carrega nativo e nem compila essa checagem/strings.
 [features]
-default = []
-dev-gadget = []
-# `autoproceed`: injeção de SPACE via CGEvent HID (auto-proceed do skip-intro, pula a tela de
-# engagement). OFF por padrão = o build PÚBLICO não importa CGEventPost/CGEventCreateKeyboardEvent
-# (o padrão "keylogger/automation" que o heurístico do VirusTotal marca) e não exige Acessibilidade.
+default = ["lua"]
+# `autoproceed`: injeção de tecla e mouse via CGEvent (`cg_*` de terminal/overlay.rs e os comandos
+# de teste `presskey`/`keydown`/`keyup`/`mousedelta`/`mouseclick`). OFF por padrão = o build PÚBLICO
+# não importa CGEventPost/CGEventCreateKeyboardEvent (o padrão "keylogger/automation" que o
+# heurístico do VirusTotal marca) e não exige Acessibilidade.
 # O skip do VÍDEO (bink hook) e o auto-continue (redscript) NÃO dependem disto. Dev liga via deploy.sh.
 autoproceed = []
 # `devlog`: logging verboso pro /tmp/cp77-console.log (dezenas de strings de debug em PT). OFF por
 # padrão = build público sem essas strings no binário (ruído p/ heurística/analista). Dev liga.
 devlog = []
 # `cpvr`: natives INERTES do toggle VR (BwmsCpvrOn/Off/State, marcador ~/.bwms-cpvr). DEV-ONLY —
-# habilita a coexistência BWMS+CPVR (evita "enfiar build"). Os reds do CPVR + gadget Frida NÃO
+# habilita a coexistência BWMS+CPVR (evita "enfiar build"). Os reds do CPVR e a captura NÃO
 # entram por esta feature; ela só expõe o marcador. OFF no build público.
 cpvr = []
 # guarda-chuva das ferramentas de DEV (o deploy.sh liga; o build público NÃO).
@@ -32,30 +29,53 @@ devtools = ["autoproceed", "devlog", "cpvr"]
 # `capture`: módulo experimental de captura de frame/depth (uso interno). OFF por padrão
 # = não entra na dylib pública. Liga com `--features capture`.
 capture = []
-# `lua`: gateway OPCIONAL p/ rodar mods CET (Lua) antigos do Windows. OFF por padrão =
-# core 0% Lua, sem luajit no binário. Liga com `--features lua` só quem quiser compat CET.
-lua = ["dep:mlua"]
+# `lua`: mods de CET (`init.lua`) pelo `bwms-lua`, o leitor e executor de `.lua` em Rust do projeto.
+lua = ["dep:bwms-lua"]
 
 [profile.release]
+# `opt-level` fica em 2 pra TUDO. Medido em 2026-09-20: `z` corta 690 KB mas a suíte (percurso de 54
+# mil funções do blob) vai de 6,9 s pra 37,9 s — e o executor de script passa por aqui ~62 mil vezes por
+# segundo. Nem as dependências entram em `z`: o `HashMap` da std (hashbrown) é o cache de resolução de função
+# (`rtti::funcao_guardada`), que os handlers que chamam script consultam a cada chamada. A rota de native em si é
+# `BTreeMap` sob `RwLock`, atrás do filtro de bits (`register::route_native`). Binário menor vem de refatoração
+# (dados no lugar de código repetido), nunca de perder velocidade.
 opt-level = 2
 panic = "abort"   # uma .dylib carregada no jogo não deve unwind pro processo
+# LTO e uma unidade de codegen: tiram a duplicação do código das dependências (std, hashbrown) entre
+# unidades. Medido em 2026-09-20.
+lto = "fat"
+codegen-units = 1
+# `strip`: o dylib público levava 11769 símbolos com nome de função interna — peso e ruído pro
+# analista de AV, e nada no runtime do BWMS resolve símbolo do PRÓPRIO dylib (os endereços que ele
+# resolve são do binário do jogo).
 
-# overlay: render no frame do jogo via Metal (metal-rs) + bridge de ponteiros cru
-# (foreign-types) do nosso swizzle. O resto (engine RTTI) segue zero-dep.
+strip = "symbols"
+
+# Só crates do projeto: o Metal do overlay e do splash vai pela ponte ObjC de `src/macos.rs`, sem código de
+# terceiro no dylib (dist/ORIGINALITY.md).
 [dependencies]
-# FONTE ÚNICA das funções de hash do TweakDB (CRC32/TweakDBID, murmur3 type-key) — a MESMA
-# impl do tweakdb-tool offline. Zero-dep, pura (só core) → não incha nem contamina o dylib.
-bwms-hashes = { path = "../bwms-hashes" }
-# Parser puro do formato declarativo do TweakXL (.yaml/.toml -> Vec<Op>), reusado do
-# tweakdb-tool offline (`tweakxl-pipeline-runtime`, 2026-07-15). `default-features = false`:
-# NÃO liga a feature `kraken` (decodificador Kraken/ooz nativo) — o dylib do jogo não precisa
-# disso, só o parser (`lib.rs` do tweakdb-tool já isola isso: hashes+template+tweakxl+yaml).
-tweakdb-tool = { path = "../tweakdb-tool", default-features = false }
-metal = "0.29"
-foreign-types = "0.5"
-imgui = "0.12"
-# decoder PNG puro-Rust p/ o splash de boot (carrega bwms-splash.png do dir do jogo). Sem C, sem traço.
-png = "0.17"
-# Rota A (compat CET): runtime Lua OPCIONAL (feature `lua`). LuaJIT = o que os mods CET usam.
-# Fora do default → o build público não embute luajit (core 0% Lua).
-mlua = { version = "0.10", features = ["luajit", "vendored"], optional = true }
+# FONTE ÚNICA do que o runtime e as ferramentas calculam igual. Os hashes do Cyberpunk 2077 que o runtime usa
+# (TweakDBID/CRC32, murmur3 type-key, FNV-1a 32/64, ResourcePath, NodeRef, CRC-16) são a MESMA impl do `bwms`
+# offline. Os núcleos puros dos itens Codeware/ArchiveXL (`editor_texto`, `garment_ctx`, `override_state`, `regex`,
+# `restarget`, `targets`) e o crivo do `DynArray` (`dynarray`) também moram lá, testáveis fora do jogo; as tabelas do
+# install chegam ao runtime pelo formato do `tabelas`. Zero-dep → não traz crate de fora para o dylib. O módulo `enderecos` acha
+# os endereços do jogo em qualquer build pela tabela de assinaturas (RED4ext #447). O módulo `tweakxl` é o
+# parser do formato declarativo do TweakXL (.yaml/.tweak -> Vec<Op>), o mesmo do `bwms tweak`, sem o
+# Kraken/ooz nativo nem o build.rs do `bwms`. O módulo `instalacao` é o motor de instalação de mods da
+# CLI: a aba Mods lista e liga/desliga por ele (`apply::mods_no_jogo`, `apply::definir_ativo`). O `fix-symtab-align` (src/bin) anda
+# pelos comandos de carga do dylib com o módulo `macho`, o mesmo andador do `enderecos`. O `archive_valido` lê o cabeçalho do
+# `.archive` da pasta Mods/ com o módulo `rdar`, o mesmo leitor do `bwms archive`.
+bwms-primitives = { path = "../bwms-primitives" }
+bwms-lua = { path = "../bwms-lua", optional = true }
+
+# Perfil do build PÚBLICO: o mesmo opt-level do dev, numa pasta de saída própria. Medido em 2026-10-13 (F6-03, teste
+# `executor_custo_por_chamada`, função fora da tabela de rotas): o executor de script custa 13,11 ns por chamada com `"s"` e
+# 9,76 ns com 2. O percurso das 54 mil funções do blob (recarga a quente do modder) dobra com `"s"` (suíte nos dois níveis,
+# 2026-09-20). O 2 custa 361.136 B no dylib (1.471.440 -> 1.832.576 B, nightly + build-std). Velocidade vem antes de tamanho
+# (AGENTS.md): o público emagrece tirando código de dev dele, não perdendo velocidade no caminho de toda chamada de script.
+# [não medido] entre os dois níveis: o custo por quadro do selo (`inicio::splash::desenhar_selo`) e dos ganchos de estágio
+# (`tempo::hook_estagio`, `tempo::bwms_anim_framebegin_hook`). Por quadro, o selo compara a chave, repinta o pulso
+# (`preparar_selo`), lê `mod_counts()` e codifica o passe Metal; `compor_selo` só roda quando a largura ou a contagem de mods
+# muda. Como medir: microbenchmark de `preparar_selo` com a chave fixa nos dois perfis e `sample` do jogo com os ganchos ligados.
+[profile.publico]
+inherits = "release"

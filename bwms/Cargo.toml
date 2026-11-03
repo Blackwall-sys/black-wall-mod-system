@@ -1,14 +1,15 @@
 # bwms — CLI ÚNICA do Black Wall Mod System. Uma porta de entrada pras funções
-# de modding. Os comandos de mod (classify/suggest/list/apply) rodam IN-PROCESS
-# via `bwms-core` (mesma lógica do mod-manager, sem duplicar, sem shellar). As
-# ferramentas de dados pesadas (tweak/archive — têm C++/ooz e build.rs próprio)
-# ficam standalone e a `bwms` as front-enda como subcomando.
+# de modding. Os comandos de mod (classify/suggest/xl e o `bwms mods checar`, que checa os scripts do jogo,
+# em src/mods/) rodam IN-PROCESS via `bwms_primitives::instalacao` (sem duplicar, sem shellar). O
+# `bwms tweak` (tweakdb.bin, em src/tweak/), o `bwms archive` (.archive/CR2W, em src/archive/) e o `bwms input` (keybinds de
+# mod, em src/input/) também rodam in-process. O 2º binário, `bwms-helper` (src/bin/), é o que o instalador usa para gravar o
+# LC_LOAD_DYLIB no executável do jogo; vai no zip como engine/bwms-helper.
 [package]
 name = "bwms"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.74"
-description = "CLI unificada do Black Wall Mod System (macOS): classifica/instala mods + front-end de tweak/archive."
+description = "CLI unificada do Black Wall Mod System (macOS): classifica mods, checa os scripts do jogo, lê/edita o tweakdb.bin, lê/extrai .archive, mescla keybinds de mods."
 authors = ["blackwall"]
 license = "MIT OR Apache-2.0"
 
@@ -16,11 +17,30 @@ license = "MIT OR Apache-2.0"
 name = "bwms"
 path = "src/main.rs"
 
+[[bin]]
+name = "bwms-helper"
+path = "src/bin/bwms-helper.rs"
+
 # Crate isolado de qualquer workspace pai (mods-research tem vários repos clonados).
 [workspace]
 
 [dependencies]
-bwms-core = { path = "../bwms-core" }
+bwms-primitives = { path = "../bwms-primitives" }
+
+[features]
+# `kraken`: o build.rs compila/linka o ooz (../_referencia-de-terceiro/ooz) com o ooz_shim.cpp: o `bwms archive` extrai segmentos
+# comprimidos e lê a usedhashes.kark, e o `bwms tweak` descomprime a tweakdbstr.kark (lista de nomes). OPT-IN: zero código de
+# terceiro no build padrão. `cargo build --release` sozinho é 100% puro-std (extrai só o que não é comprimido, lê listas já
+# descomprimidas). `--features kraken` pra descomprimir (precisa de clang++ + fonte do ooz).
+default = []
+kraken = []
 
 [profile.release]
 opt-level = 3
+
+# Perfil do `bwms-helper` do zip: o Cargo não tem perfil por [[bin]]. Compilar com
+# `cargo build --profile helper --bin bwms-helper` (saída em target/helper/bwms-helper).
+[profile.helper]
+inherits = "release"
+opt-level = "z"
+strip = true

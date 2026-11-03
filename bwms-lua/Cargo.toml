@@ -1,0 +1,8 @@
+[package]
+name = "bwms-lua"
+version = "0.1.5"
+edition = "2021"
+publish = false
+
+# Lê e executa os `.lua` dos mods de Windows. Só Rust do projeto: nenhuma dependência.
+[dependencies]

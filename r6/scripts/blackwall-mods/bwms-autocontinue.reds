@@ -4,11 +4,10 @@
 // contradiz os campos do controller e nunca dispara (bug diagnosticado 2026-07-04 via [ac-dbg]).
 // Load replica o clique: LoadModdedSave(0) p/ save modado, senão LoadLastCheckpoint(false) —
 // a via não-modada num save modado abre o diálogo que trava.
-// BwmsDbgTry(flags): bitmask do gate no log (1=savesReady, 2=metaReady, 4=count>0) — 7 = dispara.
 
 native func BwmsAutoContinue() -> Bool;
+native func BwmsAutoContinueDoBoot() -> Bool;
 native func BwmsAcFired() -> Bool;
-native func BwmsDbgTry(flags: Int32) -> Bool;
 native func BwmsMenuReadySplashOff() -> Bool;
 
 // TENTATIVAS DE SINAL PRECISO PRA "carregamento terminou de verdade" — AMBAS REFUTADAS
@@ -20,22 +19,18 @@ native func BwmsMenuReadySplashOff() -> Bool;
 // 2. PlayerPuppet.OnGameAttached (gameObject.script) — dispara CEDO DEMAIS: existe um
 //    PlayerPuppet placeholder/preview no menu que TAMBÉM aciona esse callback (mesmo
 //    "player espúrio" já documentado no projeto pra current_player()).
-// Sem um sinal confiável achado, a splash sai por REDE DE SEGURANÇA (grace period após
-// phase==5 em selfboot.rs) — empiricamente validado (2 boots reais via steam://, tela certa).
+// O splash sai no fim do load: 3ª leitura de phase 5 e o executor assentado
+// (`splash_fora_quando_o_executor_assenta`, inicio/boot.rs).
 // Se algum dia achar o sinal certo: o candidato mais promissor não testado ainda é o
 // HUD ficar visível (hudCoreGameController ou similar).
 
 @addField(SingleplayerMenuGameController) let m_bwmsContinued: Bool;
 @addField(SingleplayerMenuGameController) let m_bwmsMetaReady: Bool;
+@addField(SingleplayerMenuGameController) let m_bwmsMetaInvalid: Bool;
 
-// 2026-07-28: índice de save configurável (RE do dia: boots nesta máquina variam de 86s a 1h+
-// dependendo de quão densa é a região do mapa em que o save mais recente (index 0) está — I/O
-// genuinamente lento do SSD externo pra setores de mundo, não bug. `LoadModdedSave(saveId)` já
-// aceitava um índice desde sempre (`saves: [String]` de OnSavesForLoadReady, ordenado mais-recente-
-// primeiro, mesmo array que alimenta a lista visual do menu) — só nunca tinha sido exposto.
-// Marcador ~/.bwms-autocontinue-saveindex (conteúdo = número decimal) escolhe qual carregar; ausente
-// ou inválido = 0 (comportamento de sempre, o mais recente). Ver DATABASE.md pra próxima sessão
-// testar índices >0 (saves mais antigos) atrás desta mesma trava, procurando um que carregue rápido.
+// Índice do save que o auto-continue abre, na ordem do `saves` de `OnSavesForLoadReady` (o mais recente primeiro, a mesma lista do
+// menu): 0 no build público. No de desenvolvimento, o marcador `~/.bwms-autocontinue-saveindex` escolhe outro, pra comparar a duração
+// do boot por região do mapa.
 native func BwmsAutoContinueSaveIndex() -> Int32;
 
 @addMethod(SingleplayerMenuGameController)
@@ -48,15 +43,8 @@ public func BwmsDoContinue() -> Void {
   let nextLoadingTypeEvt: ref<inkSetNextLoadingScreenEvent> = new inkSetNextLoadingScreenEvent();
   nextLoadingTypeEvt.SetNextLoadingScreenType(inkLoadingScreenType.FastTravel);
   this.QueueBroadcastEvent(nextLoadingTypeEvt);
-  // 2026-07-29: achado ao vivo — `m_isModded` é a flag de METADADO DO SAVE (info.isModded, gravada
-  // quando o save foi CRIADO), não o estado atual da sessão; num save real do usuário veio `false`,
-  // fazendo o índice configurável cair sempre no ramo `else` (LoadLastCheckpoint, sem índice, sempre
-  // o mais recente) mesmo com um índice != 0 pedido. `LoadModdedSave(saveId)` é a native REAL (aceita
-  // qualquer índice) — não depende de `m_isModded`, essa flag só gateia a escolha vanilla entre as 2
-  // APIs. Fix: só cair no branch vanilla (preservando o comportamento default byte-a-byte) quando o
-  // índice pedido é 0 (sem marcador ou marcador=0); um índice != 0 sempre usa LoadModdedSave, mesmo
-  // com m_isModded=false — é a ÚNICA API com índice, e é native (não deveria se importar com a flag
-  // de metadado do save alvo).
+  // `m_isModded` é metadado do save (gravado quando o save foi criado), não o estado da sessão. Com índice 0 vale a escolha vanilla
+  // entre as duas APIs; índice diferente de 0 vai sempre por `LoadModdedSave`, a única que aceita índice.
   let idx: Int32 = BwmsAutoContinueSaveIndex();
   if idx < 0 || idx >= this.m_savesCount {
     idx = 0;
@@ -74,34 +62,20 @@ public func BwmsDoContinue() -> Void {
 
 // Nível 1 ("Até o menu" com saves): o lever (bwms-skipintro.reds) já ativou o save-system de
 // verdade, mas BwmsAutoContinue()==false, então NÃO carrega sozinho — só desliga a splash (senão
-// ela fica acesa pra sempre: sem auto-load não existe phase==5, que é o gatilho normal do
-// grace-period em selfboot.rs) e deixa o usuário escolher CONTINUAR/CARREGAR JOGO manualmente.
+// ela fica acesa pra sempre: sem auto-load não existe phase==5, de onde vem o fim do load que
+// tira a splash em inicio/boot.rs) e deixa o usuário escolher CONTINUAR/CARREGAR JOGO manualmente.
 @addMethod(SingleplayerMenuGameController)
 public func BwmsTryContinue() -> Void {
-  // DIAGNÓSTICO TEMPORÁRIO (2026-07-18, sessão full-body): 4 boots seguidos hoje NÃO dispararam o
-  // autocontinue (0 linhas "[autocontinue] disparou") — achado novo, nunca visto antes nesta
-  // sessão. Print isolado (1 native só, sem chamada consecutiva) loga os 3 valores do gate +
-  // se já continuou, TODA VEZ que este método roda, pra achar qual precondição está falhando.
-  let contFlag: Bool = this.m_bwmsContinued;
-  let savesReadyFlag: Bool = this.m_savesReady;
-  let metaReadyFlag: Bool = this.m_bwmsMetaReady;
-  let countVal: Int32 = this.m_savesCount;
-  Print("[ac-diag] cont=" + ToString(contFlag) + " savesReady=" + ToString(savesReadyFlag) + " metaReady=" + ToString(metaReadyFlag) + " count=" + ToString(countVal));
   if this.m_bwmsContinued { return; };
+  // Sem save, ou com o save 0 inválido, não há o que continuar: o menu é o fim da tarefa. Sem isto o splash só sairia pelo watchdog, por cima do menu.
+  if this.m_savesReady && (this.m_savesCount == 0 || this.m_bwmsMetaInvalid) {
+    BwmsMenuReadySplashOff();
+    return;
+  };
   if !(this.m_savesReady && this.m_bwmsMetaReady && this.m_savesCount > 0) { return; };
-  // BUG DE MARSHALLING RESOLVIDO (2026-07-16): o `BwmsDbgTry(flags)` que ficava AQUI (native de
-  // diagnóstico) era a 1ª de 2 natives consecutivas — corrompia o marshalling do retorno da 2ª
-  // (`BwmsAutoContinue()` logo abaixo), que vinha false de forma boot-dependente → boot parava no
-  // menu. Removido o BwmsDbgTry: agora `BwmsAutoContinue()` é a ÚNICA native do método → retorno
-  // determinístico. (O diagnóstico dos flags saiu; o gate acima já garante os pré-requisitos.)
-  // BUG DO AUTOCONTINUE RACY (2026-07-16, causa-raiz REAL): `m_bwmsContinued=true` estava sendo
-  // setado AQUI, ANTES de checar `BwmsAutoContinue()`. Se a leitura viesse racy-false uma vez (a
-  // native às vezes marshalha o retorno errado logo após outra native), o mod TRAVAVA no menu pra
-  // sempre — o guard `if m_bwmsContinued return` no topo bloqueava toda re-tentativa nos gatilhos
-  // seguintes (OnSavesForLoadReady). FIX: só marcar `continued` DEPOIS de REALMENTE continuar (dentro
-  // do `if auto`), pra os 2+ gatilhos poderem re-tentar até a leitura vir true. `auto=false` genuíno
-  // (modo "só menu") continua parando no menu corretamente (todos os gatilhos leem false).
-  let auto: Bool = BwmsAutoContinue();
+  // A native é a variante do boot: só carrega sozinho enquanto o boot não resolveu a tarefa dele no processo; num menu seguinte o
+  // load não é automático, porque sairia sem splash (`tramp_autocontinue_do_boot`, inicio/natives.rs).
+  let auto: Bool = BwmsAutoContinueDoBoot();
   if auto {
     this.m_bwmsContinued = true;
     this.BwmsDoContinue();
@@ -114,13 +88,12 @@ public func BwmsTryContinue() -> Void {
 @wrapMethod(SingleplayerMenuGameController)
 protected cb func OnSaveMetadataReady(info: ref<SaveMetadataInfo>) -> Bool {
   let r: Bool = wrappedMethod(info);
-  // DIAGNÓSTICO TEMPORÁRIO (2026-07-18): confirma que o wrap É CHAMADO PELO MOTOR + os valores
-  // reais de saveIndex/isValid que chegam (isolado do Print seguinte, sem native consecutiva).
-  let idx: Int32 = info.saveIndex;
-  let valid: Bool = info.isValid;
-  Print("[ac-diag] OnSaveMetadataReady chamado: saveIndex=" + ToString(idx) + " isValid=" + ToString(valid));
-  if info.saveIndex == 0 && info.isValid {
-    this.m_bwmsMetaReady = true;
+  if info.saveIndex == 0 {
+    if info.isValid {
+      this.m_bwmsMetaReady = true;
+    } else {
+      this.m_bwmsMetaInvalid = true;
+    };
   };
   this.BwmsTryContinue();
   return r;
@@ -130,9 +103,6 @@ protected cb func OnSaveMetadataReady(info: ref<SaveMetadataInfo>) -> Bool {
 @wrapMethod(SingleplayerMenuGameController)
 protected cb func OnSavesForLoadReady(saves: [String]) -> Bool {
   let r: Bool = wrappedMethod(saves);
-  // DIAGNÓSTICO TEMPORÁRIO (2026-07-18): confirma que o wrap É CHAMADO + o nº real de saves.
-  let n: Int32 = ArraySize(saves);
-  Print("[ac-diag] OnSavesForLoadReady chamado: ArraySize(saves)=" + ToString(n));
   this.BwmsTryContinue();
   return r;
 }

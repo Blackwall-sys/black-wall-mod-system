@@ -1,6 +1,5 @@
-// bwms-ui-controller.reds — controller de UI customizado (catálogo Codeware #88/#90/#179),
-// REESCRITO do comportamento em 2026-08-22 depois que a versão anterior saiu na auditoria de
-// originalidade. É a base sobre a qual botões e popups são construídos.
+// bwms-ui-controller.reds — controller de UI customizado (catálogo Codeware #88/#90/#179): a base sobre a qual botões e popups são
+// construídos.
 //
 // O QUE ESTA CLASSE RESOLVE: a engine só chama `OnInitialize` num controller que está anexado a
 // um widget que existe. Um mod que constrói a própria UI vive o problema inverso — ele tem o

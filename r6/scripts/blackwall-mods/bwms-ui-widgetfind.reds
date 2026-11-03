@@ -1,18 +1,8 @@
-// bwms-ui-widgetfind.reds — busca na árvore de widgets (catálogo Codeware #89), REESCRITO.
+// bwms-ui-widgetfind.reds — busca na árvore de widgets (catálogo Codeware #89).
 //
-// POR QUE ESTE ARQUIVO EXISTE: a versão anterior saiu em 2026-08-22 na auditoria de originalidade.
-//
-// UMA DIVERGÊNCIA QUE NÃO É ESCOLHA — é o que a engine permite:
-// a implementação de terceiro subia a árvore com `widget.GetParentWidget()`. Esse método **não
-// existe no redscript do jogo** (grep em `cp77-symbols/redscript-all.reds`: zero ocorrência como
-// método de `inkWidget`) — quem o fornecia era o C++ do framework, que ESTENDE a classe vanilla
-// via `RTTI_EXPAND_CLASS`. O BWMS não tem esse mecanismo (é o mesmo bloqueio já registrado no
-// item `#91`), então **subir a árvore é impossível aqui**, e prometer `InWindowTree(widget)` com
-// um argumento só seria vender o que não se entrega.
-//
-// A engine deixa DESCER (`GetNumChildren`/`GetWidgetByIndex`). Toda a API abaixo é escrita em
-// cima disso: quem chama informa a raiz. Na prática é o que um mod tem de qualquer jeito — ele
-// acabou de criar ou receber o container onde está montando a UI.
+// As duas direções, porque servem a perguntas diferentes: descer responde "o que existe dentro disto" (montagem, busca por tipo) e
+// subir responde "onde isto está" (contexto, ancestralidade) sem precisar da raiz na mão. Subir usa o `GetParentWidget` que o BWMS
+// adiciona a `inkWidget` (`bwms-ui-inkwidget-native.reds`); o redscript vanilla não tem esse método.
 //
 // TRAVESSIA POR PILHA EXPLÍCITA, não recursão: é o estilo do projeto (procedural/data-oriented),
 // e aqui tem razão técnica — árvore de UI vinda de mod é de profundidade desconhecida, e o teto
@@ -24,7 +14,7 @@
 //   - `inkWidget.GetControllers() -> [wref<inkLogicController>]`       (`:54597`)
 //   - `IScriptable.IsA(className: CName) -> Bool`                      (`:11260`)
 //   - `inkWidget.BwmsGetController()` — contorno do item `#87`, já provado ao vivo, mora em
-//     `codeware-ui-inkwidget-ext.reds` (sobreviveu à quarentena).
+//     `bwms-inkwidget-ext.reds`.
 
 public abstract class BwmsWidgetFind {
 
@@ -147,6 +137,70 @@ public abstract class BwmsWidgetFind {
             }
         }
         return visited;
+    }
+
+    // --- Subir a árvore (recuperado em 2026-08-22) ------------------------------------------
+
+    // O ancestral imediato. `null` no topo — quem chama distingue "sou raiz" de "não achei".
+    public static func Parent(widget: ref<inkWidget>) -> ref<inkWidget> {
+        if !IsDefined(widget) {
+            return null;
+        }
+        return widget.GetParentWidget();
+    }
+
+    // Sobe até o topo da árvore em que o widget está montado. Serve para responder "de qual
+    // janela/tela isto faz parte" sem o mod precisar guardar a raiz.
+    public static func Root(widget: ref<inkWidget>) -> ref<inkWidget> {
+        let atual: ref<inkWidget> = widget;
+        let passos: Int32 = 0;
+        while IsDefined(atual) && passos < BwmsWidgetFind.MaxNodes() {
+            let pai: ref<inkWidget> = atual.GetParentWidget();
+            if !IsDefined(pai) {
+                return atual;
+            }
+            atual = pai;
+            passos += 1;
+        }
+        return atual;
+    }
+
+    // Profundidade a partir do topo — diagnóstico barato de "montei onde?".
+    public static func Depth(widget: ref<inkWidget>) -> Int32 {
+        let atual: ref<inkWidget> = widget;
+        let n: Int32 = 0;
+        while IsDefined(atual) && n < BwmsWidgetFind.MaxNodes() {
+            let pai: ref<inkWidget> = atual.GetParentWidget();
+            if !IsDefined(pai) {
+                return n;
+            }
+            atual = pai;
+            n += 1;
+        }
+        return n;
+    }
+
+    // O widget está montado numa árvore de verdade, ou solto? Um widget solto não renderiza e não
+    // resolve estilo — é a causa nº 1 de "criei e não apareceu".
+    public static func IsMounted(widget: ref<inkWidget>) -> Bool {
+        if !IsDefined(widget) {
+            return false;
+        }
+        return IsDefined(widget.GetParentWidget());
+    }
+
+    // O ancestral mais próximo de um tipo — responde "estou dentro de qual container/tela".
+    public static func FirstAncestorOfType(widget: ref<inkWidget>, typeName: CName) -> ref<inkWidget> {
+        let atual: ref<inkWidget> = BwmsWidgetFind.Parent(widget);
+        let passos: Int32 = 0;
+        while IsDefined(atual) && passos < BwmsWidgetFind.MaxNodes() {
+            if atual.IsA(typeName) {
+                return atual;
+            }
+            atual = atual.GetParentWidget();
+            passos += 1;
+        }
+        return null;
     }
 
     // Junta, para UM widget, os controllers vanilla e o anexado pelo contorno do `#87`.
