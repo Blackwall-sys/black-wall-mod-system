@@ -1,4 +1,4 @@
-// BWMS — pagina nativa (Mods > Cheats) via bypass do ConfigVar. 100% redscript, sem CET, sem NativeSettings.
+// BWMS — pagina nativa (Mods > Cheats) via bypass do ConfigVar. 100% redscript.
 // Aba "Cheats": os cheats do BWMS (Modo Imortal + fáceis) e o seletor "Pular boot". Carga, dano, RAM e câmera lenta guardam estado em
 // campos do PlayerPuppet (persiste ao reabrir); Invencível e Invisível leem o estado do próprio jogo, que vai e volta com o save.
 // Gate = !IsDefined(this.m_SettingsEntry): nossos controllers tem entry null; os do jogo nao.
@@ -274,7 +274,7 @@ private final func PopulateCategorySettingsOptions(idx: Int32) -> Void {
     inkCompoundRef.RemoveAllChildren(this.m_settingsOptionsList);
     inkTextRef.SetText(this.m_descriptionText, ""); inkWidgetRef.SetVisible(this.m_descriptionText, false);
     this.BWMSDocLine(this.L("BWMS — Add your mod's options to this screen", "BWMS — Adicionar as opcoes do seu mod nesta tela", "BWMS — 将你的 mod 选项添加到此界面"));
-    this.BWMSDocLine(this.L("All in redscript, no CET and no ConfigVar. Steps:", "Tudo em redscript, sem CET e sem ConfigVar. Passos:", "全部用 redscript，无需 CET 或 ConfigVar。步骤："));
+    this.BWMSDocLine(this.L("All in redscript, no ConfigVar. Steps:", "Tudo em redscript, sem ConfigVar. Passos:", "全部用 redscript，无需 ConfigVar。步骤："));
     this.BWMSDocLine(this.L("1. Create a .reds file in r6/scripts/your-mod/", "1. Crie um arquivo .reds em r6/scripts/seu-mod/", "1. 在 r6/scripts/your-mod/ 创建一个 .reds 文件"));
     this.BWMSDocLine("2. @wrapMethod(SettingsMainGameController) PopulateSettingsData:");
     this.BWMSDocLine(this.L("   ArrayPush(this.m_data) a SettingsCategory with a unique groupPath (e.g. n\"/yourmod\").", "   ArrayPush(this.m_data) uma SettingsCategory com groupPath unico (ex n\"/seumod\").", "   ArrayPush(this.m_data) 一个带唯一 groupPath 的 SettingsCategory（例如 n\"/yourmod\"）。"));

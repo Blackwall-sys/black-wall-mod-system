@@ -1,9 +1,6 @@
-//! Modelo de edição de texto do BWMS — núcleo puro para o gap Codeware `#115` (`TextInput`).
+//! Modelo de edição de texto do BWMS — núcleo puro do `TextInput`.
 //!
-//! **Por que existe, e por que não é porte.** As 4 sub-partes que o BWMS já tinha para esse item
-//! (`Caret`/`Selection`/`TextFlow`/`TextMeasurer`) foram para `quarentena-nao-original/`: eram
-//! transliteração do Codeware. A capacidade é desejada, o corpo não pode viajar no produto. Este
-//! módulo reprojeta a camada do zero, com decisões próprias e deliberadamente diferentes:
+//! Este módulo projeta a camada do zero, com decisões próprias:
 //!
 //! - **Um só estado, não quatro objetos.** Cursor e seleção vivem no mesmo lugar, porque toda
 //!   operação de edição mexe nos dois — separá-los só cria estados que podem discordar.

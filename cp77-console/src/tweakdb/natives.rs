@@ -7,13 +7,13 @@ use crate::tempo::tramp_frame_dilatacao;
 use crate::tipos_do_motor::register_type_instantiable_with_parent;
 use crate::mods_do_usuario::tramp_require;
 use crate::mods_do_usuario::tramp_version;
-use crate::mods_do_usuario::PLUGUE_TWEAKXL;
+use crate::mods_do_usuario::PLUGUE_TWEAKS;
 use crate::aparencia::*;
 use std::ffi::c_void;
 use crate::rtti::{self, Registry};
 use crate::register::*;
 
-// ===== TweakXL `#43` (`PENDENCIAS-UNIFICADAS.md`, `ScriptInterface.GetFlat->Variant`) —
+// ===== Leitura dinâmica de flat (`GetFlat -> Variant`) —
 // `BwmsGetFlatFloat(path: TweakDBID) -> Float`, leitura DINÂMICA de um flat TweakDB por tipo,
 // redscript-callable. NÃO é literalmente `-> Variant` (isso exigiria um proto donor com esse
 // tipo de retorno — nenhuma native vanilla real declara `-> Variant`, confirmado por grep no
@@ -60,8 +60,8 @@ pub(crate) unsafe extern "C" fn tramp_get_flat_float(_c: *mut c_void, frame: *mu
     }
 }
 
-/// TweakXL `#43` (`GetRecordCount(type) -> Int32`) — `BwmsGetRecordCount(className: String) ->
-/// Int32`, reusa `get_records_of_class` (ArchiveXL #59, já provado ao vivo — 1823 records de
+/// `GetRecordCount(type) -> Int32` — `BwmsGetRecordCount(className: String) ->
+/// Int32`, reusa `get_records_of_class` (já provado ao vivo — 1823 records de
 /// `gamedataWeaponItem_Record`) só contando em vez de logar cada um.
 pub(crate) unsafe extern "C" fn tramp_get_record_count(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
@@ -77,7 +77,7 @@ pub(crate) unsafe extern "C" fn tramp_get_record_count(_c: *mut c_void, frame: *
     write_uint_ret(out, count as u64, 4);
 }
 
-/// TweakXL `#43` (`GetRecordByIndex(type, index) -> handle`) — `BwmsGetRecordByIndex(className:
+/// `GetRecordByIndex(type, index) -> handle` —`BwmsGetRecordByIndex(className:
 /// String, index: Int32) -> handle:gamedataTweakDBRecord`. Mesma composição de `BwmsGetRecordCount`
 /// (`get_records_of_class`, já provado) + `write_handle_ret` (padrão 100% provado por
 /// `GetCallbackSystem`/`StartBatch` — {ptr,0} explícito, handle "raw" sem refcount nosso, evita o
@@ -105,7 +105,7 @@ pub(crate) unsafe extern "C" fn tramp_get_record_by_index(_c: *mut c_void, frame
     write_handle_ret(out, instance as u64);
 }
 
-/// TweakXL `#43` (`GetRecords<R>() -> array<ref<R>>`) — 2026-08-10 (cont.188), a peça final que
+/// `GetRecords<R>() -> array<ref<R>>` — 2026-08-10 (cont.188), a peça final que
 /// faltava do item (GetFlat/GetRecordCount/GetRecordByIndex já fechados, cont.163/169). Composição
 /// de `get_records_of_class` (já provado) + o MESMO layout de elemento 16 bytes (`{instance,
 /// refCount}`) já usado por `dynarray_push_handle16`/`AddComponent` — a novidade real aqui é o
@@ -205,24 +205,24 @@ pub(crate) unsafe fn registrar_leitura_de_flats_e_records(reg: &Registry, proto:
         }
     }
     if !rtti::sane(float_proto) {
-        crate::log_dev!("[reg] register_all: TweakXL GetFlat* — proto Float não resolveu, abortado");
+        crate::log_dev!("[reg] register_all: GetFlat* — proto Float não resolveu, abortado");
         return;
     }
     let ok1 = register_argful_by_types(reg, float_proto, &["TweakDBID"], "BwmsGetFlatFloat", "BwmsGetFlatFloat", tramp_get_flat_float);
-    crate::log_dev!("[reg] register_all: TweakXL ScriptInterface.GetFlat (BwmsGetFlatFloat)={ok1}");
+    crate::log_dev!("[reg] register_all: GetFlat (BwmsGetFlatFloat)={ok1}");
     let ok2 = register_argful_by_types(reg, float_proto, &["String"], "BwmsGetRecordCount", "BwmsGetRecordCount", tramp_get_record_count);
-    crate::log_dev!("[reg] register_all: TweakXL ScriptInterface.GetRecordCount (BwmsGetRecordCount)={ok2}");
+    crate::log_dev!("[reg] register_all: GetRecordCount (BwmsGetRecordCount)={ok2}");
     let ok3 = register_argful_by_types(reg, float_proto, &["String", "Int32"], "BwmsGetRecordByIndex", "BwmsGetRecordByIndex", tramp_get_record_by_index);
-    crate::log_dev!("[reg] register_all: TweakXL ScriptInterface.GetRecordByIndex (BwmsGetRecordByIndex)={ok3}");
-    // `#43` cont.188: `GetRecords(className, limit) -> array<ref<IScriptable>>` — 1ª native deste
+    crate::log_dev!("[reg] register_all: GetRecordByIndex (BwmsGetRecordByIndex)={ok3}");
+    // cont.188: `GetRecords(className, limit) -> array<ref<IScriptable>>` — 1ª native deste
     // projeto a devolver um ARRAY inteiro (não escalar/handle único). Mesmo donor float_proto
     // (shape-only, o retorno real vem da declaração .reds + do que o handler escreve em `out`).
     let ok4 = register_argful_by_types(reg, float_proto, &["String", "Int32"], "BwmsGetRecordsArray", "BwmsGetRecordsArray", tramp_records_da_classe);
-    crate::log_dev!("[reg] register_all: TweakXL ScriptInterface.GetRecords (BwmsGetRecordsArray)={ok4}");
+    crate::log_dev!("[reg] register_all: GetRecords (BwmsGetRecordsArray)={ok4}");
     let _ = proto; // proto (donor String) não usado aqui — cada família resolve seu próprio donor
 }
 
-// TweakXL #22 e #8: genealogia e nome dos records criados por mod, pelo registro do BWMS (`tweakdb::registro`). Descendentes por contagem e
+// Genealogia e nome dos records criados por mod, pelo registro do BWMS (`tweakdb::registro`). Descendentes por contagem e
 // índice: o script não precisa de array montado pela native.
 pub(crate) unsafe fn id_do_parametro(frame: *mut c_void) -> (u64, rtti::ArgsLidos) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
@@ -262,7 +262,7 @@ pub(crate) unsafe extern "C" fn tramp_tweak_name(_c: *mut c_void, frame: *mut c_
     write_string_ret(out, &crate::tweakdb::registro::nome(id).unwrap_or_default());
 }
 
-/// `BwmsTweakRemoveRecord(id) -> Bool` (RED4ext `#345`): tira do TweakDB um record criado por mod; recusa record do jogo.
+/// `BwmsTweakRemoveRecord(id) -> Bool`: tira do TweakDB um record criado por mod; recusa record do jogo.
 pub(crate) unsafe extern "C" fn tramp_tweak_remove_record(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let (id, _) = id_do_parametro(frame);
     let r = crate::tweakdb::remover::remover_record(id);
@@ -283,19 +283,18 @@ pub(crate) unsafe extern "C" fn tramp_tweak_register_name(_c: *mut c_void, frame
 
 /// `ScriptableTweak` — classe abstrata nativa que mods estendem; BWMS instancia cada subclasse
 /// concreta e chama `OnApply()` uma vez, no menu antes do load do save (ou em gameplay, se o load começou antes; `cp77_tick`). Semelhante a ScriptableService mas sem lifecycle.
-/// Fonte real: `enablers/TweakXL/scripts/ScriptableTweak.reds`.
 pub unsafe fn register_scriptabletweak(reg: &Registry) -> String {
     let forged = register_type_min(reg, "ScriptableTweak");
     format!("[reg] ScriptableTweak: forjada={}", !forged.is_null())
 }
 
-/// `TweakXL.Reload() -> Void` — a real `Facade::Reload()` do TweakXL é gatilho MANUAL (não
+/// `Reload() -> Void` da fachada de tweaks — gatilho MANUAL (não
 /// FSEventStream automático) que reprocessa os `.yaml` já carregados. Vai por `recarregar_tweaks`:
 /// desfaz o que os arquivos gravaram, reaplica por `apply_mod_tweaks()` (o mesmo pipeline que já
 /// roda automático em `Session/Start`) e pede o redespacho do `OnApply` — chamável a qualquer momento
 /// (ex. depois de editar um `.yaml` de mod ativo em disco), sem precisar rebootar o jogo.
 pub(crate) unsafe extern "C" fn tramp_recarregar_tweaks(_c: *mut c_void, _f: *mut c_void, _out: *mut c_void, _rt: i64) {
-    crate::log_dev!("[reg] >>> TweakXL.Reload chamado — recarga dos tweaks de mod sem empilhar");
+    crate::log_dev!("[reg] >>> Reload dos tweaks chamado — recarga dos tweaks de mod sem empilhar");
     crate::mods_do_usuario::pipeline::recarregar_tweaks();
 }
 
@@ -304,31 +303,31 @@ pub unsafe fn registrar_fachada_de_tweaks(reg: &Registry) -> String {
         reg,
         "TweakXL",
         &[
-            ("Version", tramp_version::<PLUGUE_TWEAKXL>),
-            ("Require", tramp_require::<PLUGUE_TWEAKXL>),
+            ("Version", tramp_version::<PLUGUE_TWEAKS>),
+            ("Require", tramp_require::<PLUGUE_TWEAKS>),
             ("Reload", tramp_recarregar_tweaks),
         ],
     )
 }
 
-/// TweakXL `#46` (2026-08-11): `ConvertScriptValueForFlatValue` — quando o valor de um `SetFlat`
-/// é um `CName` cujo texto começa com `Red::LocKeyPrefix` ("LocKey#", `Red/Localization.hpp`),
-/// o TweakXL real converte AUTOMATICAMENTE pro flat-type `LocKey` (`gamedataLocKeyWrapper`, 8
-/// bytes: só `primaryKey: u64` — `RED4ext/NativeTypes.hpp:319-327`), em vez de armazenar como
-/// CName cru. Algoritmo fiel (`ScriptUtils.hpp:28-44`): extrai o sufixo após o prefixo; tenta
+/// Conversão do valor de `SetFlat` (2026-08-11): quando o valor de um `SetFlat`
+/// é um `CName` cujo texto começa com "LocKey#",
+/// ele vira AUTOMATICAMENTE o flat-type `LocKey` (`gamedataLocKeyWrapper`, 8
+/// bytes: só `primaryKey: u64`), em vez de ser armazenado como
+/// CName cru. Algoritmo: extrai o sufixo após o prefixo; tenta
 /// parsear como inteiro; se não-numérico, `primaryKey = FNV1a64(sufixo)`. Doador real confirmado
 /// no schema deste projeto (`tweakdb-base.tsv`): `Items.AdvancedKiroshiOpticsPiercingCommon.
 /// displayName` é um flat `LocKey` genuíno e não-nulo (`primaryKey=0x16d2d`) — usado como donor
-/// pro `create_flat_value`/`set_flat_nonscalar` (mecanismo já provado, TweakXL #43/#59).
+/// pro `create_flat_value`/`set_flat_nonscalar` (mecanismo já provado).
 pub(crate) const LOCKEY_DONOR_FIELD: &str = "Items.AdvancedKiroshiOpticsPiercingCommon.displayName";
 
-/// TweakXL `#46` (2026-08-11, 2º incremento): `ConvertScriptValueForFlatValue` sub-parte
+/// Conversão do valor de `SetFlat` (2026-08-11, 2º incremento), parte
 /// `ResRefToken` — quando o Variant é um `ResRef` redscript real, o tipo de entrada tem CNAME
 /// `redResourceReferenceScriptToken` (confirmado ao vivo — mesmo nome já achado pra marshalling
-/// de PARÂMETRO no item Codeware #63, `rtti.rs::read_params_inner`). O C++ real (`ScriptUtils.
-/// hpp:14-20`) faz uma REINTERPRETAÇÃO PURA de tipo (`Variant(type, aVariant.GetDataPtr())`,
+/// de PARÂMETRO em `rtti.rs::read_params_inner`). A conversão é uma REINTERPRETAÇÃO PURA de tipo
+/// (`Variant(type, aVariant.GetDataPtr())`,
 /// MESMOS bytes) — sem transformação de dado, só troca o flat-type de `ResRefToken` pro
-/// `ERTDBFlatType::ResRef` real (`"raRef:CResource"`, `RED4ext/TweakDB/Reflection.hpp:17`).
+/// flat-type `ResRef` do motor (`"raRef:CResource"`).
 /// Donor real confirmado no schema deste projeto (`tweakdb-base.tsv`): `UIIcon.clothing_player_
 /// legs_item_l1_pants_06_basic_02__Male_.atlasResourcePath` (não-nulo, `0x...9862eb62`).
 pub(crate) const RESREF_DONOR_FIELD: &str =
@@ -471,7 +470,7 @@ pub(crate) unsafe extern "C" fn tramp_tdbm_setflat(_c: *mut c_void, frame: *mut 
             false
         }
     };
-    // Flat que o record não tem (o `.parentSlot`/`.dependencySlots` do Equipment-EX): o TweakXL cria com o tipo do valor. A busca no índice só
+    // Flat que o record não tem (o `.parentSlot`/`.dependencySlots` de mod de roupa): nasce com o tipo do valor. A busca no índice só
     // roda quando a gravação falhou, fora do caminho dos milhares de `SetFlat` em flat que existe.
     let ok = match &valor {
         Some(v)
@@ -502,7 +501,7 @@ pub(crate) unsafe extern "C" fn tramp_tdbm_createrecord(_c: *mut c_void, frame: 
             crate::log_dev!("[tdbmanager] CreateRecord(id={id:#x}): CName do tipo ({type_cname_hash:#x}) não resolveu nome");
             false
         }
-        // Record que já existe: o `CreateRecord` do TweakXL também recusa.
+        // Record que já existe: recusa.
         (_, Some(t)) if !crate::tweakdb::get_record_instance(t, id).is_null() => false,
         (Some(reg), Some(t)) => match crate::tweakdb::criar_record_do_tipo(&reg, t, id, &class_name) {
             Some((classe, modelo, padroes, sem)) => {
@@ -531,7 +530,7 @@ pub(crate) unsafe extern "C" fn tramp_tdbm_updaterecord(_c: *mut c_void, frame: 
     write_bool_ret(out, ok);
 }
 
-/// `CloneRecord(id: TweakDBID, base: TweakDBID) -> Bool` — item TweakXL #45, fecha junto com #44.
+/// `CloneRecord(id: TweakDBID, base: TweakDBID) -> Bool`.
 /// `tweak_db_id_derive` (`bwms-primitives`) é o que deixa a herança de flats funcionar sem o NOME do
 /// record (mods reais só têm o TweakDBID numérico, nunca a string).
 pub(crate) unsafe extern "C" fn tramp_tdbm_clonerecord(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -549,8 +548,7 @@ pub(crate) unsafe extern "C" fn tramp_tdbm_clonerecord(_c: *mut c_void, frame: *
     write_bool_ret(out, ok);
 }
 
-/// `RegisterEnum(id: TweakDBID)` — sem retorno na fonte real (`void RegisterEnum(TweakDBID)`,
-/// `ScriptManager.hpp`), mas o `.reds` declara `-> Bool` (mesma convenção usada pra `ScriptBatch.
+/// `RegisterEnum(id: TweakDBID)` — o `.reds` declara `-> Bool` (mesma convenção usada pra `ScriptBatch.
 /// RegisterEnum`, que RETORNA bool) — devolve sempre `true` (registro em memória nunca falha).
 pub(crate) unsafe extern "C" fn tramp_tdbm_registerenum(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
@@ -561,7 +559,7 @@ pub(crate) unsafe extern "C" fn tramp_tdbm_registerenum(_c: *mut c_void, frame: 
     write_bool_ret(out, ok);
 }
 
-/// `RegisterName(name: CName) -> Bool` — o TweakXL real usa isso pra ensinar o nome ORIGINAL de
+/// `RegisterName(name: CName) -> Bool` — ensina o nome ORIGINAL de
 /// um TweakDBID introduzido por mod pro registro reverso (hash->string) de debug. Literal
 /// `n"..."`/`t"..."` de `.reds` já entra no CNamePool do motor no load do bundle; o handler resolve
 /// o CName e grava o nome no registro reverso (`registro::nomear`). `false` se o CName não resolve.
@@ -608,20 +606,16 @@ pub(crate) unsafe extern "C" fn tramp_tdbm_startbatch(_c: *mut c_void, _f: *mut 
     rtti::make_handle(out, instance);
 }
 
-/// `TweakDBBatch.Commit()` — no-op: cada método do batch já aplica IMEDIATAMENTE (sem staging),
-/// mesma simplificação já documentada pro lado C++ do `Batch` (item TweakXL #9, EQUIVALENTE —
-/// "BWMS aplica as mesmas mutações imediatamente, uma por vez — mesmo efeito final, sem staging").
+/// `TweakDBBatch.Commit()` — no-op: cada método do batch já aplica IMEDIATAMENTE (sem staging):
+/// as mesmas mutações, uma por vez — mesmo efeito final.
 pub(crate) unsafe extern "C" fn tramp_tdbm_commit(_c: *mut c_void, _f: *mut c_void, _out: *mut c_void, _rt: i64) {
     crate::log_dev!("[tdbmanager] TweakDBBatch.Commit() -> (no-op, mutações já aplicadas ao chamar cada método)");
 }
 
-/// TweakXL `#34` (`TweakChangeset::ReinheritFlat`, 2026-08-10). Fonte real (`TweakChangeset.cpp`):
-/// NÃO é redscript-callable no TweakXL oficial (não aparece em `Executable/Scriptable/`) — é
-/// mecanismo INTERNO da leitura de `.yaml`/`.tweak` (`YamlReader.cpp`/`RedReader.cpp`), pra quando
+/// `ReinheritFlat` (2026-08-10): pra quando
 /// um mod sobrescreve 1 flat específico de um record que é ele mesmo um clone/herdeiro, apontando
-/// esse flat pra um record-fonte DIFERENTE do usado no `CloneRecord` original. Exposto aqui como
-/// método PRÓPRIO do BWMS (mesma capacidade, API nova — filosofia já estabelecida pro projeto
-/// inteiro: framework de 3os não precisa bater nome/superfície 1:1). `flatId` (o flat do clone,
+/// esse flat pra um record-fonte DIFERENTE do usado no `CloneRecord` original. Método
+/// PRÓPRIO do BWMS, chamável de redscript. `flatId` (o flat do clone,
 /// já existente via CloneRecord/InheritProps) tem seu offset REPONTADO pro do flat
 /// `sourceId + "." + appendix` — ver `tweakdb::reinherit_flat_by_id`.
 pub(crate) unsafe extern "C" fn tramp_tdbm_reinheritflat(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -640,7 +634,7 @@ pub(crate) unsafe extern "C" fn tramp_tdbm_reinheritflat(_c: *mut c_void, frame:
     write_bool_ret(out, ok);
 }
 
-/// TweakXL `#23` (`RegisterExtraFlat`, 2026-08-10). `AddFlat(flatId, donorTypeFlat, value)` —
+/// Flat extra (2026-08-10). `AddFlat(flatId, donorTypeFlat, value)` —
 /// `flatId`/`donorTypeFlat` chegam PRONTOS do compilador (`TDBID.Create("Items.X.prop")`
 /// resolvido em compile-time pelo `scc`, mesmo padrão de `ReinheritFlat`) — evita precisar ler
 /// String+Variant juntos (o projeto só tem extração combinada de UM dos dois por chamada).
@@ -697,8 +691,8 @@ pub unsafe fn register_tweakdbmanager(reg: &Registry) -> String {
     )
 }
 
-/// `TweakDBBatch` — item TweakXL #45. Mesma receita 100% provada de `register_callbacksystemhandler`
-/// (`CallbackSystemHandler`, classe instanciável sem `extends` explícito na fonte real = parent
+/// `TweakDBBatch`. Mesma receita 100% provada de `register_callbacksystemhandler`
+/// (`CallbackSystemHandler`, classe instanciável sem `extends` explícito = parent
 /// `IScriptable` implícito, mesmo donor `gameuiInGameMenuGameController`, mesmo fix de alocador
 /// embutido já aplicado dentro de `register_type_instantiable_with_parent`). Reusa os MESMOS
 /// handlers de `TweakDBManager` pros 6 métodos delegados (nenhum lê `self`/estado de instância —

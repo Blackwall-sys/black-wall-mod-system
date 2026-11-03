@@ -1,5 +1,5 @@
-// bwms-visualcontrollercomponent.reds — Codeware `#33` (`entVisualControllerComponent.reds`): os campos do
-// `entVisualControllerComponent` pelos offsets do header gerado da reflection do jogo (`RED4ext.SDK/.../Generated/ent/
+// bwms-visualcontrollercomponent.reds — os campos do
+// `entVisualControllerComponent` pelos offsets do header gerado da reflection do jogo (`Generated/ent/
 // VisualControllerComponent.hpp`; `register_vcc_33_natives`, aparencia/mod.rs). A classe NÃO é declarada (a categoria do `CMesh`, que
 // derruba o bind): o parâmetro é sempre `ref<IComponent>`, obtido por `Entity.FindComponentByType(n"entVisualControllerComponent")`,
 // que busca só pelo nome.

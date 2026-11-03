@@ -1,5 +1,5 @@
 // ponte-mensagem-generica.reds — o popup de mensagem do jogo (`GenericMessageNotification`) com o que mods do Windows pedem a mais:
-// `Show` com `inkTextParams` (variáveis na mensagem, Equipment-EX) e `ShowInput` (o mesmo popup com um campo de texto; o texto volta em
+// `Show` com `inkTextParams` (variáveis na mensagem) e `ShowInput` (o mesmo popup com um campo de texto; o texto volta em
 // `GenericMessageNotificationCloseData.input`). O campo é o `HubTextInput` da ponte, pendurado logo abaixo da mensagem.
 
 import Codeware.UI.*

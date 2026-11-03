@@ -1,4 +1,4 @@
-// Codeware #91 — campos nativos de widget, lidos de verdade.
+// Campos nativos de widget, lidos de verdade.
 //
 // A ficha refutou a via do `@addField`: daria "storage próprio mas DESCONECTADO da lógica real de
 // render — não seria capacidade genuína, só decoração inerte". A refutação está certa **para o

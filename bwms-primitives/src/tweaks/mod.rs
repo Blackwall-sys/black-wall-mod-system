@@ -1,4 +1,4 @@
-//! Interpretador do formato declarativo do TweakXL (YAML/TOML → mesma AST) →
+//! Interpretador do formato declarativo de tweak (YAML/TOML → mesma AST) →
 //! a lista canônica de operações ([`crate::operacoes`]): atribuição
 //! de flats (escalar/array/struct), `$base` (herança = clone + overrides), `$type` (record do zero, ou flat novo tipado com `$value`),
 //! `$props: AutoFlats` (prop que o record não tem vira flat novo, com o tipo deduzido do valor), as
@@ -14,18 +14,16 @@ pub mod yaml;
 
 use std::collections::HashMap;
 
-use crate::fnv1a32;
 use crate::operacoes::{lista_em_texto, EditOp, Op};
-use crate::tweakxl::yaml::{Kind, Node};
+use crate::tweaks::yaml::{Kind, Node};
 
 /// Versão do jogo contra a qual o `$game` é avaliado quando o chamador não lê a do jogo instalado (offline, testes): a da 2.5 do Mac
-/// (`CFBundleShortVersionString` 2.5.0 do `Cyberpunk2077.app`). O TweakXL usa a versão de PRODUTO do executável (`HostImage::
-/// TryResolveVersion`: major, minor, patch do `VS_FIXEDFILEINFO`, cortados em `uint8_t` no `TweakContext`); o RED4ext do Mac tira a mesma
-/// trinca do `CFBundleShortVersionString` (`Image.cpp`). Na 2.31 a de produto era 2.31 (o CET confere `(2, 31)`); o runtime lê a do
+/// (`CFBundleShortVersionString` 2.5.0 do `Cyberpunk2077.app`). A versão é a de PRODUTO do executável (major, minor, patch); no Mac
+/// sai do `CFBundleShortVersionString`. Na 2.31 a de produto era 2.31; o runtime lê a do
 /// `Info.plist` ([`versao_do_info_plist`]).
 pub const GAME_VERSION: (u32, u32, u32) = (2, 5, 0);
 
-/// A versão `major.minor.patch` do `CFBundleShortVersionString` de um `Info.plist` em XML, lida como o RED4ext do Mac (`sscanf "%d.%d.%d"`,
+/// A versão `major.minor.patch` do `CFBundleShortVersionString` de um `Info.plist` em XML (`%d.%d.%d`,
 /// componente ausente = 0). `None` sem a chave ou sem número.
 pub fn versao_do_info_plist(texto: &str) -> Option<(u32, u32, u32)> {
     let depois = &texto[texto.find("<key>CFBundleShortVersionString</key>")?..];
@@ -35,15 +33,15 @@ pub fn versao_do_info_plist(texto: &str) -> Option<(u32, u32, u32)> {
     Some((major, partes.next().flatten().unwrap_or(0), partes.next().flatten().unwrap_or(0)))
 }
 
-/// Contexto da interpretação: a origem (caminho do arquivo, p/ o hash do nome
-/// inline), o contador por-hash que espelha o `m_inlineIndexSuffix` do TweakXL, e
+/// Contexto da interpretação: a origem (caminho do arquivo, entra no nome dos records
+/// inline) e
 /// `is_ep1`/`game_version` — avaliação real de `$dlc: EP1`/`$game` (2026-08-05, achado de
 /// auditoria: o código antigo IGNORAVA `$game`/`$dlc` mesmo em runtime, onde dá pra saber de
 /// verdade — um mod gateado `$dlc: EP1` aplicava sempre, sem checar se Phantom Liberty está
 /// instalado; um mod gateado `$game: ">=3.0"` aplicava numa versão do jogo que não suporta).
-/// Fonte de verdade real do TweakXL (`TweakContext.hpp`): `CheckInstalledDLC(cond)` só retorna
-/// true se `cond=="EP1"` E `IsEP1()` (native global real do jogo, `orphans.script:39008`) for
-/// true, ou se `cond` for vazio; `CheckGameVersion(cond)` chama `semver::range::satisfies` (grade
+/// Regra: `$dlc` só vale
+/// se `cond=="EP1"` E `IsEP1()` (native global real do jogo, `orphans.script:39008`) for
+/// true, ou se `cond` for vazio; `$game` é um range semver (grade
 /// NPM completa: `^`/`~`/`x`/hífen/`||`). Implementamos aqui o SUBCONJUNTO real de uso — operador
 /// de comparação único (`>=`/`<=`/`>`/`<`/`=`) ou versão nua (match parcial por componente
 /// especificado, ex.: `"2"` casa qualquer `2.x.x`, `"2.31"` casa qualquer `2.31.x`) — documentado
@@ -52,14 +50,29 @@ pub fn versao_do_info_plist(texto: &str) -> Option<(u32, u32, u32)> {
 /// `auto_flats`: o `$props: AutoFlats` vale no nó atual (do documento ou do record).
 struct Ctx<'a> {
     source: &'a str,
-    inline_counter: HashMap<String, u32>,
     is_ep1: bool,
     game_version: (u32, u32, u32),
     auto_flats: bool,
     /// Os filhos em processamento são propriedades de um record (nomeado, em linha ou editado no topo): mapa vira record em linha.
     em_record: bool,
-    /// O record pai não define `iconPath`: o `icon` em linha o preenche (`YamlReader` do TweakXL).
+    /// O record pai não define `iconPath`: o `icon` em linha o preenche.
     pai_sem_iconpath: bool,
+    /// Nomes de item de array em linha já dados neste arquivo ([`nome_de_record_em_linha`]).
+    itens_em_linha: HashMap<String, u32>,
+}
+
+/// O nome do record em linha de `pai` (`.yaml` e `.tweak` dão o mesmo): `<pai>$<H>`, `H` = FNV-1a 32 em hexadecimal maiúsculo de
+/// `<origem>|<pai>|<tipo>`, e no item de array (`indice` ≥ 0) mais `|<indice>|<n>`, com `n` contando os nomes da mesma chave já dados no
+/// arquivo (`itens_em_linha`). O nome é o `TweakDBID` do record e pode estar em save: a fórmula não muda.
+pub(crate) fn nome_de_record_em_linha(origem: &str, pai: &str, tipo: &str, indice: i32, itens_em_linha: &mut HashMap<String, u32>) -> String {
+    let mut chave = format!("{origem}|{pai}|{tipo}");
+    if indice >= 0 {
+        chave.push_str(&format!("|{indice}|"));
+        let n = itens_em_linha.entry(chave.clone()).or_insert(0);
+        *n += 1;
+        chave.push_str(&n.to_string());
+    }
+    format!("{pai}${:08X}", crate::fnv1a32(chave.as_bytes()))
 }
 
 /// Avalia uma condição `$game` (string do YAML) contra a versão do jogo. Suporta:
@@ -68,7 +81,7 @@ struct Ctx<'a> {
 /// - versão nua sem operador (`"2"`, `"2.31"`, `"2.31.0"`): match PARCIAL — só os componentes
 ///   informados precisam bater (`"2"` casa qualquer versão com major==2).
 ///
-/// NÃO implementa a grade NPM completa que `semver::range::satisfies` (real) suporta (`^`/`~`/
+/// NÃO implementa a grade NPM completa de range semver (`^`/`~`/
 /// `x`/hífen-range/`||` OR/espaço-AND) — nenhum `.xl`/`.yaml` do corpus deste projeto usa essas
 /// formas, e sem exemplo real pra testar contra, implementar às cegas arriscaria parsear errado
 /// silenciosamente (categoria de bug que este próprio fix existe pra evitar). Condição vazia ou
@@ -131,7 +144,7 @@ pub fn interpret(root: &Node) -> Result<Vec<Op>, String> {
 }
 
 /// Como [`interpret`], mas recebe a ORIGEM (caminho do arquivo) — entra no hash
-/// do nome sintético dos records inline, igual ao `m_path` do TweakXL. `$dlc: EP1` sempre
+/// do nome sintético dos records inline. `$dlc: EP1` sempre
 /// passa (compat com chamadores antigos/offline, que não sabem se EP1 está instalado).
 pub fn interpret_from(root: &Node, source: &str) -> Result<Vec<Op>, String> {
     interpret_from_ctx(root, source, true)
@@ -149,9 +162,17 @@ pub fn interpret_do_jogo(root: &Node, source: &str, is_ep1: bool, versao: (u32, 
     let Kind::Map(entries) = &root.kind else {
         return Err("o documento precisa ser um mapa de records/flats".into());
     };
-    let mut ctx = Ctx { source, inline_counter: HashMap::new(), is_ep1, game_version: versao, auto_flats: false, em_record: false, pai_sem_iconpath: false };
+    let mut ctx = Ctx {
+        source,
+        is_ep1,
+        game_version: versao,
+        auto_flats: false,
+        em_record: false,
+        pai_sem_iconpath: false,
+        itens_em_linha: HashMap::new(),
+    };
     let mut ops = Vec::new();
-    // `YamlReader::Read`: `$game`/`$dlc` do topo valem pro arquivo inteiro, e o `$props` do topo é o modo de todos os records.
+    // `$game`/`$dlc` do topo valem pro arquivo inteiro, e o `$props` do topo é o modo de todos os records.
     if !check_conditions(entries, &ctx) {
         return Ok(ops);
     }
@@ -166,12 +187,12 @@ pub fn interpret_do_jogo(root: &Node, source: &str, is_ep1: bool, versao: (u32, 
     Ok(ops)
 }
 
-/// `$props: AutoFlats` no nó (`YamlReader::ResolvePropertyMode`).
+/// `$props: AutoFlats` no nó.
 fn modo_auto(entries: &[(String, Node)]) -> bool {
     entries.iter().any(|(k, v)| k == "$props" && v.as_str() == Some("AutoFlats"))
 }
 
-/// Espelha `App::YamlReader::CheckConditions` real (`YamlReader.cpp:87-114`): olha `$game`/`$dlc`
+/// Olha `$game`/`$dlc`
 /// nas entradas do node e devolve `false` se algum falhar — quem chama deve pular o node INTEIRO
 /// (record ou bloco de props), não só a chave da condição (bug antigo: só a chave era ignorada,
 /// os irmãos continuavam sendo processados incondicionalmente).
@@ -205,7 +226,7 @@ fn edicao(path: &str, tipo: Option<String>, op: EditOp) -> Op {
     }
 }
 
-/// `top` = flat solto no topo do arquivo (o TweakXL cria o que não existe pelo tipo deduzido); prop de record só cria com `$props:
+/// `top` = flat solto no topo do arquivo (o que não existe nasce pelo tipo deduzido); prop de record só cria com `$props:
 /// AutoFlats`.
 fn process_entry(path: &str, node: &Node, top: bool, ops: &mut Vec<Op>, ctx: &mut Ctx) -> Result<(), String> {
     let cria = top || ctx.auto_flats;
@@ -229,13 +250,13 @@ fn process_map(path: &str, node: &Node, top: bool, ops: &mut Vec<Op>, ctx: &mut 
         return Ok(());
     };
 
-    // `CheckConditions` real: se `$game`/`$dlc` falhar, o node INTEIRO é pulado (record ou bloco
-    // de props) — checado ANTES de qualquer ramo (record/scalar/aninhado), igual ao original.
+    // Se `$game`/`$dlc` falhar, o node INTEIRO é pulado (record ou bloco
+    // de props) — checado ANTES de qualquer ramo (record/scalar/aninhado).
     if !check_conditions(entries, ctx) {
         return Ok(());
     }
 
-    // Flat novo tipado no topo (`HandleTopNode`: `$type` com `$value` é tipo de flat, sem `$value` é classe de record).
+    // Flat novo tipado no topo (`$type` com `$value` é tipo de flat, sem `$value` é classe de record).
     if top {
         if let (Some(tipo), Some(valor)) = (node.get("$type"), node.get("$value")) {
             let tipo = tipo.as_str().ok_or_else(|| format!("'{path}': $type precisa ser um nome de tipo"))?.to_string();
@@ -262,7 +283,7 @@ fn process_map(path: &str, node: &Node, top: bool, ops: &mut Vec<Op>, ctx: &mut 
         return Ok(());
     }
 
-    // Sem $base/$type, mapa só com campos de struct é valor de struct (`ConvertValue` do TweakXL, wiki "Structures"): o completo vale em
+    // Sem $base/$type, mapa só com campos de struct é valor de struct: o completo vale em
     // qualquer contexto (no topo, flat novo do tipo dos campos); o parcial só onde o tipo já se sabe, no flat vivo, com os ausentes em 0.
     if node.get("$base").is_none() && node.get("$type").is_none() && node.get("$value").is_none() {
         if top {
@@ -296,23 +317,9 @@ fn process_map(path: &str, node: &Node, top: bool, ops: &mut Vec<Op>, ctx: &mut 
         }
     }
 
-    // Mapa sob propriedade de record, sem `$type`/`$base` e sem forma de struct: record em linha do tipo estrangeiro da propriedade
-    // (`YamlReader` do TweakXL, `propInfo->foreignType`). O tipo só se sabe no TweakDB vivo: a classe vai como `@<propriedade>` e o runtime
-    // a resolve. `icon` (o `gamedataUIIcon_Record` dos itens) segue a regra do TweakXL: o record leva o prefixo `UIIcon.` e o `iconPath` do
-    // pai recebe o nome sem ele, se o pai não define o seu.
+    // Mapa sob propriedade de record, sem `$type`/`$base`/`$value` e sem forma de struct.
     if !top && ctx.em_record && node.get("$value").is_none() {
-        let curto = compose_inline_name(path, "@", ctx, -1);
-        let icone = path.rsplit('.').next() == Some("icon");
-        let nome = if icone { format!("UIIcon.{curto}") } else { curto.clone() };
-        let pai_sem_iconpath = ctx.pai_sem_iconpath;
-        ops.push(Op::Create { record: nome.clone(), class: format!("@{path}") });
-        emit_record(&nome, node, ops, ctx)?;
-        if icone && pai_sem_iconpath {
-            let pai = &path[..path.len() - ".icon".len()];
-            ops.push(Op::Edit { flat: format!("{pai}.iconPath"), op: EditOp::Assign(curto) });
-        }
-        ops.push(Op::Edit { flat: path.to_string(), op: EditOp::Assign(nome) });
-        return Ok(());
+        return record_em_linha_pela_propriedade(path, node, ops, ctx);
     }
 
     // Caminho aninhado: cada filho vira um flat `path.filho`. `$game`/`$dlc` já foram
@@ -403,27 +410,29 @@ fn make_inline_record(
     Ok(name)
 }
 
-/// Replica o `ComposeInlineName` do TweakXL: `parentFlat$XXXXXXXX`, onde XXXXXXXX
-/// é o FNV1a32 (8 hex MAIÚSCULOS) de `source|parentFlat|recordType[|idx|counter]`.
+/// Nome de record inline do flat `parent_flat`: `record_type` é o `$type`, o `$base` ou `@` (tipo da propriedade); `item_index` ≥ 0 para
+/// item de array, −1 para valor de flat.
 fn compose_inline_name(parent_flat: &str, record_type: &str, ctx: &mut Ctx, item_index: i32) -> String {
-    let mut h = String::new();
-    h.push_str(ctx.source);
-    h.push('|');
-    h.push_str(parent_flat);
-    h.push('|');
-    h.push_str(record_type);
-    if item_index >= 0 {
-        h.push('|');
-        h.push_str(&item_index.to_string());
-        h.push('|');
-        // O contador é indexado pelo hash ATÉ AQUI (com o separador final), igual
-        // ao `m_inlineIndexSuffix[inlineHash]` do TweakXL.
-        let c = ctx.inline_counter.entry(h.clone()).or_insert(0);
-        *c += 1;
-        let c = *c;
-        h.push_str(&c.to_string());
+    nome_de_record_em_linha(ctx.source, parent_flat, record_type, item_index, &mut ctx.itens_em_linha)
+}
+
+/// Mapa sem `$type`/`$base`/`$value`, sem forma de struct, sob propriedade `path` de record: record em linha do tipo da propriedade
+/// (com o bloco `icon`).
+fn record_em_linha_pela_propriedade(path: &str, node: &Node, ops: &mut Vec<Op>, ctx: &mut Ctx) -> Result<(), String> {
+    let curto = compose_inline_name(path, "@", ctx, -1);
+    let icone = path.rsplit('.').next() == Some("icon");
+    // O ícone do item mora no pacote `UIIcon.` e o jogo monta o id dele como `UIIcon.` + `iconPath`. `icon` dentro de `icon` já nasce sob
+    // `UIIcon.`: o prefixo entra uma vez só.
+    let nome = if icone && !curto.starts_with("UIIcon.") { format!("UIIcon.{curto}") } else { curto };
+    let pai_sem_iconpath = ctx.pai_sem_iconpath;
+    ops.push(Op::Create { record: nome.clone(), class: format!("@{path}") });
+    emit_record(&nome, node, ops, ctx)?;
+    if let Some(record_pai) = path.strip_suffix(".icon").filter(|_| icone && pai_sem_iconpath) {
+        let icon_path = nome.strip_prefix("UIIcon.").unwrap_or(&nome).to_string();
+        ops.push(Op::Edit { flat: format!("{record_pai}.iconPath"), op: EditOp::Assign(icon_path) });
     }
-    format!("{parent_flat}${:08X}", fnv1a32(h.as_bytes()))
+    ops.push(Op::Edit { flat: path.to_string(), op: EditOp::Assign(nome) });
+    Ok(())
 }
 
 /// O texto de um elemento de array: escalar como está, struct pela forma posicional.
@@ -444,8 +453,8 @@ fn emit_array_ops(path: &str, items: &[Node], cria: bool, ops: &mut Vec<Op>, ctx
             let name = make_inline_record(path, it, ops, ctx, i as i32)?;
             resolved.push(Node { aspas: false, tag: it.tag.clone(), kind: Kind::Scalar(name) });
         } else if let (true, Kind::Map(entries)) = (ctx.em_record, &it.kind) {
-            // Mapa sem `$type`/`$base` num array de propriedade de record (`itemStock: - !append {item: …, quantity: […]}`): o
-            // `YamlReader` do TweakXL faz record em linha do `foreignType` do elemento; o struct (`{x: 1, y: 2}`) fica como valor.
+            // Mapa sem `$type`/`$base` num array de propriedade de record (`itemStock: - !append {item: …, quantity: […]}`): vira
+            // record em linha do `foreignType` do elemento; o struct (`{x: 1, y: 2}`) fica como valor.
             if struct_map_to_scalar(entries).is_some() || struct_nomeado(entries).is_some() || it.get("$value").is_some() {
                 resolved.push(it.clone());
                 continue;
@@ -459,7 +468,7 @@ fn emit_array_ops(path: &str, items: &[Node], cria: bool, ops: &mut Vec<Op>, ctx
         }
     }
 
-    // `TryMakeValue` de sequência: o tipo do array sai do 1º elemento (a tag de operação não conta na dedução).
+    // Dedução de sequência: o tipo do array sai do 1º elemento (a tag de operação não conta na dedução).
     let tipo = if cria { resolved.first().and_then(deduzir_tipo).map(|(t, _)| format!("array:{t}")) } else { None };
     let elem_tipo = tipo.as_deref().and_then(|t| t.strip_prefix("array:")).map(str::to_string);
     let valor = |it: &Node| -> Result<String, String> {
@@ -483,7 +492,7 @@ fn emit_array_ops(path: &str, items: &[Node], cria: bool, ops: &mut Vec<Op>, ctx
             .tag
             .as_deref()
             .ok_or_else(|| format!("'{path}': item sem tag numa lista de operações (!append etc.)"))?;
-        // `!remove-all` (fonte real: `YamlReader.cpp::RemoveAllOp`) IGNORA o valor do item — a
+        // `!remove-all` IGNORA o valor do item — a
         // única tag desta família sem operando. As outras exigem um valor escalar.
         if tag == "!remove-all" {
             ops.push(edicao(path, tipo.clone(), EditOp::RemoveAll));
@@ -505,10 +514,10 @@ fn emit_array_ops(path: &str, items: &[Node], cria: bool, ops: &mut Vec<Op>, ctx
     Ok(())
 }
 
-/// Tira do texto o invólucro de tipo do TweakXL (`n"X"`, `CName("X")`, `t"X"`, `TweakDBID("X")`, `l"X"`, `r"X"`, `ResRef("X")`) para o
+/// Tira do texto o invólucro de tipo (`n"X"`, `CName("X")`, `t"X"`, `TweakDBID("X")`, `l"X"`, `r"X"`, `ResRef("X")`) para o
 /// tipo do flat; `LocKey(N)` vira `LocKey#N` (chave primária), `ResRef(N)` vira `N` (o hash) e `<TDBID:CRC:LEN>` vira o id em
 /// hexadecimal. O resto passa como está; o decimal puro num `LocKey` segue o [`crate::lockey_chave`] (decisão do dono, F1-30). É a regra
-/// única dos formatos da wiki do TweakXL (YAML Tweaks): o intérprete a usa no flat novo e o escritor do runtime na propriedade de record,
+/// única dos formatos de tweak: o intérprete a usa no flat novo e o escritor do runtime na propriedade de record,
 /// onde o tipo só se sabe no TweakDB vivo.
 pub fn normalizar_para(tipo: &str, s: &str) -> String {
     let dentro = |pre: &str, suf: &str| s.strip_prefix(pre).and_then(|x| x.strip_suffix(suf)).map(str::to_string);
@@ -557,7 +566,7 @@ fn e_bool(s: &str) -> bool {
     )
 }
 
-/// O tipo de struct de um mapa com todas as chaves do tipo (`ConvertValue` estrito do TweakXL, na mesma ordem de tentativa).
+/// O tipo de struct de um mapa com todas as chaves do tipo (conversão estrita, nesta ordem de tentativa).
 fn tipo_de_struct(entries: &[(String, Node)]) -> Option<&'static str> {
     let tem = |ks: &[&str]| ks.iter().all(|k| entries.iter().any(|(e, _)| e == k));
     [
@@ -572,10 +581,10 @@ fn tipo_de_struct(entries: &[(String, Node)]) -> Option<&'static str> {
     .map(|(t, _)| t)
 }
 
-/// O tipo de flat que o TweakXL deduz de um valor sem tipo declarado (`YamlReader::TryMakeValue`, conversões estritas nesta ordem): texto
+/// O tipo de flat deduzido de um valor sem tipo declarado (conversões estritas nesta ordem): texto
 /// entre aspas é `String`; número inteiro `Int32`; número `Float`; booleano `Bool`; `n"X"` `CName`; `t"X"` `TweakDBID`; `l"X"`/`LocKey#`
 /// `gamedataLocKeyWrapper`; `r"X"` `raRef:CResource`; mapa de struct o struct; sequência `array:` do tipo do 1º elemento. Devolve o tipo
-/// e o valor sem o invólucro; `None` = ambíguo (palavra solta como `Items.X`), o TweakXL recusa.
+/// e o valor sem o invólucro; `None` = ambíguo (palavra solta como `Items.X`), recusado.
 pub fn deduzir_tipo(node: &Node) -> Option<(String, String)> {
     match &node.kind {
         Kind::Scalar(s) => {
@@ -637,7 +646,7 @@ fn valor_tipado(tipo: &str, node: &Node) -> Option<String> {
     }
 }
 
-/// A forma posicional do struct `tipo` (a de [`struct_map_to_scalar`]); componente ausente vale 0, como no `ConvertValue` não estrito.
+/// A forma posicional do struct `tipo` (a de [`struct_map_to_scalar`]); componente ausente vale 0, como na conversão não estrita.
 fn struct_texto(tipo: &str, entries: &[(String, Node)]) -> Option<String> {
     let ordem: &[&str] = match tipo {
         "Vector2" => &["x", "y"],
@@ -698,7 +707,7 @@ fn struct_nomeado(entries: &[(String, Node)]) -> Option<String> {
 }
 
 /// O texto nomeado de um struct (`{y:6.0}`, do [`struct_nomeado`]) na forma posicional do `tipo` (`0,6.0` no `Vector2`), com os campos
-/// ausentes em 0 como no `ConvertValue` não estrito do TweakXL. `None` com campo que o tipo não tem ou texto que não é nomeado.
+/// ausentes em 0 como na conversão não estrita. `None` com campo que o tipo não tem ou texto que não é nomeado.
 pub fn struct_em_posicional(tipo: &str, texto: &str) -> Option<String> {
     let miolo = texto.trim().strip_prefix('{')?.strip_suffix('}')?;
     let (_, campos) = CAMPOS_DE_STRUCT.iter().find(|(t, _)| *t == tipo)?;
@@ -711,7 +720,7 @@ pub fn struct_em_posicional(tipo: &str, texto: &str) -> Option<String> {
     Some(valores.join(","))
 }
 
-/// A tupla `(a,b,c)` do `.tweak` (os campos na ordem de memória do struct, a do `RedReader::ConvertValue` e do `tweakdb.bin`) no texto
+/// A tupla `(a,b,c)` do `.tweak` (os campos na ordem de memória do struct, a do `tweakdb.bin`) no texto
 /// posicional do `tipo`: só o `EulerAngles` muda, `(roll,pitch,yaw)` → `pitch,yaw,roll`. Sem tipo declarado no `.tweak` a tupla chega
 /// assim até o flat vivo, que diz se é `Vector3` ou `EulerAngles`. `None` se o texto não é tupla.
 pub fn tupla_em_posicional(tipo: &str, texto: &str) -> Option<String> {
@@ -730,7 +739,7 @@ fn set(items: &[&'static str]) -> std::collections::BTreeSet<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tweakxl::yaml;
+    use crate::tweaks::yaml;
 
     /// Resume cada Op em texto pra checagem (Op não deriva Debug/Eq).
     fn summarize(ops: &[Op]) -> Vec<String> {
@@ -758,7 +767,7 @@ mod tests {
     }
     fn run(src: &str) -> Vec<String> {
         let root = yaml::parse(src).unwrap();
-        let root = crate::tweakxl::template::expand(&root).unwrap();
+        let root = crate::tweaks::template::expand(&root).unwrap();
         summarize(&interpret_from(&root, "test.yaml").unwrap())
     }
 
@@ -782,6 +791,20 @@ mod tests {
         assert_eq!(s.iter().filter(|l| l.starts_with("edit Items.X.iconPath")).count(), 1, "{s:?}");
     }
 
+    /// `icon` dentro de `icon`: o record já nasce sob `UIIcon.`, o prefixo não dobra, e todo `iconPath` acha o seu record por `UIIcon.` +
+    /// `iconPath` (a montagem do jogo).
+    #[test]
+    fn icone_dentro_de_icone_tem_o_prefixo_uma_vez() {
+        let s = run("Items.X:\n  icon:\n    atlasPartName: p\n    icon:\n      atlasPartName: q\n");
+        assert!(s.iter().all(|l| !l.contains("UIIcon.UIIcon.")), "{s:?}");
+        let criados: Vec<&str> = s.iter().filter_map(|l| l.strip_prefix("create ")?.split(" : ").next()).collect();
+        let icon_paths: Vec<&str> = s.iter().filter_map(|l| l.split_once(".iconPath = ").map(|(_, v)| v)).collect();
+        assert_eq!(icon_paths.len(), 2, "{s:?}");
+        for p in icon_paths {
+            assert!(criados.contains(&format!("UIIcon.{p}").as_str()), "iconPath {p} sem record: {s:?}");
+        }
+    }
+
     /// Mapa sem `$type`/`$base` como item de array de record (o `itemStock` de vendedor do Wannabe Edgerunner): record em linha marcado
     /// `@` com a tag do item preservada; struct no array segue como valor.
     #[test]
@@ -797,7 +820,7 @@ mod tests {
         assert_eq!(s, vec!["edit Condition.X.pontos append 1.0,2.0"]);
     }
 
-    /// Struct da wiki do TweakXL ("Structures"): completo no topo cria o flat do tipo dos campos; parcial vira o texto nomeado, que o
+    /// Struct: completo no topo cria o flat do tipo dos campos; parcial vira o texto nomeado, que o
     /// flat vivo põe na ordem com os ausentes em 0; completo dentro de record segue posicional.
     #[test]
     fn struct_completo_no_topo_e_parcial() {
@@ -836,9 +859,8 @@ mod tests {
 
     #[test]
     fn tag_remove_all_ignora_o_valor_do_item_e_nao_exige_um() {
-        // Fonte real (`YamlReader.cpp::RemoveAllOp`) chama `RemoveAllElements(flatId)` direto,
-        // SEM ler `itemData` — nenhum valor associado, diferente de `!remove`. O parser não pode
-        // exigir escalar aqui (item #30, TweakXL #46-#48).
+        // `!remove-all` limpa o array SEM ler o valor do item — nenhum valor associado, diferente
+        // de `!remove`. O parser não pode exigir escalar aqui (item #30).
         let s = run("Items.A:\n  tags:\n    - !remove-all\n");
         assert_eq!(s, vec!["edit Items.A.tags remove-all"]);
         // Mesmo com um valor presente no item (alguns mods escrevem `!remove-all ~` por hábito
@@ -847,9 +869,9 @@ mod tests {
         assert_eq!(s2, vec!["edit Items.A.tags remove-all"]);
     }
 
-    /// `.yaml` do TweakXL com âncora é aceito (decisão do dono, F7-23): o alias repete o valor, com a tag, em outro record.
+    /// `.yaml` de tweak com âncora é aceito (decisão do dono, F7-23): o alias repete o valor, com a tag, em outro record.
     #[test]
-    fn ancora_e_alias_no_yaml_do_tweakxl() {
+    fn ancora_e_alias_no_yaml_dos_tweaks() {
         let s = run("Items.A:\n  $base: Items.Base\n  quality: &Q Quality.Rare\n  tags: &T\n    - !append Cool\nItems.B:\n  $base: Items.Base\n  quality: *Q\n  tags: *T\n");
         assert_eq!(
             s,
@@ -940,7 +962,7 @@ mod tests {
     fn dlc_e_game_bloqueiam_o_node_inteiro() {
         // $dlc: EP1 sem EP1 instalado (is_ep1=false) -> node inteiro pulado, zero ops.
         let root = yaml::parse("Items.A:\n  $dlc: EP1\n  damage: 10\n").unwrap();
-        let root = crate::tweakxl::template::expand(&root).unwrap();
+        let root = crate::tweaks::template::expand(&root).unwrap();
         let ops = interpret_from_ctx(&root, "test.yaml", false).unwrap();
         assert!(summarize(&ops).is_empty(), "ops: {:?}", summarize(&ops));
 
@@ -950,18 +972,18 @@ mod tests {
 
         // $game fora do range da versão suportada -> node inteiro pulado.
         let root3 = yaml::parse("Items.A:\n  $game: \">=3.0\"\n  damage: 10\n").unwrap();
-        let root3 = crate::tweakxl::template::expand(&root3).unwrap();
+        let root3 = crate::tweaks::template::expand(&root3).unwrap();
         let ops3 = interpret_from_ctx(&root3, "test.yaml", true).unwrap();
         assert!(summarize(&ops3).is_empty(), "ops: {:?}", summarize(&ops3));
 
         // $game dentro do range -> passa.
         let root4 = yaml::parse("Items.A:\n  $game: \">=2.0\"\n  damage: 10\n").unwrap();
-        let root4 = crate::tweakxl::template::expand(&root4).unwrap();
+        let root4 = crate::tweaks::template::expand(&root4).unwrap();
         let ops4 = interpret_from_ctx(&root4, "test.yaml", true).unwrap();
         assert_eq!(summarize(&ops4), vec!["edit Items.A.damage = 10"]);
     }
 
-    /// A 2.5 do Mac é 2.5.0 (`CFBundleShortVersionString`): o `$game` responde como o `semver::range::satisfies` do TweakXL com a versão de
+    /// A 2.5 do Mac é 2.5.0 (`CFBundleShortVersionString`): o `$game` responde como um range semver com a versão de
     /// produto 2.5.0 — `2.5` tem minor 5, menor que o 31 da 2.31.
     #[test]
     fn game_version_na_2_5() {
@@ -997,7 +1019,7 @@ mod tests {
         assert_eq!(rodar("Bwms.Teste.escalar: 1.5\n"), ["novo Float Bwms.Teste.escalar = 1.5"]);
         assert_eq!(rodar("Bwms.Teste.texto: \"oi, mundo\"\n"), ["novo String Bwms.Teste.texto = oi, mundo"]);
         assert_eq!(rodar("Bwms.Teste.id: t\"Items.X\"\n"), ["novo TweakDBID Bwms.Teste.id = Items.X"]);
-        // Palavra solta é ambígua: só edita flat que já existe (o TweakXL recusa criar).
+        // Palavra solta é ambígua: só edita flat que já existe (não cria).
         assert_eq!(rodar("Bwms.Teste.ambiguo: Items.X\n"), ["edit Bwms.Teste.ambiguo = Items.X"]);
         // Atributo no topo não vira flat.
         assert_eq!(rodar("$game: \">=2.0\"\nItems.A.v: 2\n"), ["novo Int32 Items.A.v = 2"]);

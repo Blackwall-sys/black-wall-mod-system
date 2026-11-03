@@ -1,4 +1,4 @@
-// bwms-text-input.reds — campo de texto do BWMS (Codeware `#115`, parte 115d), 2026-09-13.
+// bwms-text-input.reds — campo de texto do BWMS, 2026-09-13.
 //
 // PARA QUE SERVE: digitar texto numa UI de mod — nome de preset, busca numa lista, valor de uma opção. Com foco, o campo recebe a tecla pelo
 // `OnBwmsInputKey` (`#176`), edita pelo modelo do BWMS (`BwmsTextEdit`: buffer, cursor e seleção em codepoint, no Rust) e desenha texto, seleção e caret
@@ -18,7 +18,7 @@
 //
 // USO: `let campo = BwmsTextInput.Create(420.0, 38); campo.Mount(raiz); campo.OnChange(this, n"OnTexto"); campo.Focus(controller);`
 //
-// De Codeware: `TextInput` → `BwmsTextInput`. Sem `Viewport` próprio: o conteúdo desloca por `SetTranslation` com o deslocamento que o modelo calcula.
+// Sem `Viewport` próprio: o conteúdo desloca por `SetTranslation` com o deslocamento que o modelo calcula.
 
 public class BwmsTextInput extends BwmsUIController {
     private let m_editor: ref<BwmsTextEdit>;

@@ -1,14 +1,12 @@
-//! Codeware `#137` — `ResourceTarget`: filtro de path por WILDCARD ou REGEX explícito.
+//! `ResourceTarget`: filtro de path por WILDCARD ou REGEX explícito.
 //!
-//! Porte da fábrica `Path()` do original (`App/Callback/Targets/ResourceTarget.hpp:64-87`), que
-//! decide UMA vez, nesta ordem:
+//! A fábrica `Path()` decide UMA vez, nesta ordem:
 //!
-//! 1. padrão começa com `"regex:"` → o resto é regex crua (`std::regex`, ECMAScript);
-//! 2. senão, padrão contém `*` → **escapa** os metacaracteres `. ^ $ - + ( ) [ ] { } | ? \`,
-//!    troca `*` por `.*`, e ancora com `^...$`;
-//! 3. senão → sem regex; o `Matches` compara o path (`hpp:41`).
+//! 1. padrão começa com `"regex:"` → o resto é regex crua (ECMAScript);
+//! 2. senão, padrão contém `*` → glob ancorado nas duas pontas, `*` casa qualquer trecho;
+//! 3. senão → sem regex; o `Matches` compara o path.
 //!
-//! O `Matches` só executa o que a fábrica montou, com `std::regex_match` (`hpp:36`).
+//! O `Matches` só executa o que a fábrica montou, casando o texto inteiro.
 //! [`CompiledResourceTarget`] é essa decisão compilada: quem guarda o alvo compila uma vez e casa
 //! por evento sem reinterpretar o texto.
 //!
@@ -17,44 +15,34 @@
 //! `crate::regex`. `None` em [`casa`] é "não sei" (padrão `regex:` recusado, com o motivo em
 //! [`CompiledResourceTarget::Recusado`]), nunca "não casou".
 //!
-//! A transformação do caso (2) é portada byte-a-byte mesmo sem ser usada para casar, porque ela é
-//! OBSERVÁVEL: [`wildcard_para_regex`] permite conferir contra a fonte, e é o que garante que o
-//! glob e a regex do original aceitam o mesmo conjunto de strings.
+//! [`wildcard_para_regex`] dá a regex equivalente ao glob do caso (2), para conferir que os dois
+//! aceitam o mesmo conjunto de strings.
 
 use crate::regex::{ErroDeRegex, Regex};
 
-/// Metacaracteres que o original escapa antes de trocar `*` por `.*`.
-/// Lista idêntica à do `regexWildcardMeta`: `[\.\^\$\-\+\(\)\[\]\{\}\|\?\\]`.
-const META: &[char] = &[
-    '.', '^', '$', '-', '+', '(', ')', '[', ']', '{', '}', '|', '?', '\\',
-];
-
-/// Converte um padrão com `*` na MESMA regex que o Codeware produziria.
-///
-/// Existe para ser conferível contra a fonte: o matcher usa glob, mas a equivalência entre os dois
-/// só é auditável se a regex do original for reproduzível.
+/// Regex equivalente a um padrão com `*` (usada pela native de devtools e pelo teste de equivalência com o glob).
+/// `^` + o padrão com `*` → `.*` e cada metacaractere de regex escapado + `$`: ancorada nas duas pontas, como o glob.
 pub fn wildcard_para_regex(padrao: &str) -> String {
-    let mut out = String::with_capacity(padrao.len() * 2 + 2);
-    out.push('^');
+    let mut rx = String::with_capacity(padrao.len() * 2 + 2);
+    rx.push('^');
     for c in padrao.chars() {
-        if c == '*' {
-            out.push_str(".*");
-        } else {
-            if META.contains(&c) {
-                out.push('\\');
+        match c {
+            '*' => rx.push_str(".*"),
+            '.' | '^' | '$' | '-' | '+' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '?' | '\\' => {
+                rx.push('\\');
+                rx.push(c);
             }
-            out.push(c);
+            _ => rx.push(c),
         }
     }
-    out.push('$');
-    out
+    rx.push('$');
+    rx
 }
 
-/// Padrão de `ResourceTarget` interpretado e compilado uma vez, como a fábrica do original guarda o
-/// `std::optional<std::regex>` (`hpp:98`).
+/// Padrão de `ResourceTarget` interpretado e compilado uma vez, na fábrica.
 #[derive(Debug)]
 pub enum CompiledResourceTarget {
-    /// Tinha `*`: glob ancorado, o mesmo conjunto da regex que o original monta (`hpp:76-82`).
+    /// Tinha `*`: glob ancorado, o mesmo conjunto da regex equivalente.
     Glob(Box<str>),
     /// Prefixo `regex:`.
     Regex(Regex),
@@ -63,8 +51,7 @@ pub enum CompiledResourceTarget {
 }
 
 impl CompiledResourceTarget {
-    /// `None` = o texto não é padrão (sem `regex:` e sem `*`): o original compara o path, sem regex
-    /// (`hpp:41`).
+    /// `None` = o texto não é padrão (sem `regex:` e sem `*`): o path é comparado, sem regex.
     pub fn compilar(padrao: &str) -> Option<Self> {
         if let Some(resto) = padrao.strip_prefix("regex:") {
             return Some(match Regex::compilar(resto) {
@@ -88,9 +75,9 @@ impl CompiledResourceTarget {
 /// Casa um glob ancorado (`*` = qualquer sequência, inclusive vazia) contra um texto.
 ///
 /// Iterativo com backtracking de uma estrela só — o algoritmo clássico, O(n·m) no pior caso e sem
-/// recursão. Sobre bytes, como a regex do original sobre `std::string`; com UTF-8 válido dos dois
+/// recursão. Sobre bytes; com UTF-8 válido dos dois
 /// lados dá o mesmo que por caractere, porque byte líder nunca coincide com byte de continuação.
-// TODO: `*` aqui casa `\n`/`\r`; o `.*` do original talvez não (ver o TODO do `.` em `crate::regex`). Path de recurso não tem quebra de linha.
+// TODO: `*` aqui casa `\n`/`\r`; o `.*` da regex talvez não (ver o TODO do `.` em `crate::regex`). Path de recurso não tem quebra de linha.
 fn casa_glob(padrao: &str, texto: &str) -> bool {
     let (p, t) = (padrao.as_bytes(), texto.as_bytes());
     let (mut i, mut j) = (0usize, 0usize);
@@ -132,7 +119,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn transformacao_bate_com_a_fonte() {
+    fn wildcard_vira_regex_ancorada_com_metacaracteres_escapados() {
         // Entrada (string real): `base\*.inkatlas`
         //   `\` é metacaractere -> vira `\\`;  `*` -> `.*`;  `.` é metacaractere -> vira `\.`
         // Saída esperada (string real): `^base\\.*\.inkatlas$`
@@ -169,7 +156,7 @@ mod tests {
 
     #[test]
     fn estrela_casa_vazio() {
-        // `.*` do original aceita sequência vazia — o glob tem de aceitar também.
+        // `.*` aceita sequência vazia — o glob tem de aceitar também.
         assert_eq!(casa("ab*", "ab"), Some(true));
         assert_eq!(casa("*ab", "ab"), Some(true));
         assert_eq!(casa("a*b", "ab"), Some(true));
@@ -177,7 +164,7 @@ mod tests {
 
     #[test]
     fn ancoragem_nas_duas_pontas() {
-        // O original ancora com ^...$: um padrão sem estrela nas pontas NÃO casa substring.
+        // A regex ancora com ^...$: um padrão sem estrela nas pontas NÃO casa substring.
         assert_eq!(casa("b*c", "abcd"), Some(false));
         assert_eq!(casa("*b*c*", "abcd"), Some(true));
     }
@@ -203,7 +190,7 @@ mod tests {
             CompiledResourceTarget::compilar("regex:(abc"),
             Some(CompiledResourceTarget::Recusado(ErroDeRegex::Invalido))
         ));
-        // O prefixo é sensível a caixa, como o `starts_with` do original (`hpp:72`).
+        // O prefixo é sensível a caixa.
         assert!(CompiledResourceTarget::compilar("REGEX:abc").is_none());
         let c = CompiledResourceTarget::compilar("regex:^base.*$").expect("é padrão");
         assert_eq!(c.casa("base\\x"), Some(true));
@@ -290,10 +277,9 @@ mod tests_regex_explicita {
     fn regex_explicita_casa_o_path_inteiro() {
         assert_eq!(casa(r"regex:^base\\gameplay\\.*\.ent$", r"base\gameplay\v.ent"), Some(true));
         assert_eq!(casa(r"regex:^base\\gameplay\\.*\.ent$", r"base\outro\v.ent"), Some(false));
-        // `std::regex_match` (`hpp:36`): sem âncora, o padrão ainda cobre o path inteiro.
-        // Pendência: a prova proofs/2026-09-05-codeware-137-restarget-regex-COMPLETO-PROVADO.log:23 registrou a busca por
-        // substring (esperado=1); blackwall-mods-dev/codeware-targets-reach-smoke.reds:43-44 (`regex-alternancia`) já espera 0
-        // e só vale como prova num boot novo.
+        // Casamento do texto inteiro: sem âncora, o padrão ainda cobre o path inteiro.
+        // Pendência: a prova do alvo por regex de 2026-09-05 registrou a busca por substring (esperado=1); o smoke de dev
+        // `regex-alternancia` já espera 0 e só vale como prova num boot novo.
         assert_eq!(casa("regex:(foo|bar)", "xxbarxx"), Some(false));
         assert_eq!(casa("regex:(foo|bar)", "bar"), Some(true));
         assert_eq!(casa("regex:", r"base\x.ent"), Some(false), "regex vazia não casa path nenhum");

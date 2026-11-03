@@ -1,4 +1,4 @@
-// bwms-hub-text-input.reds — campo de texto com a cara dos filtros dos menus do jogo (Codeware `#116`), 2026-09-13.
+// bwms-hub-text-input.reds — campo de texto com a cara dos filtros dos menus do jogo, 2026-09-13.
 //
 // PARA QUE SERVE: um campo que combina com as telas de inventário, mapa e diário, sem o mod desenhar moldura. É o `BwmsTextInput` inteiro, com cinco
 // camadas de imagem da forma `sorting` do atlas de formas do jogo, cores pelo estilo `main_colors` e transições curtas:
@@ -11,8 +11,6 @@
 //
 // USO: `let campo = BwmsHubTextInput.Create(520.0); campo.Mount(raiz); campo.Focus(controller);`. `SetAnimated(false)` troca as transições por
 // mudança imediata.
-//
-// De Codeware: `HubTextInput` → `BwmsHubTextInput`.
 
 public class BwmsHubTextInput extends BwmsTextInput {
     private let m_hubFill: ref<inkImage>;

@@ -1,7 +1,7 @@
 //! Tabelas de runtime (`red4ext/bwms-*.txt`, formato em [`crate::tabelas`]) emitidas dos `.xl` — camada PURA (offline, testável sem
 //! jogo): hash de ResourcePath, plano de redirecionamento (resource.link / resource.copy) e um emissor por seção de
 //! [`crate::instalacao::xl::XlFile`]. A camada ENGINE (ganchos do loader e do depot, in-game) mora no
-//! runtime (cp77-console), NÃO aqui. RE do loader em `cp77-symbols/notes/archivexl-apply-re.md`.
+//! runtime (cp77-console), NÃO aqui. RE do loader nas notas de RE (`cp77-symbols/notes/`).
 
 use crate::instalacao::xl::XlFile;
 use crate::tabelas;
@@ -17,25 +17,25 @@ pub use crate::resource_path_hash;
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PlanoDeRedirecionamento {
     /// `hash(path pedido) → hash(path servido)` de `resource.link` (os pares `ResourceLink` do parse, com a cadeia A→B→C colapsada em A→C) e
-    /// `hash(cópia) → hash(original)` de `resource.copy` (sem encadeamento, como a referência). Cada `len()` é o número de linhas desse tipo que
+    /// `hash(cópia) → hash(original)` de `resource.copy` (sem encadeamento). Cada `len()` é o número de linhas desse tipo que
     /// `emit_reslink_do_plano` grava; pedido repetido conta uma vez.
     ///
-    /// **Dois mapas, ArchiveXL `#26`:** cada hook da referência (`ResourceLink/Extension.cpp:208-247`) consulta um mapa diferente —
+    /// **Dois mapas, `#26`:** cada gancho consulta um mapa diferente —
     ///
-    ///   `OnLoaderResourceRequest`  -> só `s_links`
-    ///   `OnDepotResourceRequest`   -> só `s_copies`
-    ///   `OnDepotResourceCheck`     -> `s_mappings` (a união)
-    ///   `GetAliases`               -> `s_mappings`, nos DOIS sentidos
+    ///   requisição do loader       -> só os links
+    ///   requisição do depot        -> só as cópias
+    ///   checagem do depot          -> a união
+    ///   apelidos                   -> a união, nos DOIS sentidos
     ///
-    /// Num mapa só, um `resource.copy` responderia uma requisição de LOADER, coisa que o ArchiveXL nunca faz. A união e o `GetAliases` são do
+    /// Num mapa só, um `resource.copy` responderia uma requisição de LOADER, o que o `.xl` não pede. A união e os apelidos são do
     /// runtime, sobre as tabelas que ele relê do `bwms-reslink.txt` (`check` e `apelidos_de_copia` em `arquivos_do_jogo/depot.rs`,
     /// `reslink_aliases_of` em `arquivos_do_jogo/mod.rs`).
     pub mapa_links: HashMap<u64, u64>,
     pub mapa_copies: HashMap<u64, u64>,
-    /// Caminho pedido de cada link que cai num ciclo (A→B→…→A, chega a um, ou aponta para si mesmo), em ordem: fica fora de `mapa_links`, como o
-    /// `Link "…" is cyclic` / `points to itself` da referência (`ResourceLink/Extension.cpp`), que loga e descarta.
+    /// Caminho pedido de cada link que cai num ciclo (A→B→…→A, chega a um, ou aponta para si mesmo), em ordem: fica fora de `mapa_links`, com
+    /// aviso, e é descartado.
     pub cyclic_links: Vec<String>,
-    /// Link e cópia que ficam fora de `mapa_links` e `mapa_copies` por regra da referência que não é ciclo, em PT-BR com a ação: a cópia de si mesma
+    /// Link e cópia que ficam fora de `mapa_links` e `mapa_copies` por regra que não é ciclo, em PT-BR com a ação: a cópia de si mesma
     /// e o link cujo pedido é uma cópia (as chaves dos dois mapas nunca coincidem). A gravação das tabelas leva o texto aos avisos do relatório da `Mods/`.
     pub avisos: Vec<String>,
     /// Caminho em texto de cada hash citado em link/copy, na grafia do primeiro `.xl` que o cita (o alvo de escopo, na de `resource_scope_listas`). O
@@ -52,11 +52,11 @@ enum Visita {
     Feita,
 }
 
-/// Resolução canônica de caminho do ArchiveXL, a mesma do `resource.scope` e do `resource.link`: as folhas que `raiz` alcança em `grafo` (nó que não é
-/// chave do grafo), em pré-ordem e sem repetição, e se a busca passou por um ciclo. É o fecho do `ResourceMetaExtension::Configure` (escopo dentro de
-/// escopo vira os alvos dele) e, com um sucessor por nó, a cadeia do `ResourceLinkExtension::Configure` (A→B→C vira A→C; com ciclo não há folha).
+/// Resolução canônica de caminho do `.xl`, a mesma do `resource.scope` e do `resource.link`: as folhas que `raiz` alcança em `grafo` (nó que não é
+/// chave do grafo), em pré-ordem e sem repetição, e se a busca passou por um ciclo. É o fecho dos escopos (escopo dentro de
+/// escopo vira os alvos dele) e, com um sucessor por nó, a cadeia dos links (A→B→C vira A→C; com ciclo não há folha).
 /// Busca em profundidade com estado por nó e pilha explícita: cada nó entra uma vez por raiz, então termina em qualquer grafo, inclusive no ciclo
-/// indireto em que o laço `do`/`while` da referência não sai.
+/// indireto.
 fn resolver(grafo: &HashMap<u64, Vec<u64>>, raiz: u64) -> (Vec<u64>, bool) {
     let mut estado: HashMap<u64, Visita> = HashMap::from([(raiz, Visita::EmCurso)]);
     let mut pilha: Vec<(u64, usize)> = vec![(raiz, 0)];
@@ -92,93 +92,88 @@ pub fn build_apply_plan(xl: &XlFile) -> PlanoDeRedirecionamento {
     build_apply_plan_combinado(&[xl], &resource_scope_listas(&[xl]).0)
 }
 
-/// Constrói o plano de `resource.link` + `resource.copy` de vários `.xl` juntos, como o `Configure` da referência junta as configs antes de resolver
-/// cadeia e ciclo: `a: b` num `.xl` e `b: c` noutro dão `a → c`. Pedido repetido: vence o `.xl` que vem depois em `xls` (o `finalLinks[...] =` da
-/// referência e o `retain` + `push` do runtime).
+/// Plano de `resource.link` + `resource.copy` de vários `.xl` juntos (na ordem do install), com os escopos de `resource_scope_listas` dos mesmos
+/// `.xl`.
 ///
-/// `link`: cada `ResourceLink` dá a aresta `pedido → servido` do grafo que o `resolver` percorre. A direção da forma escalar ou sequência do
-/// YAML já vem resolvida do parse (doc de `ResourceLink`). O pedido passa por `caminho` primeiro e o servido depois, porque a grafia que fica em `caminhos` é a do primeiro que cita o hash.
-///
-/// Link que aponta para si mesmo sai antes da cadeia, como o `points to itself` da referência, e não derruba quem aponta para ele. Depois,
-/// `resolver` colapsa cada cadeia no alvo final e tira o link que cai num ciclo (`cyclic_links`).
-///
-/// `copy`: cada `target` é uma cópia de `source` → sempre `mapa_copies[target] = source`
-/// (Config.cpp não tem essa assimetria pra copy — as 2 formas armazenam igual).
-///
-/// A cópia igual ao original e o link cujo pedido é cópia de qualquer `.xl` saem, com o motivo em `avisos`, como a referência faz com as cópias
-/// de todas as configs antes dos links; o link sobre cópia sai antes da cadeia.
-///
-/// `scopes` (`resource_scope_listas` dos mesmos `.xl`) expande o pedido de cada link (a chave na forma escalar, cada item na sequência) e cada
-/// cópia do copy, como o `ExpandList` de `ResourceLink/Extension.cpp:53,87`; o lado servido e o original do copy ficam como estão. O caminho igual
-/// ao servido é conferido depois da expansão, como na referência.
+/// O escopo expande o pedido de cada link e cada cópia; o servido e o original ficam como estão. Pedido ou cópia repetido: vence o posterior. O
+/// link cujo pedido é cópia sai antes da cadeia (o loader e o depot nunca respondem pelo mesmo caminho); a cadeia colapsa no destino final e o
+/// pedido que chega a um ciclo sai, com os do ciclo. Link para si mesmo e cópia de si mesma não definem nada.
 pub fn build_apply_plan_combinado(xls: &[&XlFile], scopes: &HashMap<u64, Vec<String>>) -> PlanoDeRedirecionamento {
-    let mut caminhos: HashMap<u64, String> = HashMap::new();
-    let mut caminho = |s: &str| {
-        let h = resource_path_hash(s);
-        caminhos.entry(h).or_insert_with(|| s.to_string());
-        h
-    };
-    let mut grafo: HashMap<u64, Vec<u64>> = HashMap::new();
-    let mut para_si: Vec<u64> = Vec::new();
-    let mut mapa_copies: HashMap<u64, u64> = HashMap::new();
-    let mut copias_para_si: Vec<u64> = Vec::new();
+    let h = |s: &str| resource_path_hash(s.trim());
+    let mut plano = PlanoDeRedirecionamento::default();
+    let mut links: HashMap<u64, u64> = HashMap::new();
+    let mut links_para_si: Vec<(u64, String)> = Vec::new();
+    let mut copias_de_si: Vec<(u64, String)> = Vec::new();
     for xl in xls {
         for l in &xl.links {
-            for (_, pedido) in expandir_escopo(std::slice::from_ref(&l.pedido), scopes) {
-                let (pedido, servido) = (caminho(&pedido), caminho(&l.servido));
-                if pedido == servido {
-                    para_si.push(pedido);
+            let servido = l.servido.trim();
+            let h_servido = h(servido);
+            for (h_pedido, pedido) in expandir_escopo(std::slice::from_ref(&l.pedido), scopes) {
+                plano.caminhos.entry(h_pedido).or_insert_with(|| pedido.clone());
+                plano.caminhos.entry(h_servido).or_insert_with(|| servido.to_string());
+                if h_pedido == h_servido {
+                    links_para_si.push((h_pedido, pedido));
                 } else {
-                    grafo.insert(pedido, vec![servido]);
+                    links.insert(h_pedido, h_servido);
                 }
             }
         }
         for c in &xl.copies {
-            for (_, copia) in expandir_escopo(&c.targets, scopes) {
-                let (copia, original) = (caminho(&copia), caminho(&c.source));
-                if copia == original {
-                    copias_para_si.push(copia);
+            let original = c.source.trim();
+            let h_original = h(original);
+            for (h_copia, copia) in expandir_escopo(&c.targets, scopes) {
+                plano.caminhos.entry(h_copia).or_insert_with(|| copia.clone());
+                plano.caminhos.entry(h_original).or_insert_with(|| original.to_string());
+                if h_copia == h_original {
+                    copias_de_si.push((h_copia, copia));
                 } else {
-                    mapa_copies.insert(copia, original);
+                    plano.mapa_copies.insert(h_copia, h_original);
                 }
             }
         }
     }
-    // Pedido de link que é cópia sai antes da cadeia, como o `finalCopies.contains(linkPath)` da referência (`ResourceLink/Extension.cpp:99-107`,
-    // que junta as cópias de todas as configs antes dos links): com os dois, o loader trocaria o pedido pelo link e o depot o serviria como cópia.
-    // Tirar do grafo, e não de `mapa_links` depois do `resolver`, mantém `a → k` quando `k` é cópia e tem link (a referência aceita alvo que é cópia).
-    let sobre_copia: Vec<u64> = grafo.keys().copied().filter(|h| mapa_copies.contains_key(h)).collect();
-    grafo.retain(|h, _| !mapa_copies.contains_key(h));
-    // Cópia de si mesma que nenhuma outra entrada pôs na tabela (o `Copy "…" points to itself` de `Extension.cpp:55-63`).
-    copias_para_si.retain(|h| !mapa_copies.contains_key(h));
-    let em_texto = |hs: &[u64]| {
-        let mut v: Vec<&str> = hs.iter().filter_map(|h| caminhos.get(h).map(String::as_str)).collect();
-        v.sort_unstable();
-        v.dedup();
-        v
-    };
-    let avisos: Vec<String> = em_texto(&copias_para_si)
-        .into_iter()
-        .map(|c| format!("resource.copy {c}: a cópia é o próprio original e fica fora de bwms-reslink.txt; tire esse caminho da lista de cópias no .xl"))
-        .chain(em_texto(&sobre_copia).into_iter().map(|c| {
-            format!("resource.link {c}: o pedido é um resource.copy e fica fora de bwms-reslink.txt; tire esse caminho do link ou do copy no .xl")
-        }))
-        .collect();
-    let mut p = PlanoDeRedirecionamento { avisos, ..PlanoDeRedirecionamento::default() };
-    let mut fora: Vec<u64> = Vec::new();
+    let texto = |caminhos: &HashMap<u64, String>, hash: &u64| caminhos.get(hash).cloned().unwrap_or_else(|| format!("{hash:#018x}"));
+
+    let mut avisos_de_link: Vec<String> = Vec::new();
+    links.retain(|h_pedido, _| {
+        let e_copia = plano.mapa_copies.contains_key(h_pedido);
+        if e_copia {
+            avisos_de_link.push(format!(
+                "resource.link {}: o pedido é um resource.copy e fica fora de bwms-reslink.txt; tire esse caminho do link ou do copy no .xl",
+                texto(&plano.caminhos, h_pedido)
+            ));
+        }
+        !e_copia
+    });
+
+    let grafo: HashMap<u64, Vec<u64>> = links.iter().map(|(&pedido, &servido)| (pedido, vec![servido])).collect();
+    let mut ciclicos: Vec<String> = Vec::new();
     for &pedido in grafo.keys() {
         match resolver(&grafo, pedido) {
-            (folhas, false) => p.mapa_links.extend(folhas.first().map(|&servido| (pedido, servido))),
-            (_, true) => fora.push(pedido),
+            (folhas, false) if folhas.len() == 1 => {
+                plano.mapa_links.insert(pedido, folhas[0]);
+            }
+            _ => ciclicos.push(texto(&plano.caminhos, &pedido)),
         }
     }
-    fora.extend(para_si.into_iter().filter(|h| !p.mapa_links.contains_key(h)));
-    p.cyclic_links = fora.iter().filter_map(|h| caminhos.get(h).cloned()).collect();
-    p.cyclic_links.sort();
-    p.cyclic_links.dedup();
-    p.mapa_copies = mapa_copies;
-    p.caminhos = caminhos;
-    p
+    ciclicos.extend(links_para_si.into_iter().filter(|(hash, _)| !plano.mapa_links.contains_key(hash)).map(|(_, pedido)| pedido));
+    ciclicos.sort();
+    ciclicos.dedup();
+    plano.cyclic_links = ciclicos;
+
+    let mut avisos_de_copia: Vec<String> = copias_de_si
+        .into_iter()
+        .filter(|(hash, _)| !plano.mapa_copies.contains_key(hash))
+        .map(|(_, copia)| {
+            format!("resource.copy {copia}: a cópia é o próprio original e fica fora de bwms-reslink.txt; tire esse caminho da lista de cópias no .xl")
+        })
+        .collect();
+    avisos_de_copia.sort();
+    avisos_de_copia.dedup();
+    avisos_de_link.sort();
+    avisos_de_link.dedup();
+    plano.avisos = avisos_de_copia.into_iter().chain(avisos_de_link).collect();
+    plano
 }
 
 /// Emits `bwms-resfixes.txt` content: one line per fix entry (`tabelas::Resfix`).
@@ -223,10 +218,10 @@ pub fn emit_reslink_do_plano(p: &PlanoDeRedirecionamento) -> String {
     out
 }
 
-/// Emite o conteúdo de `red4ext/bwms-streaming.txt` a partir do `.xl` (ArchiveXL `#49` parte 4d): uma linha por deleção de node de setor
+/// Emite o conteúdo de `red4ext/bwms-streaming.txt` a partir do `.xl` (`#49` parte 4d): uma linha por deleção de node de setor
 /// (`streaming.sectors[].nodeDeletions`), no formato `<mod> | <path do setor> | <expectedNodes> | <nodeIndex> | <tipo>`. O runtime
 /// (`cp77-console`, `mundo::streaming_file`) agrupa por (mod, setor) e só aplica o grupo se todas as linhas passarem na conferência (contagem de setups,
-/// índice e classe do node) — um erro cancela o mod no setor, como no ArchiveXL. Sub-deleções e mutações saem em linhas de 7 colunas
+/// índice e classe do node) — um erro cancela o mod no setor. Sub-deleções e mutações saem em linhas de 7 colunas
 /// (`... | <op> | <valores>`, ver `linhas_de_mutacao`), no formato de `tabelas::Streaming`.
 /// `mod_id` identifica o `.xl` de origem.
 pub fn emit_streaming_table(xl: &XlFile, mod_id: &str) -> String {
@@ -247,7 +242,7 @@ pub fn emit_streaming_table(xl: &XlFile, mod_id: &str) -> String {
                     let valores = format!("{} {}", d.expected_sub_nodes, indices.join(" "));
                     linha(d.node_index, &d.node_type, Some(("subdel", &valores)), &mut out);
                 }
-                // `[ator, shape]` (ArchiveXL 1.27.0): `subshape <atores esperados> <ator> <shape> ...`.
+                // `[ator, shape]`: `subshape <atores esperados> <ator> <shape> ...`.
                 if !d.shape_deletions.is_empty() {
                     let pares: Vec<String> = d.shape_deletions.iter().map(|(a, s)| format!("{a} {s}")).collect();
                     let valores = format!("{} {}", d.expected_sub_nodes, pares.join(" "));
@@ -264,9 +259,9 @@ pub fn emit_streaming_table(xl: &XlFile, mod_id: &str) -> String {
     out
 }
 
-/// Emite o conteúdo de `red4ext/bwms-questphase.txt` a partir do `.xl` (ArchiveXL `#35` parte 2d-1): uma linha por fase de mod
+/// Emite o conteúdo de `red4ext/bwms-questphase.txt` a partir do `.xl` (`#35` parte 2d-1): uma linha por fase de mod
 /// (`quest.phases[]`), no formato `<mod> | <fase pai> | <fase do mod> | <nó de entrada> | <socket de entrada> | <nó de saída> | <socket de saída> |
-/// <intercept>`. Caminho de nó = ids separados por espaço (vazio = o `questStartNodeDefinition` do grafo, como na referência); socket ausente = `-`;
+/// <intercept>`. Caminho de nó = ids separados por espaço (vazio = o `questStartNodeDefinition` do grafo); socket ausente = `-`;
 /// intercept `1`/`0`. Os caminhos de recurso seguem em texto porque o id do nó novo sai do CRC-16 de `"<fase do mod>:<id do nó de entrada>"`
 /// (`crate::quest_phase_node_id`), e o id do nó de entrada só se sabe no grafo quando o caminho é vazio. `mod_id` identifica o `.xl`. Linha de
 /// `tabelas::Questphase`.
@@ -288,7 +283,7 @@ pub fn emit_questphase_table(xl: &XlFile, mod_id: &str) -> String {
     out
 }
 
-/// Emite o conteúdo de `red4ext/bwms-journal.txt` a partir do `.xl` (ArchiveXL `#44`, fluxo de produção): uma linha por `.journal` de mod (`journal:`), no
+/// Emite o conteúdo de `red4ext/bwms-journal.txt` a partir do `.xl` (`#44`, fluxo de produção): uma linha por `.journal` de mod (`journal:`), no
 /// formato `<mod> | <caminho do .journal>`. O runtime carrega cada um, mescla as entradas na árvore viva e coleta os mappins das entradas novas. `mod_id`
 /// identifica o `.xl`. Linha de `tabelas::Journal`.
 pub fn emit_journal_table(xl: &XlFile, mod_id: &str) -> String {
@@ -299,7 +294,7 @@ pub fn emit_journal_table(xl: &XlFile, mod_id: &str) -> String {
     out
 }
 
-/// Tabela do `localization` (ArchiveXL `#45`) pro runtime: uma linha `<mod> | <tipo> | <idioma> | <caminho>` (`tabelas::Localizacao`) por recurso de
+/// Tabela do `localization` (`#45`) pro runtime: uma linha `<mod> | <tipo> | <idioma> | <caminho>` (`tabelas::Localizacao`) por recurso de
 /// texto do mod. O runtime pede ao motor os recursos do idioma em uso (o motor lê o `.archive` do mod, comprimido ou não) e insere as entradas no
 /// repositório vivo de textos.
 pub fn emit_localization_table(xl: &XlFile, mod_id: &str) -> String {
@@ -358,7 +353,7 @@ pub fn secoes_sem_efeito(xl: &XlFile) -> Vec<String> {
     sem_tabela.chain(nao_reconhecidas).collect()
 }
 
-/// Tabela do `customizations` (ArchiveXL `#47`) pro runtime: uma linha `<male|female> | <caminho>` (`tabelas::Customizacao`) por recurso de opções de
+/// Tabela do `customizations` (`#47`) pro runtime: uma linha `<male|female> | <caminho>` (`tabelas::Customizacao`) por recurso de opções de
 /// customização. O runtime pede cada recurso na carga das tabelas e mescla nos recursos base na abertura do criador ou do espelho.
 pub fn emit_customization_table(xl: &XlFile, _mod_id: &str) -> String {
     let mut out = tabelas::CUSTOMIZATIONS.cabecalho();
@@ -373,12 +368,12 @@ pub fn emit_customization_table(xl: &XlFile, _mod_id: &str) -> String {
 }
 
 /// Listas do `resource.scope` de todos os `.xl` juntos, pelo hash do caminho do escopo: os alvos em texto, com o fecho transitivo (escopo dentro de escopo
-/// vira os alvos dele, `resolver`). É o que o `ResourceMetaExtension` da referência monta juntando os escopos de todas as configs; como lá, o escopo só
+/// vira os alvos dele, `resolver`), com os escopos de todas as configs juntos; o escopo só
 /// existe com ao menos um alvo diferente dele. A grafia de cada caminho é a do primeiro `.xl` que o cita (o runtime re-hasheia o texto). O caminho nulo
 /// (vazio, só espaço, só barras) não chega aqui: o parse do `.xl` tira a entrada ou o alvo, com aviso.
 ///
 /// Devolve também, em ordem, o caminho de cada escopo cuja busca passou por um ciclo: ele fica só com os alvos alcançáveis fora do ciclo (A↔B dá A e B
-/// vazios, como a referência; no ciclo indireto o laço dela não sai).
+/// vazios).
 pub fn resource_scope_listas(xls: &[&XlFile]) -> (HashMap<u64, Vec<String>>, Vec<String>) {
     let h = |s: &str| crate::resource_path_hash(s.trim());
     let mut grafo: HashMap<u64, Vec<u64>> = HashMap::new();
@@ -413,9 +408,9 @@ pub fn resource_scope_listas(xls: &[&XlFile]) -> (HashMap<u64, Vec<String>>, Vec
     (listas, em_ciclo)
 }
 
-/// `caminhos` com cada escopo trocado pela lista dele em `scopes` (`resource_scope_listas`), o `ResourceMetaExtension::ExpandList` da referência
-/// (`ResourceMeta/Extension.cpp:117-135`): escopo com alvos vira os alvos; caminho que não é escopo, ou escopo de lista vazia (o A↔B), fica ele mesmo.
-/// Sem repetição pelo hash, porque a referência devolve um `Set`; a ordem é a da primeira ocorrência. Cada caminho sai com o hash dele, calculado
+/// `caminhos` com cada escopo trocado pela lista dele em `scopes` (`resource_scope_listas`):
+/// escopo com alvos vira os alvos; caminho que não é escopo, ou escopo de lista vazia (o A↔B), fica ele mesmo.
+/// Sem repetição pelo hash (a expansão é um conjunto); a ordem é a da primeira ocorrência. Cada caminho sai com o hash dele, calculado
 /// uma vez aqui, para quem filtra não re-hashear. O caminho vem sem os espaços das pontas, e o que fica vazio sai: o `resource.patch`
 /// não passa pela regra do caminho nulo do parse. Única expansão de escopo do plano: `resource.patch` (includes e excludes), lado pedido do
 /// `resource.link` e cópias do `resource.copy`.
@@ -445,8 +440,8 @@ fn expandir_escopo(caminhos: &[String], scopes: &HashMap<u64, Vec<String>>) -> V
 }
 
 /// Emite o conteúdo de `red4ext/bwms-resscopes.txt` a partir dos escopos de todos os `.xl` já expandidos (`resource_scope_listas`): uma linha por alvo,
-/// `<hash do caminho do escopo> | <caminho do alvo>` (`tabelas::Resscope`), em ordem de escopo. É a tabela do `ResourceMetaExtension::InScope` em
-/// runtime (ArchiveXL `#20` 20e-2, o escopo `player_customization.app` do `FixCustomizationAppearance`).
+/// `<hash do caminho do escopo> | <caminho do alvo>` (`tabelas::Resscope`), em ordem de escopo. É a tabela que o runtime consulta para saber se um recurso
+/// está num escopo (`#20` 20e-2, o escopo `player_customization.app`).
 pub fn emit_resscopes(scopes: &HashMap<u64, Vec<String>>) -> String {
     let mut out = tabelas::RESSCOPES.cabecalho();
     let mut escopos: Vec<&u64> = scopes.keys().collect();
@@ -459,67 +454,65 @@ pub fn emit_resscopes(scopes: &HashMap<u64, Vec<String>>) -> String {
     out
 }
 
-/// Uma linha da `bwms-resource-patch.txt` antes das regras entre `.xl`, com o texto que vai para o arquivo e o hash desse texto.
-struct LinhaDePatch {
-    mod_id: String,
-    patch: String,
-    hash_do_patch: u64,
-    alvo: String,
-    hash_do_alvo: u64,
-    props: u32,
-}
-
-/// Emite o conteúdo de `red4ext/bwms-resource-patch.txt` a partir de todos os `.xl` do install juntos, `(id do .xl, .xl)` na ordem do install (ArchiveXL
-/// `#17`, `resource.patch`): uma linha por par patch → alvo, no formato `<mod> | <caminho do patch> | <caminho do alvo> | <props>`
-/// (`tabelas::ResourcePatch`). O runtime só lê.
+/// Conteúdo de `red4ext/bwms-resource-patch.txt` a partir de todos os `.xl` do install juntos, `(id do .xl, .xl)` na ordem do install
+/// (`#17`, `resource.patch`, e `streaming.blocks`), no formato de `tabelas::ResourcePatch`. O runtime só lê.
 ///
-/// Dentro de cada `.xl`, como o `Configure` da referência: cada include e cada exclude que é escopo vira a lista dele (`scopes`, de todos os `.xl`
-/// instalados, por `expandir_escopo`), senão entra o próprio caminho; alvos = includes menos excludes menos o próprio patch, pelo hash do caminho.
-/// Cada `streaming.blocks` entra como patch do streaming world principal com a prop `blocks` (o `RegisterPatch` da extensão de streaming da
-/// referência; ArchiveXL `#51` 51e).
-///
-/// Entre os `.xl`, também como o `Configure`: alvo que é patch de qualquer linha sai; o par (patch, alvo) entra uma vez, com o mod da 1ª ocorrência
-/// (`knownPatches`); as props do patch são as da última linha dele, mesmo de uma linha que essas regras tiraram (`s_patches[patchPath]` sobrescrito).
-/// O hash de patch e alvo nessas regras é o do texto gravado, que é o que o runtime hasheia.
-///
-/// `props` = máscara em hex (`0x…`, bits `crate::A17_PROP_*`) ou `-` com todas ligadas (props vazio: a referência trata vazio como "tudo"); nome
-/// desconhecido não liga bit (`crate::a17_props_mascara`). `|` vira `_` no id do `.xl` e nos caminhos (`tabelas::campo`); linha de patch vazio sai.
+/// Por patch: alvos = includes expandidos menos excludes expandidos e o próprio patch (pelo hash). Cada `streaming.blocks` vira o patch do streaming
+/// world principal com a prop `blocks`. Entre todos os pares: sai o par cujo alvo é patch de outro par (o runtime aplicaria patch sobre patch), o par
+/// repetido fica só a 1ª vez, e as props de um patch são as do último par produzido para ele.
 pub fn emit_resource_patch_table(xls: &[(String, XlFile)], scopes: &HashMap<u64, Vec<String>>) -> String {
-    let mut linhas: Vec<LinhaDePatch> = Vec::new();
-    let mut linha = |mod_id: &str, patch: &str, hash_do_patch: u64, alvo: &str, props: u32| {
-        let alvo = tabelas::campo(alvo);
-        let hash_do_alvo = resource_path_hash(&alvo);
-        linhas.push(LinhaDePatch { mod_id: mod_id.to_string(), patch: patch.to_string(), hash_do_patch, alvo, hash_do_alvo, props });
-    };
+    let mut pares: Vec<ParDePatch> = Vec::new();
+    let mut props_do_patch: HashMap<u64, u32> = HashMap::new();
     for (mod_id, xl) in xls {
-        for p in xl.patches.iter().filter(|p| !p.patch.trim().is_empty()) {
-            let patch = p.patch.trim();
+        for p in &xl.patches {
+            let bruto = p.patch.trim();
+            if bruto.is_empty() {
+                continue;
+            }
+            let patch = tabelas::campo(bruto);
+            let h_patch = resource_path_hash(&patch);
             let props = if p.props.is_empty() { u32::MAX } else { crate::a17_props_mascara(&p.props.join(" ")) };
-            let fora: HashSet<u64> = expandir_escopo(&p.excludes, scopes).into_iter().map(|(h, _)| h).chain(std::iter::once(resource_path_hash(patch))).collect();
-            let gravado = tabelas::campo(patch);
-            let hash_do_patch = resource_path_hash(&gravado);
-            for (_, alvo) in expandir_escopo(&p.includes, scopes).into_iter().filter(|(h, _)| !fora.contains(h)) {
-                linha(mod_id, &gravado, hash_do_patch, &alvo, props);
+            let mut fora: HashSet<u64> = expandir_escopo(&p.excludes, scopes).into_iter().map(|(hash, _)| hash).collect();
+            fora.insert(resource_path_hash(bruto));
+            for (h_alvo, alvo) in expandir_escopo(&p.includes, scopes) {
+                if fora.contains(&h_alvo) {
+                    continue;
+                }
+                let alvo = tabelas::campo(&alvo);
+                props_do_patch.insert(h_patch, props);
+                pares.push(ParDePatch { mod_id, h_patch, h_alvo: resource_path_hash(&alvo), patch: patch.clone(), alvo });
             }
         }
-        if let Some(streaming) = &xl.streaming {
-            for bloco in streaming.blocks.iter().map(|b| tabelas::campo(b.trim())).filter(|b| !b.is_empty()) {
-                linha(mod_id, &bloco, resource_path_hash(&bloco), MUNDO_PRINCIPAL, crate::A17_PROP_BLOCKS);
-            }
+        for bloco in xl.streaming.iter().flat_map(|st| &st.blocks).map(|b| b.trim()).filter(|b| !b.is_empty()) {
+            let patch = tabelas::campo(bloco);
+            let h_patch = resource_path_hash(&patch);
+            props_do_patch.insert(h_patch, crate::A17_PROP_BLOCKS);
+            pares.push(ParDePatch { mod_id, h_patch, h_alvo: resource_path_hash(MUNDO_PRINCIPAL), patch, alvo: MUNDO_PRINCIPAL.to_string() });
         }
     }
-    let patches: HashSet<u64> = linhas.iter().map(|l| l.hash_do_patch).collect();
-    let props_do_patch: HashMap<u64, u32> = linhas.iter().map(|l| (l.hash_do_patch, l.props)).collect();
-    let mut vistos: HashSet<(u64, u64)> = HashSet::new();
+    let patches: HashSet<u64> = pares.iter().map(|p| p.h_patch).collect();
+    let mut gravados: HashSet<(u64, u64)> = HashSet::new();
     let mut out = tabelas::RESOURCE_PATCH.cabecalho();
-    for l in linhas.iter().filter(|l| !patches.contains(&l.hash_do_alvo) && vistos.insert((l.hash_do_patch, l.hash_do_alvo))) {
-        let props = props_do_patch.get(&l.hash_do_patch).copied().unwrap_or(l.props);
-        tabelas::ResourcePatch { mod_id: &l.mod_id, patch: &l.patch, alvo: &l.alvo, props }.gravar(&mut out);
+    for par in &pares {
+        if patches.contains(&par.h_alvo) || !gravados.insert((par.h_patch, par.h_alvo)) {
+            continue;
+        }
+        let props = props_do_patch.get(&par.h_patch).copied().unwrap_or(u32::MAX);
+        tabelas::ResourcePatch { mod_id: par.mod_id, patch: &par.patch, alvo: &par.alvo, props }.gravar(&mut out);
     }
     out
 }
 
-/// O streaming world em que os `streaming.blocks` entram, o mesmo da referência.
+/// Um par patch → alvo de `emit_resource_patch_table`, com o texto como a tabela o grava e o hash desse texto.
+struct ParDePatch<'a> {
+    mod_id: &'a str,
+    h_patch: u64,
+    h_alvo: u64,
+    patch: String,
+    alvo: String,
+}
+
+/// O streaming world principal do jogo (fato do jogo: o `.streamingworld` de Night City).
 const MUNDO_PRINCIPAL: &str = "base\\worlds\\03_night_city\\_compiled\\default\\03_night_city.streamingworld";
 
 /// `(op, valores)` de cada linha de uma mutação de node (`streaming.sectors[].nodeMutations`): `pos x y z w`, `rot i j k r`, `scale x y z`,
@@ -842,8 +835,8 @@ mod streaming_tests {
     }
 
     #[test]
-    fn escopo_a_b_a_fica_vazio_como_na_referencia_e_sai_no_diagnostico() {
-        // A referência apaga o alvo antes de ler o conjunto dele e termina com A e B vazios; o patch que mira A cai no próprio caminho de A.
+    fn escopo_a_b_a_fica_vazio_e_sai_no_diagnostico() {
+        // O ciclo A↔B termina com A e B vazios; o patch que mira A cai no próprio caminho de A.
         let xl = parse_xl("resource:\n  scope:\n    a: b\n    b: a\n  patch:\n    p.ent: a\n").expect("parse");
         let (listas, em_ciclo) = super::resource_scope_listas(&[&xl]);
         let h = crate::resource_path_hash;
@@ -878,7 +871,7 @@ mod streaming_tests {
 
     #[test]
     fn escopo_sem_alvo_alem_de_si_mesmo_nao_e_escopo() {
-        // O `Configure` da referência só cria o conjunto do escopo no insert de um alvo diferente dele: `b: b` não faz de `b` um escopo, e `a` fica com `b`.
+        // O conjunto do escopo só nasce com um alvo diferente dele: `b: b` não faz de `b` um escopo, e `a` fica com `b`.
         let xl = parse_xl("resource:\n  scope:\n    a: b\n    b: b\n").expect("parse");
         let (listas, _) = super::resource_scope_listas(&[&xl]);
         let h = crate::resource_path_hash;
@@ -915,8 +908,8 @@ mod tests {
         assert_eq!(resource_path_hash("BASE/Surfaces/Materials/Default/White.xbm"), canon);
     }
 
-    /// ArchiveXL `#26`: o loader consulta só os links e o depot só as cópias. Com um mapa só, um `resource.copy` responderia uma requisição de
-    /// LOADER — coisa que o ArchiveXL nunca faz. A união (`OnDepotResourceCheck`) é do runtime (`depot.rs`, `check_responde_pela_uniao_e_o_original_nao`).
+    /// `#26`: o loader consulta só os links e o depot só as cópias. Com um mapa só, um `resource.copy` responderia uma requisição de
+    /// LOADER, o que o `.xl` não pede. A união (checagem do depot) é do runtime (`depot.rs`, `check_responde_pela_uniao_e_o_original_nao`).
     #[test]
     fn link_e_copy_ficam_em_mapas_separados() {
         let mut xl = XlFile::default();
@@ -932,7 +925,7 @@ mod tests {
         assert_eq!(p.mapa_copies.get(&a), None, "link NÃO pode responder no depot");
     }
 
-    /// Link cujo pedido é cópia sai do plano (`finalCopies.contains(linkPath)`, `ResourceLink/Extension.cpp:99-107`): o loader e o depot nunca
+    /// Link cujo pedido é cópia sai do plano: o loader e o depot nunca
     /// respondem pelo mesmo caminho, e o motivo vai para `avisos`, não para `cyclic_links`.
     #[test]
     fn link_cujo_pedido_e_copia_sai_do_plano_com_aviso() {
@@ -952,8 +945,8 @@ mod tests {
         assert_eq!(emit_reslink(&xl), "# bwms-reslink (gerado de .xl). Formato: <path_pedido> | <path_servido> [| copy]\nx.mesh | via_copy.mesh | copy\n");
     }
 
-    /// A cópia que tem link sai do grafo antes da cadeia: `a: k` continua `a → k` (a referência aceita link para cópia, `Extension.cpp:177`) e não
-    /// atravessa `k: z`. A cópia vem de outro `.xl`, depois do link, e conta igual: a referência junta as cópias de todas as configs primeiro.
+    /// A cópia que tem link sai do grafo antes da cadeia: `a: k` continua `a → k` (link para cópia vale) e não
+    /// atravessa `k: z`. A cópia vem de outro `.xl`, depois do link, e conta igual: as cópias de todas as configs se juntam primeiro.
     #[test]
     fn link_sobre_copia_sai_antes_da_cadeia_e_copy_de_outro_xl_conta() {
         let links = crate::instalacao::xl::parse_xl("resource:\n  link:\n    mod\\a.mesh: mod\\k.mesh\n    mod\\k.mesh: base\\z.mesh\n").expect("parse");
@@ -969,7 +962,7 @@ mod tests {
         assert_eq!(reslink_relido(&emit_reslink_do_plano(&p)), (p.mapa_links.clone(), p.mapa_copies.clone()));
     }
 
-    /// Cópia igual ao original sai (`Copy "…" points to itself`, `Extension.cpp:55-63`) sem derrubar as outras cópias da mesma entrada, e o
+    /// Cópia igual ao original sai sem derrubar as outras cópias da mesma entrada, e o
     /// aviso só sai quando nenhuma outra entrada pôs o caminho na tabela. O link para esse caminho continua: ele não é cópia.
     #[test]
     fn copy_para_si_mesmo_sai_com_aviso_e_nao_derruba_o_resto() {
@@ -1088,11 +1081,11 @@ mod tests {
         assert_eq!(reslink_relido(&emit_reslink(&xl)).0, esperado);
     }
 
-    /// Direção escalar x sequência de `resource.link` contra a referência (`ResourceLink/Config.cpp:25-48` + `finalLinks[linkPath] = targetPath` de
-    /// `Extension.cpp:85-113`): o escalar pede a chave e serve o valor; a sequência pede cada item e serve a chave (a migração do `Migration.xl`).
+    /// Direção escalar x sequência de `resource.link`: o escalar pede a chave e serve o valor; a sequência pede cada item e serve a chave
+    /// (a forma de migração de nome legado).
     /// O parse entrega os pares já orientados, na ordem do YAML, e o plano só os aplica.
     #[test]
-    fn link_direcao_scalar_vs_sequencia_bate_com_cpp() {
+    fn link_direcao_scalar_vs_sequencia() {
         let xl = crate::instalacao::xl::parse_xl(
             "resource:\n  link:\n    base\\fake\\a.mesh: base\\real\\b.mesh\n    base\\novo\\h1.mesh: [base\\antigo\\base.mesh, base\\antigo\\legacy.mesh]\n",
         )
@@ -1115,27 +1108,26 @@ mod tests {
         assert_eq!(p.mapa_links.get(&h("base\\novo\\h1.mesh")), None, "o servido da sequência não é pedido");
     }
 
-    /// O trecho do `Migration.xl` real pelo parse e pelo plano, com a tabela emitida inteira: o item (nome legado) é pedido e a chave é servida.
+    /// Um link de migração de nome legado pelo parse e pelo plano, com a tabela emitida inteira: o item (nome legado) é pedido e a chave é servida.
     #[test]
-    fn link_migration_real_end_to_end_direcao_correta() {
-        let src = "resource:\n  link:\n    archive_xl\\a\\h1.mesh:\n      - archive_xl\\a\\base.mesh\n";
+    fn link_de_migracao_end_to_end_direcao_correta() {
+        let src = "resource:\n  link:\n    mod\\a\\h1.mesh:\n      - mod\\a\\base.mesh\n";
         let xl = crate::instalacao::xl::parse_xl(src).expect("parse");
-        assert_eq!(xl.links, vec![ResourceLink { pedido: "archive_xl\\a\\base.mesh".into(), servido: "archive_xl\\a\\h1.mesh".into() }]);
+        assert_eq!(xl.links, vec![ResourceLink { pedido: "mod\\a\\base.mesh".into(), servido: "mod\\a\\h1.mesh".into() }]);
         assert_eq!(
             emit_reslink(&xl),
-            "# bwms-reslink (gerado de .xl). Formato: <path_pedido> | <path_servido> [| copy]\narchive_xl\\a\\base.mesh | archive_xl\\a\\h1.mesh\n"
+            "# bwms-reslink (gerado de .xl). Formato: <path_pedido> | <path_servido> [| copy]\nmod\\a\\base.mesh | mod\\a\\h1.mesh\n"
         );
         let p = build_apply_plan(&xl);
         // "base.mesh" (nome antigo, na lista) deve resolver pro "h1.mesh" (o alvo/path novo).
         assert_eq!(
-            p.mapa_links[&resource_path_hash("archive_xl\\a\\base.mesh")],
-            resource_path_hash("archive_xl\\a\\h1.mesh")
+            p.mapa_links[&resource_path_hash("mod\\a\\base.mesh")],
+            resource_path_hash("mod\\a\\h1.mesh")
         );
     }
 
-    /// **`axl-link-nton-table` (2026-07-13).** Cadeia A→B→C colapsa pro alvo FINAL (C), igual
-    /// `Extension.cpp::Configure()` (persegue `finalLinks[target]` até não achar mais chave,
-    /// substitui `link.value()` pelo alvo final) — replicado em `resolver`.
+    /// **Tabela de link N→1 (2026-07-13).** Cadeia A→B→C colapsa pro alvo FINAL (C): a cadeia é
+    /// seguida até não achar mais chave e o link fica com o alvo final (`resolver`).
     #[test]
     fn link_cadeia_a_para_b_para_c_colapsa_no_final() {
         let mut xl = XlFile::default();
@@ -1149,7 +1141,7 @@ mod tests {
         assert_eq!(p.mapa_links[&resource_path_hash("b")], resource_path_hash("c"));
     }
 
-    /// Ciclo A→B→A é detectado e REMOVIDO (não aplicado) — fiel ao C++ (`LogError` + `erase`).
+    /// Ciclo A→B→A é detectado e REMOVIDO (não aplicado), com aviso.
     #[test]
     fn link_ciclo_e_detectado_e_removido() {
         let mut xl = XlFile::default();
@@ -1172,7 +1164,7 @@ mod tests {
         assert_eq!(p.mapa_links[&resource_path_hash("a")], resource_path_hash("d"));
     }
 
-    /// Quem chega a um ciclo sem estar nele também sai (o C++ marca `a` como cíclico ao revisitar `b`), e a resolução termina.
+    /// Quem chega a um ciclo sem estar nele também sai (`a` é cíclico ao revisitar `b`), e a resolução termina.
     #[test]
     fn link_que_chega_a_um_ciclo_sai_junto() {
         let mut xl = XlFile::default();
@@ -1184,7 +1176,7 @@ mod tests {
         assert_eq!(p.mapa_links, HashMap::from([(resource_path_hash("x"), resource_path_hash("y"))]));
     }
 
-    /// `ResourceLink/Extension.cpp` descarta `b: b` (`points to itself`) antes de montar `finalLinks`, então `a: b` continua valendo.
+    /// `b: b` (aponta para si mesmo) sai antes de montar os links finais, então `a: b` continua valendo.
     #[test]
     fn link_para_si_mesmo_sai_sem_derrubar_quem_aponta_para_ele() {
         let xl = crate::instalacao::xl::parse_xl("resource:\n  link:\n    a: b\n    b: b\n").expect("parse");
@@ -1216,7 +1208,7 @@ mod tests {
         assert_eq!(linhas, vec!["a | c", "b | c", "r | s2", "c | o2 | copy"]);
     }
 
-    /// `ResourceLink/Extension.cpp:53,87`: o escopo vira os alvos dele no lado pedido do link (item da sequência, chave do escalar) e na cópia do copy.
+    /// O escopo vira os alvos dele no lado pedido do link (item da sequência, chave do escalar) e na cópia do copy.
     /// O lado servido (`mod\fora.mesh: mod\seq.mesh`) e o original do copy ficam como estão, e nenhuma linha pede o caminho do escopo.
     #[test]
     fn link_e_copy_expandem_o_escopo_no_lado_pedido() {
@@ -1242,7 +1234,7 @@ mod tests {
         assert_eq!(reslink_relido(&emit_reslink(&xl)), (p.mapa_links, p.mapa_copies));
     }
 
-    /// Como o `ExpandList`: escopo de lista vazia (o A↔B) e caminho que não é escopo ficam eles mesmos, e o link não some.
+    /// Como na expansão de escopo: escopo de lista vazia (o A↔B) e caminho que não é escopo ficam eles mesmos, e o link não some.
     #[test]
     fn escopo_vazio_e_caminho_comum_ficam_como_estao_no_link_e_no_copy() {
         let xl = crate::instalacao::xl::parse_xl("resource:\n  scope:\n    a: b\n    b: a\n  link:\n    a: real\n    comum: real\n  copy:\n    orig: [b]\n").expect("parse");
@@ -1251,7 +1243,7 @@ mod tests {
         assert_eq!(linhas, vec!["a | real", "comum | real", "b | orig | copy"]);
     }
 
-    /// O `points to itself` da referência confere o pedido já expandido: o membro do escopo igual ao servido sai sozinho, os outros ficam.
+    /// A regra do link para si mesmo confere o pedido já expandido: o membro do escopo igual ao servido sai sozinho, os outros ficam.
     #[test]
     fn membro_do_escopo_igual_ao_servido_sai_sem_derrubar_os_outros() {
         let xl = crate::instalacao::xl::parse_xl("resource:\n  scope:\n    g: [x, real]\n  link:\n    real: [g]\n").expect("parse");

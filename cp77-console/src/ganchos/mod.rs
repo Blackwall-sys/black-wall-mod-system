@@ -355,7 +355,7 @@ unsafe fn relocate_n(orig: u64, n_insns: u64) -> Option<Vec<u8>> {
         }
         // LDR literal 64-bit GP (0x58) -> LÊ o valor UMA VEZ (agora, na relocação) e materializa o
         // VALOR direto em Xt — NÃO materializa o endereço pra reler em runtime. Achado 2026-07-16
-        // (ao vivo, empilhando 2 hooks no mesmo alvo pra `red4ext-attach-detach-contract`): o
+        // (ao vivo, empilhando 2 hooks no mesmo alvo pra `attach-detach-contract`): o
         // padrão antigo (materializa endereço + `ldr [Xscratch]` em runtime) quebra quando o
         // "prólogo" sendo relocado É UM abs_jump patch de OUTRO hook — o próprio abs_jump usa ESTE
         // exato encoding (`ldr x17,#8`), e reler o endereço em runtime pega o que estiver lá NAQUELE
@@ -801,7 +801,7 @@ mod tests {
         x.wrapping_add(1_000_000)
     }
 
-    /// Codeware `#118`, boot 178: o jogo travou na remoção dos hooks de evento. Hook de verdade num alvo do próprio binário de teste (`por` devolve o
+    /// Boot 178: o jogo travou na remoção dos hooks de evento. Hook de verdade num alvo do próprio binário de teste (`por` devolve o
     /// trampolim ou nulo), 4 threads chamando o alvo sem parar e `tirar` numa thread à parte, com teto de 10 s: travar aqui reproduz o boot sem jogo.
     /// `tirar` devolve se o alvo foi restaurado.
     fn revert_com_chamadas_concorrentes(chamar: extern "C" fn(u64) -> u64, por: fn(*mut c_void) -> *mut c_void, tirar: fn(*mut c_void) -> bool) {
@@ -1306,7 +1306,7 @@ mod tests {
     /// Entrada de [`TRAMPOLINS`] com os bytes do alvo e um conteúdo que não é o relocado.
     static TRAMPOLIM_FALSO: [u8; 4096] = [0; 4096];
 
-    /// Codeware `#118` (F5-11): 8 ciclos de pôr e tirar 2 hooks empilhados no mesmo alvo usam 2 trampolins no total, 1 por bytes no alvo, e em todo
+    /// F5-11: 8 ciclos de pôr e tirar 2 hooks empilhados no mesmo alvo usam 2 trampolins no total, 1 por bytes no alvo, e em todo
     /// ciclo a chamada passa pelos dois e chega ao corpo do alvo. A entrada da tabela com os mesmos bytes e outro conteúdo não é usada. O
     /// `inline_hook_owned` de plugin ganha página nova em toda instalação, fora da tabela.
     #[test]
@@ -1628,7 +1628,7 @@ mod tests {
     }
 
     /// REGRESSÃO (2026-07-16, achado empilhando 2 hooks no mesmo alvo ao vivo p/
-    /// `red4ext-attach-detach-contract`): relocar o PRÓPRIO encoding do `abs_jump` (o patch que
+    /// `attach-detach-contract`): relocar o PRÓPRIO encoding do `abs_jump` (o patch que
     /// `ganchos::instalar` escreve no alvo) — o cenário de um hook capturando o que OUTRO hook
     /// já escreveu ali (hook empilhado). O `abs_jump` é `ldr x17,#8; br x17; <8B: endereço>` — o
     /// mesmo LDR-literal 64-bit que qualquer prólogo real pode ter. Prova que o valor relocado
@@ -1665,7 +1665,7 @@ mod tests {
         );
     }
 
-    /// Codeware `#118`: só um PC dentro dos 16 bytes do patch impede a restauração; a instrução seguinte e a anterior não.
+    /// Só um PC dentro dos 16 bytes do patch impede a restauração; a instrução seguinte e a anterior não.
     #[test]
     fn pc_no_trecho_do_patch() {
         let alvo = 0x1_019b_95f4;
@@ -1689,7 +1689,7 @@ unsafe fn liberar_threads(threads: &[MachPort], lista: *mut MachPort, quantas: u
     mach_vm_deallocate(mach_task_self_, lista as u64, quantas as u64 * 4);
 }
 
-/// Codeware `#118`: roda `escrever` (os 16 bytes de `t` e a lista `HOOKS`) com as outras threads do processo suspensas e nenhum PC dentro dos 16 bytes
+/// Roda `escrever` (os 16 bytes de `t` e a lista `HOOKS`) com as outras threads do processo suspensas e nenhum PC dentro dos 16 bytes
 /// — uma thread entre as instruções do salto executaria instrução misturada, e a página do alvo fica sem `X` durante a escrita. Com algum PC no trecho,
 /// retoma todas e tenta de novo (até 200 vezes, 1 ms entre elas). Com as threads paradas não há alocação, log nem trava nova: a lista de threads, o
 /// vetor, a trava de `HOOKS` e 1 posição livre nela vêm antes. `pode` roda com a trava antes de suspender; falso encerra sem escrever. Devolve
@@ -1764,7 +1764,7 @@ pub unsafe fn remover_com_threads_paradas(target: *mut c_void) -> (bool, u32) {
     remover_parado(target, None)
 }
 
-/// Codeware `#118`: desfaz o hook mais recente de `target` com as outras threads suspensas ([`escrever_com_threads_paradas`]). Com `so_topo`, só desfaz
+/// Desfaz o hook mais recente de `target` com as outras threads suspensas ([`escrever_com_threads_paradas`]). Com `so_topo`, só desfaz
 /// se o hook do topo é o que devolveu esse trampolim; a conferência roda com a trava de `HOOKS` na mão, a mesma da escrita, então outro hook empilhado
 /// no meio tempo não é tirado no lugar dele. O trampolim continua mapeado, e uma thread que já entrou nele volta pro alvo+16, que a restauração não
 /// muda. Devolve (restaurado, tentativas com PC no trecho).
@@ -1804,7 +1804,7 @@ pub(crate) unsafe fn remover_parado(target: *mut c_void, so_topo: Option<u64>) -
     (restaurado, ocupadas)
 }
 
-/// Codeware `#118`, boots 178 e 181: com o salto escrito com as outras threads rodando código da página do alvo, o jogo parou 2 vezes na instalação
+/// Boots 178 e 181: com o salto escrito com as outras threads rodando código da página do alvo, o jogo parou 2 vezes na instalação
 /// dos hooks de evento (logo depois do 1º registro no 178, antes do 19º no 181), e nenhuma das 180 remoções com as threads paradas travou. A escrita
 /// única dos 3 instaladores ([`instalar_com_threads_paradas`], [`instalar_perto`] e [`instalar_com_ponte`]): põe `salto` no começo de `t` como a
 /// remoção ([`escrever_com_threads_paradas`]) e empilha o hook. Com a trava de `HOOKS` na mão, que todo escritor de código deste módulo pega, recusa
@@ -1849,7 +1849,7 @@ struct Trampolim {
     tramp: u64,
 }
 
-/// Codeware `#118`: cada ciclo de registrar e tirar o último ouvinte reinstala até 11 hooks de evento. A reinstalação com os mesmos bytes no alvo e o
+/// Cada ciclo de registrar e tirar o último ouvinte reinstala até 11 hooks de evento. A reinstalação com os mesmos bytes no alvo e o
 /// mesmo conteúdo relocado usa o trampolim da anterior, sem `mmap`: o custo fica em 1 página por alvo no processo, por mais ciclos que haja.
 static TRAMPOLINS: Mutex<Vec<Trampolim>> = Mutex::new(Vec::new());
 
@@ -2080,7 +2080,7 @@ pub(crate) unsafe fn remover(target: *mut c_void) -> bool {
     remover_parado(target, None).0 || ganchos_no_endereco(target) == 0
 }
 
-/// `red4ext-attach-detach-contract`: desfaz TODOS os hooks empilhados em `target` num call
+/// `attach-detach-contract`: desfaz TODOS os hooks empilhados em `target` num call
 /// só (o "Detach(target) -> ambos somem" do contrato) — chama `remover` em loop LIFO até
 /// `target` não ter mais nenhum hook nosso. Idempotente: no-op se já não há hook ali.
 /// Para na 1ª escrita recusada, com o hook do topo ainda no alvo e na lista.
@@ -2127,7 +2127,7 @@ pub(crate) fn esquecer_sem_restaurar(target: u64) {
 }
 
 /// Aloca 1 página JIT NOVA contendo só `ret` — alvo dummy SEGURO pra hookar quando o teste não
-/// precisa de um alvo real do jogo (ex.: `red4ext-attach-detach-contract`, provar o contrato de
+/// precisa de um alvo real do jogo (ex.: `attach-detach-contract`, provar o contrato de
 /// empilhamento em si). NUNCA hookar uma função compilada no NOSSO PRÓPRIO dylib para isso: o
 /// `set_prot`(RW+COPY) do `instalar()` te dá a página INTEIRA (4K) do alvo gravável — se essa
 /// página for compartilhada com o código que está EXECUTANDO a própria chamada de `instalar()`

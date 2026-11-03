@@ -1,4 +1,4 @@
-// bwms-communitysystem.reds — os 9 métodos do `Raw::CommunitySystem` do Codeware (`Red/CommunitySystem.hpp`, item #77) sobre o
+// bwms-communitysystem.reds — os 9 métodos do `Raw::CommunitySystem` sobre o
 // `CommunitySystem` vanilla (`GameInstance.GetCommunitySystem(game)`, `orphans.script:11401`). São slots de VTABLE (`RawVFunc`, offset
 // Windows em bytes), chamados no Mac com o deslocamento Itanium de +0x08:
 //
@@ -14,8 +14,8 @@
 // `Community`/`Spawner` nem `wref<T>`. Os ids são o hash cru do `EntityID`/`gameCommunityID`, passados como `EntityID`/`Uint64`, sem
 // forjar o wrapper `gameCommunityID`.
 //
-// As 7 mutações mudam estado real de mundo (ativam e desativam spawn de NPC e multidão) e não chamam o `CommunitySystem::Update` que o
-// Codeware chama depois de cada uma; a API completa, com o `Update`, é o `WorldStateSystem` (`ponte-worldstatesystem.reds`).
+// As 7 mutações mudam estado real de mundo (ativam e desativam spawn de NPC e multidão) e não chamam o `CommunitySystem::Update`
+// depois de cada uma; a API completa, com o `Update`, é o `WorldStateSystem` (`ponte-worldstatesystem.reds`).
 
 native func BwmsCommunityActivate(sys: ref<CommunitySystem>, communityId: EntityID, entryName: CName) -> Void;
 native func BwmsCommunityDeactivate(sys: ref<CommunitySystem>, communityId: EntityID, entryName: CName) -> Void;

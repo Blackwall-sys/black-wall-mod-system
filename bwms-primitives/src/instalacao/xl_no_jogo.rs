@@ -1,4 +1,4 @@
-//! A parte dos `.xl` da `Mods/` que o próprio jogo aplica. A 2.5 traz o ArchiveXL compilado no binário (`App::LocalizationExtension`,
+//! A parte dos `.xl` da `Mods/` que o próprio jogo aplica. A 2.5 traz no binário a aplicação de config de mod (`App::LocalizationExtension`,
 //! `App::FactoryIndexExtension`, ...; `relatorios/N.md` §1) com as instruções em JSON: `0x101cbd304` varre `archive/mac/mod` e as pastas do
 //! mod.io com glob `*.json` recursivo, sem filtro de nome, e cada arquivo é uma config (`0x101cbdddc`, rapidjson). O BWMS converte o `.xl`
 //! (YAML, pelo `xl::parse_xl`) num `.json` em `archive/Mac/mod/BWMS-Mods/xl/` e tira da tabela de runtime a seção que o jogo aplica: uma
@@ -459,8 +459,8 @@ mod tests {
     use super::*;
     use crate::instalacao::xl::parse_xl;
 
-    const EEX: &str = "localization:\n  onscreens:\n    en-us: equipment_ex\\localization\\en-us.json\n    ar-ar: equipment_ex\\localization\\ar-ar.json\n    cz-cz: equipment_ex\\localization\\cz-cz.json\n    de-de: equipment_ex\\localization\\de-de.json\n    es-es: equipment_ex\\localization\\es-es.json\n    fr-fr: equipment_ex\\localization\\fr-fr.json\n    it-it: equipment_ex\\localization\\it-it.json\n    kr-kr: equipment_ex\\localization\\kr-kr.json\n    pl-pl: equipment_ex\\localization\\pl-pl.json\n    pt-br: equipment_ex\\localization\\pt-br.json\n    ru-ru: equipment_ex\\localization\\ru-ru.json\n    tr-tr: equipment_ex\\localization\\tr-tr.json\n    zh-cn: equipment_ex\\localization\\zh-cn.json\n";
-    const VA: &str = "localization:\n  onscreens:\n    en-us: base\\localization\\en-us\\onscreens\\virtual-atelier.json\n    cz-cz: base\\localization\\cz-cz\\onscreens\\virtual-atelier.json\n    de-de: base\\localization\\de-de\\onscreens\\virtual-atelier.json\n    it-it: base\\localization\\it-it\\onscreens\\virtual-atelier.json\n    ru-ru: base\\localization\\ru-ru\\onscreens\\virtual-atelier.json\n    tr-tr: base\\localization\\tr-tr\\onscreens\\virtual-atelier.json\n    zh-cn: base\\localization\\zh-cn\\onscreens\\virtual-atelier.json\n    fr-fr: base\\localization\\fr-fr\\onscreens\\virtual-atelier.json\n    zh-tw: base\\localization\\zh-tw\\onscreens\\virtual-atelier.json\n    pt-br: base\\localization\\pt-br\\onscreens\\virtual-atelier.json\n";
+    const TEXTOS_A: &str = "localization:\n  onscreens:\n    en-us: mod_a\\localization\\en-us.json\n    ar-ar: mod_a\\localization\\ar-ar.json\n    cz-cz: mod_a\\localization\\cz-cz.json\n    de-de: mod_a\\localization\\de-de.json\n    es-es: mod_a\\localization\\es-es.json\n    fr-fr: mod_a\\localization\\fr-fr.json\n    it-it: mod_a\\localization\\it-it.json\n    kr-kr: mod_a\\localization\\kr-kr.json\n    pl-pl: mod_a\\localization\\pl-pl.json\n    pt-br: mod_a\\localization\\pt-br.json\n    ru-ru: mod_a\\localization\\ru-ru.json\n    tr-tr: mod_a\\localization\\tr-tr.json\n    zh-cn: mod_a\\localization\\zh-cn.json\n";
+    const TEXTOS_B: &str = "localization:\n  onscreens:\n    en-us: base\\localization\\en-us\\onscreens\\mod-b.json\n    cz-cz: base\\localization\\cz-cz\\onscreens\\mod-b.json\n    de-de: base\\localization\\de-de\\onscreens\\mod-b.json\n    it-it: base\\localization\\it-it\\onscreens\\mod-b.json\n    ru-ru: base\\localization\\ru-ru\\onscreens\\mod-b.json\n    tr-tr: base\\localization\\tr-tr\\onscreens\\mod-b.json\n    zh-cn: base\\localization\\zh-cn\\onscreens\\mod-b.json\n    fr-fr: base\\localization\\fr-fr\\onscreens\\mod-b.json\n    zh-tw: base\\localization\\zh-tw\\onscreens\\mod-b.json\n    pt-br: base\\localization\\pt-br\\onscreens\\mod-b.json\n";
 
     fn sem_concorrentes() -> Concorrentes {
         Concorrentes { modio: Ok(Vec::new()), outras_pastas: Vec::new() }
@@ -520,10 +520,10 @@ mod tests {
         m.into_iter().collect()
     }
 
-    /// O `.json` do EEX e do VA: JSON estrito, a reserva livre na frente com os arquivos do en-us, e os idiomas do `.xl` na ordem.
+    /// O `.json` de dois `.xl` com 13 e 10 idiomas: JSON estrito, a reserva livre na frente com os arquivos do en-us, e os idiomas do `.xl` na ordem.
     #[test]
-    fn json_do_eex_e_do_va() {
-        for (fonte, livre) in [(EEX, "es-mx"), (VA, "ar-ar")] {
+    fn json_de_dois_xl_com_textos() {
+        for (fonte, livre) in [(TEXTOS_A, "es-mx"), (TEXTOS_B, "ar-ar")] {
             let xl = parse_xl(fonte).unwrap();
             let o = onscreens_do_bwms(&xl);
             let t = json_da_config(&o, &[]).unwrap();
@@ -533,19 +533,19 @@ mod tests {
             assert_eq!(o[0].0, "en-us");
             assert!(!o.iter().any(|(i, _)| i == livre));
         }
-        let t = json_da_config(&onscreens_do_bwms(&parse_xl(VA).unwrap()), &[]).unwrap();
-        assert!(t.starts_with("{\n    \"localization\": {\n        \"onscreens\": {\n            \"ar-ar\": [\n                \"base\\\\localization\\\\en-us\\\\onscreens\\\\virtual-atelier.json\"\n            ],\n"), "{t}");
+        let t = json_da_config(&onscreens_do_bwms(&parse_xl(TEXTOS_B).unwrap()), &[]).unwrap();
+        assert!(t.starts_with("{\n    \"localization\": {\n        \"onscreens\": {\n            \"ar-ar\": [\n                \"base\\\\localization\\\\en-us\\\\onscreens\\\\mod-b.json\"\n            ],\n"), "{t}");
     }
 
-    /// O formato da amostra real do mod.io (`ImmersiveRippers.archive.json`): objeto no topo, seção → valor, caminho com `\\`; o leitor estrito
+    /// O formato de uma config real do mod.io: objeto no topo, seção → valor, caminho com `\\`; o leitor estrito
     /// a lê, e o mesmo leitor lê o `.json` gerado.
     #[test]
     fn amostra_do_modio_e_o_gerado_no_mesmo_formato() {
-        let amostra = "{\n    \"streaming\": {\n        \"blocks\": [\n            \"base\\\\worlds\\\\immersive_rippers.streamingblock\"\n        ]\n    },\n    \"journal\": [\n        \"base\\\\journal\\\\ripper_journal.journal\"\n    ]\n}";
+        let amostra = "{\n    \"streaming\": {\n        \"blocks\": [\n            \"base\\\\worlds\\\\amostra.streamingblock\"\n        ]\n    },\n    \"journal\": [\n        \"base\\\\journal\\\\amostra.journal\"\n    ]\n}";
         let v = json::ler(amostra).unwrap();
-        assert_eq!(v.campo("journal"), Some(&Valor::Lista(vec![Valor::Texto("base\\journal\\ripper_journal.journal".into())])));
-        let xl = parse_xl("streaming:\n  blocks:\n    - base\\worlds\\immersive_rippers.streamingblock\njournal:\n  - base\\journal\\ripper_journal.journal\n").unwrap();
-        assert_eq!(xl.journals, ["base\\journal\\ripper_journal.journal"]);
+        assert_eq!(v.campo("journal"), Some(&Valor::Lista(vec![Valor::Texto("base\\journal\\amostra.journal".into())])));
+        let xl = parse_xl("streaming:\n  blocks:\n    - base\\worlds\\amostra.streamingblock\njournal:\n  - base\\journal\\amostra.journal\n").unwrap();
+        assert_eq!(xl.journals, ["base\\journal\\amostra.journal"]);
         assert!(onscreens_do_bwms(&xl).is_empty());
     }
 
@@ -590,16 +590,16 @@ mod tests {
     /// gera `.json` e conta na numeração.
     #[test]
     fn corrente_na_ordem_inversa_da_mods() {
-        let (eex, va, outro) = (parse_xl(EEX).unwrap(), parse_xl(VA).unwrap(), parse_xl("journal:\n  - j.journal\n").unwrap());
+        let (mod_a, mod_b, outro) = (parse_xl(TEXTOS_A).unwrap(), parse_xl(TEXTOS_B).unwrap(), parse_xl("journal:\n  - j.journal\n").unwrap());
         let mods = [
-            (PathBuf::from("/j/Mods/Equipment-EX/archive/pc/mod/EquipmentEx.archive.xl"), &eex),
+            (PathBuf::from("/j/Mods/Mod-A/archive/pc/mod/ModA.archive.xl"), &mod_a),
             (PathBuf::from("/j/Mods/Outro/o.xl"), &outro),
-            (PathBuf::from("/j/Mods/Virtual Atelier/archive/pc/mod/VirtualAtelier.archive.xl"), &va),
+            (PathBuf::from("/j/Mods/Zeta Mod/archive/pc/mod/ZetaMod.archive.xl"), &mod_b),
         ];
         let p = planejar(&mods, &sem_concorrentes(), true);
         assert_eq!(p.motivo, None);
         let destinos: Vec<String> = p.configs.iter().map(|c| c.destino.display().to_string()).collect();
-        assert_eq!(destinos, ["archive/Mac/mod/BWMS-Mods/xl/0003-VirtualAtelier.archive.json", "archive/Mac/mod/BWMS-Mods/xl/xl/0001-EquipmentEx.archive.json"]);
+        assert_eq!(destinos, ["archive/Mac/mod/BWMS-Mods/xl/0003-ZetaMod.archive.json", "archive/Mac/mod/BWMS-Mods/xl/xl/0001-ModA.archive.json"]);
         assert!(p.no_jogo(&mods[0].0, "localization.onscreens"));
         assert!(!p.no_jogo(&mods[0].0, "journal"));
         assert!(!p.no_jogo(&mods[1].0, "localization.onscreens"));
@@ -610,8 +610,8 @@ mod tests {
     /// Cada concorrente deixa tudo no BWMS, com o motivo.
     #[test]
     fn concorrentes_deixam_no_bwms() {
-        let eex = parse_xl(EEX).unwrap();
-        let mods = [(PathBuf::from("/j/Mods/E/e.xl"), &eex)];
+        let mod_a = parse_xl(TEXTOS_A).unwrap();
+        let mods = [(PathBuf::from("/j/Mods/E/e.xl"), &mod_a)];
         assert_eq!(planejar(&mods, &sem_concorrentes(), false).motivo, Some(Motivo::SemPastaDoJogo));
         assert_eq!(planejar(&mods, &sem_concorrentes(), true).motivo, None);
         let modio = Concorrentes { modio: Ok(vec!["123".into()]), outras_pastas: Vec::new() };
@@ -667,8 +667,8 @@ mod tests {
     fn no_disco_exige_todas_iguais() {
         let game = std::env::temp_dir().join(format!("bwms-xl-no-disco-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&game);
-        let (eex, va) = (parse_xl(EEX).unwrap(), parse_xl(VA).unwrap());
-        let p = planejar(&[(PathBuf::from("/j/Mods/E/e.xl"), &eex), (PathBuf::from("/j/Mods/V/v.xl"), &va)], &sem_concorrentes(), true);
+        let (mod_a, mod_b) = (parse_xl(TEXTOS_A).unwrap(), parse_xl(TEXTOS_B).unwrap());
+        let p = planejar(&[(PathBuf::from("/j/Mods/E/e.xl"), &mod_a), (PathBuf::from("/j/Mods/V/v.xl"), &mod_b)], &sem_concorrentes(), true);
         assert!(!no_disco(&game, &p));
         for c in &p.configs[..1] {
             std::fs::create_dir_all(game.join(&c.destino).parent().unwrap()).unwrap();
@@ -706,21 +706,21 @@ mod tests {
     /// seção.
     #[test]
     fn textos_e_factories_no_mesmo_json() {
-        let xl = parse_xl(&format!("{VA}factories:\n  - va\\f.csv\n")).unwrap();
+        let xl = parse_xl(&format!("{TEXTOS_B}factories:\n  - mb\\f.csv\n")).unwrap();
         let p = PathBuf::from("/j/Mods/V/v.xl");
         let plano = planejar(&[(p.clone(), &xl)], &sem_concorrentes(), true);
         assert_eq!(plano.configs.len(), 1);
         let c = &plano.configs[0];
-        assert_eq!(factories_do_json(&c.conteudo), ["va\\f.csv"]);
+        assert_eq!(factories_do_json(&c.conteudo), ["mb\\f.csv"]);
         assert_eq!(idiomas_do_json(&c.conteudo)[1..], onscreens_do_bwms(&xl)[..]);
         assert!(c.conteudo.starts_with("{\n    \"localization\": {\n        \"onscreens\": {\n"), "{}", c.conteudo);
-        assert!(c.conteudo.ends_with("        }\n    },\n    \"factories\": [\n        \"va\\\\f.csv\"\n    ]\n}\n"), "{}", c.conteudo);
+        assert!(c.conteudo.ends_with("        }\n    },\n    \"factories\": [\n        \"mb\\\\f.csv\"\n    ]\n}\n"), "{}", c.conteudo);
         assert!(plano.no_jogo(&p, "factories") && plano.no_jogo(&p, "localization.onscreens"));
         assert!(plano.factories_fora.is_empty());
         // Os textos de volta ao BWMS: o mesmo destino, só com o `factories`.
         let so = plano.so_factories();
         assert_eq!((so.len(), &so[0].destino), (1, &c.destino));
-        assert_eq!(so[0].conteudo, "{\n    \"factories\": [\n        \"va\\\\f.csv\"\n    ]\n}\n");
+        assert_eq!(so[0].conteudo, "{\n    \"factories\": [\n        \"mb\\\\f.csv\"\n    ]\n}\n");
         assert!(!so[0].leva("localization.onscreens") && so[0].leva("factories"));
     }
 
@@ -728,8 +728,8 @@ mod tests {
     /// por `.xl`, os `.csv` fora dos archives que o jogo monta, sem tirar o `.csv` do `.json`.
     #[test]
     fn factories_vao_ao_jogo_por_mod() {
-        let (a, b, va) = (parse_xl("factories:\n  - a\\f.csv\n").unwrap(), parse_xl("factories: [ b\\f.csv, b\\g.csv ]\n").unwrap(), parse_xl(VA).unwrap());
-        let mods = [(PathBuf::from("/j/Mods/A/a.xl"), &a), (PathBuf::from("/j/Mods/B/b.xl"), &b), (PathBuf::from("/j/Mods/V/v.xl"), &va)];
+        let (a, b, mod_b) = (parse_xl("factories:\n  - a\\f.csv\n").unwrap(), parse_xl("factories: [ b\\f.csv, b\\g.csv ]\n").unwrap(), parse_xl(TEXTOS_B).unwrap());
+        let mods = [(PathBuf::from("/j/Mods/A/a.xl"), &a), (PathBuf::from("/j/Mods/B/b.xl"), &b), (PathBuf::from("/j/Mods/V/v.xl"), &mod_b)];
         let plano = planejar(&mods, &sem_concorrentes(), true);
         let destinos: Vec<String> = plano.configs.iter().map(|c| c.destino.display().to_string()).collect();
         assert_eq!(
@@ -750,7 +750,7 @@ mod tests {
     /// Com os textos no BWMS (mod do mod.io com textos), o `factories` vai ao jogo mesmo assim, num `.json` sem `localization`.
     #[test]
     fn factories_vao_com_os_textos_no_bwms() {
-        let xl = parse_xl(&format!("{VA}factories: v\\f.csv\n")).unwrap();
+        let xl = parse_xl(&format!("{TEXTOS_B}factories: v\\f.csv\n")).unwrap();
         let p = PathBuf::from("/j/Mods/V/v.xl");
         let modio = Concorrentes { modio: Ok(vec!["123".into()]), outras_pastas: Vec::new() };
         let plano = planejar(&[(p.clone(), &xl)], &modio, true);

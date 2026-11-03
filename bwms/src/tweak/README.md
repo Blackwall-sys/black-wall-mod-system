@@ -6,7 +6,7 @@ Subcomando da CLI `bwms` (Rust, **sem dependência do crates.io**: só o
 preços, itens, ...): records + flats (valores) + queries + group tags. Os flats
 **não são comprimidos**, então é leitura direta — sem Kraken.
 
-Porta o codec de leitura do **WolvenKit** (`WolvenKit.RED4/TweakDB`). É a base do
+É a base do
 merger offline de dano/stats — a primeira ferramenta de modding de gameplay no Mac
 **sem hook**.
 
@@ -15,19 +15,18 @@ merger offline de dano/stats — a primeira ferramenta de modding de gameplay no
 ```sh
 # na pasta bwms/
 cargo build --release                     # puro std
-cargo build --release --features kraken   # + descomprime a tweakdbstr.kark (clang++ e a fonte do ooz)
 BWMS=target/release/bwms
 
 # Sem <file>, procura o tweakdb.bin nas instalações comuns do macOS (override: CP77_DIR). `ep1` = Phantom Liberty.
 $BWMS tweak info                          # resumo
 $BWMS tweak map                           # header + flat types + contagens
-$BWMS tweak sample --type CFloat -n 8     # exemplos: NOME -> valor
-$BWMS tweak find "Items.Preset_Lexington_Default"   # acha flats pelo nome + valor
-$BWMS tweak find Damage                   # qualquer flat cujo nome contém "Damage"
+$BWMS tweak sample --type Float -n 8      # exemplos: NOME -> valor
+$BWMS tweak find "Items.Preset_Lexington_Default" --nomes meus-nomes.txt   # acha flats pelo nome + valor
+$BWMS tweak find Damage --nomes meus-nomes.txt   # qualquer flat cujo nome contém "Damage"
 
 # Exporta TODOS os atributos (nome ⇥ tipo ⇥ valor) — a lista completa
 $BWMS tweak dump -o tweakdb-flats.tsv                       # 2,88M flats (~248 MB)
-$BWMS tweak dump --type CFloat --filter damage -o dano.tsv  # só os de dano numérico
+$BWMS tweak dump --type Float --filter damage -o dano.tsv   # só os de dano numérico
 
 # Inspeção pontual
 $BWMS tweak get Items.Preset_Lexington_Default.OnAttach          # 1 flat
@@ -40,7 +39,7 @@ $BWMS tweak set Items.X.NPCAnimWrapperWeightOverride MeuNome      # string (CNam
 $BWMS tweak set Items.X.fxAppearance '$Foo.Bar'                   # ref TweakDBID por nome
 $BWMS tweak set Items.X.tags '[a, b, c]'                          # array inteiro
 
-# Lote (changeset .tweak), com append/remove em arrays (estilo TweakXL)
+# Lote (changeset .tweak), com append/remove em arrays
 #   Flat = valor | Flat = [a,b,c] | Flat += valor | Flat -= valor
 $BWMS tweak batch conforto-camera.tweak -o tweakdb-mod.bin
 
@@ -51,10 +50,11 @@ $BWMS tweak map ep1                       # tweakdb_ep1.bin
 Para usar no jogo: substitua `r6/cache/tweakdb.bin` pelo arquivo gerado (faça
 backup do original primeiro).
 
-Os **nomes** (TweakDBID → texto) vêm da `tweakdbstr.kark` do WolvenKit, procurada
-ao lado do binário e depois na pasta atual (override `TWEAKDB_NAMES`; `--no-names`
-desliga; sem a lista, segue sem nomes). O build padrão é puro std: lê tweakdb.bin e
-listas já descomprimidas, mas não `.kark`, que pede `--features kraken`.
+Os **nomes** (TweakDBID → texto) vêm de uma lista sua, opcional: texto, um nome de
+record/flat por linha, `#` comenta. Passe com `--nomes <arquivo>` em qualquer comando
+ou na variável `BWMS_NOMES`; o BWMS calcula o TweakDBID de cada nome. Sem a lista, os
+ids aparecem pelo hash (`--no-names` desliga mesmo com a lista). `find`, `record`,
+`clone`, `create`, `list-areas` e a `ui` precisam dela; nos `apply-*`, só `$base`/`$type`.
 
 ## O que já faz
 
@@ -67,7 +67,7 @@ listas já descomprimidas, mas não `.kark`, que pede `--features kraken`.
   Vector2/3, EulerAngles, Quaternion) e arrays (`array:T`).
 
 Validado no `tweakdb.bin` real (42 MB): 2,88M flats, 176K records, 22/22 tipos
-resolvidos; valores de CFloat decodificados (ex.: `0.1`, `-0.5`, `2`).
+resolvidos; valores de Float decodificados (ex.: `0.1`, `-0.5`, `2`).
 
 ## Formato (resumo)
 
@@ -87,17 +87,17 @@ u64 = `CRC32(nome) | (len<<32)`.
 
 ## Resolução de nomes (feito)
 
-O flat/record é endereçado por TweakDBID = `CRC32(nome) | (len<<32)`. A
-`tweakdbstr.kark` (196K records, 3,3M flats, 490 queries) é descomprimida e
-indexada hash→nome. Validado: `sample`/`find` mostram nomes reais (ex.:
-`Items.GrenadeIncendiarySticky.deepWaterDepth = -0.5`).
+O flat/record é endereçado por TweakDBID = `CRC32(nome) | (len<<32)`. Cada nome da
+lista do usuário vira esse id e entra no índice hash→nome; o teste
+`id_lido_bate_com_a_derivacao_pelo_pai` confere que o id lido é o que o motor deriva do
+record pai + sufixo.
 
 ## Writer / merger (feito)
 
-Reescreve o `tweakdb.bin` no layout REAL do jogo. **Achado-chave:** o
-`TweakDBWriter` do WolvenKit grava um formato **delta** (tabela de flat types de
-12 bytes, sem offsets) que NÃO é o do jogo — então o writer aqui reproduz o
-layout do *reader* (offsets recalculados), não porta o writer. Detalhes que
+Reescreve o `tweakdb.bin` no layout REAL do jogo. **Achado-chave:** um
+formato **delta** (tabela de flat types de 12 bytes, sem offsets) NÃO é o do
+jogo — então o writer aqui reproduz o layout do *reader* (offsets
+recalculados). Detalhes que
 tornam o round-trip **byte-exato**:
 
 - valores guardados como **bytes crus** (strings VLQ são ambíguas ao decodificar);
@@ -111,15 +111,15 @@ arquivo continua válido. `set`/`batch` cobrem **todos os 20 tipos escalares** +
 **arrays** (set/append/remove). Validado no tweakdb real: string `"None"→"ZZTEST"`,
 array `OnAttach += $Items.X` (re-encode correto), tudo round-trip-válido.
 
-## Cobertura vs Windows (TweakXL)
+## Cobertura
 
-A meta é cobrir o que do TweakXL é **viável offline no macOS** (o que é runtime-only
+A meta é cobrir o que dos tweaks declarativos é **viável offline no macOS** (o que é runtime-only
 fica de fora por definição — exige o jogo vivo + hook, não um editor de arquivo).
 
-| Função (TweakXL) | Viável offline? | bwms tweak |
+| Função | Viável offline? | bwms tweak |
 |---|---|---|
 | Ler/inspecionar tweakdb | sim | ✅ `info`/`map`/`sample`/`find`/`dump`/`get`/`record` |
-| Resolver nomes (TweakDBID→texto) | sim | ✅ `tweakdbstr.kark` + CRC32 |
+| Resolver nomes (TweakDBID→texto) | sim | ✅ lista do usuário (`--nomes`/`BWMS_NOMES`) + CRC32 |
 | Editar flat numérico/bool | sim | ✅ |
 | Editar string (CName/CString) | sim | ✅ (VLQ) |
 | Editar ref (TweakDBID/CResource) | sim | ✅ `$Nome`/hex/decimal |
@@ -129,13 +129,13 @@ fica de fora por definição — exige o jogo vivo + hook, não um editor de arq
 | Changeset em lote (`.tweak`) | sim | ✅ `batch` |
 | Regravar `tweakdb.bin` válido | sim | ✅ writer byte-exato |
 | Criar record NOVO clonando outro (copia+ajusta) | sim | ✅ `clone` + `set` |
-| Criar record de tipo do ZERO (flats inéditos) | parcial — precisa do schema RTTI (`InheritanceMap.dat`/`ExtraFlats.dat`) | ⚠️ parcial: `create --class` e `$type` copiam o schema de uma amostra da classe no próprio bin; classe sem amostra, não |
+| Criar record de tipo do ZERO (flats inéditos) | parcial — precisa do schema RTTI | ⚠️ parcial: `create --class` e `$type` copiam o schema de uma amostra da classe no próprio bin; classe sem amostra, não |
 | Herança `$base` entre records | parcial — idem | ✅ `$base` (`apply-yaml`/`apply-toml`) e `Novo : Base` (`apply-tweak`): clone + overrides |
 | Tweaks runtime/scriptáveis | **não** (runtime-only) | — fora do escopo offline |
 
 **Cobertura ≳90% do viável offline.** Está completo: ler tudo, resolver nomes,
 editar qualquer flat EXISTENTE (escalar ou array, todos os tipos), lote, clonar
-records, herança `$base` e regravar válido — o uso real do TweakXL (tunar
+records, herança `$base` e regravar válido — o uso real dos mods de tweak (tunar
 dano/stats/itens/listas e clonar+ajustar). Fora: criar record de uma classe sem
 amostra no bin (flats inéditos), que depende do schema RTTI (o pedaço menos viável
 offline); e tweaks runtime-only, que por definição não cabem num editor de arquivo.

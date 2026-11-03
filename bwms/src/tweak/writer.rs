@@ -1,9 +1,9 @@
 //! Reescrita do `tweakdb.bin` — modelo editável + serializador que reproduz o
 //! layout REAL (o que o reader lê / o jogo carrega), com offsets recalculados.
 //!
-//! Importante: o `TweakDBWriter` do WolvenKit grava um formato **delta** (tabela
-//! de flat types de 12 bytes, sem offsets) que NÃO é o do jogo — por isso aqui
-//! reproduzimos o layout do reader, não portamos o writer. Para ser byte-exato,
+//! Importante: um formato **delta** (tabela de flat types de 12 bytes, sem
+//! offsets) NÃO é o do jogo — por isso aqui reproduzimos o layout do reader.
+//! Para ser byte-exato,
 //! os valores são preservados como **bytes crus** (strings VLQ são ambíguas ao
 //! decodificar); só os offsets são recalculados.
 
@@ -17,7 +17,7 @@ pub struct Model {
     pub parser_version: i32,
     pub record_checksum: u32,
     pub groups: Vec<RawGroup>,
-    /// Índice do `ETweakType` de cada grupo (paralelo a `groups`), para o `set`.
+    /// Índice do tipo de flat (`TWEAK_TYPES`) de cada grupo (paralelo a `groups`), para o `set`.
     pub group_type_index: Vec<usize>,
     /// Se cada grupo é um array (paralelo a `groups`). O `set`/`batch` editam só
     /// escalares — escrever um escalar onde o flat é array corromperia o bloco.
@@ -340,8 +340,8 @@ impl Model {
     }
 
     /// Lê os blobs de elemento de um flat-FONTE (array) pelo nome, exigindo o
-    /// mesmo `ETweakType` do alvo (compatibilidade de elemento). É o lado offline
-    /// do `AppendFrom`/`!merge` do TweakXL.
+    /// mesmo tipo de flat do alvo (compatibilidade de elemento). É o lado offline
+    /// do `!append-from`/`!merge`.
     fn source_array_blobs(&self, src: &str, want_type: usize) -> Result<Vec<Vec<u8>>, String> {
         let src_id = tweak_db_id(src);
         let (sgi, ski) = self
@@ -361,8 +361,8 @@ impl Model {
 
     /// Clona um record: cria `dst` como cópia de `src` — todos os flats
     /// `src.prop` viram `dst.prop` (apontando o mesmo valor) e adiciona a entrada
-    /// de record `dst` com o MESMO type_key de `src`. É o "copia e ajusta" do
-    /// TweakXL, viável offline (não precisa do schema RTTI, só copia o existente).
+    /// de record `dst` com o MESMO type_key de `src`. É o "copia e ajusta",
+    /// viável offline (não precisa do schema RTTI, só copia o existente).
     /// Depois use `set dst.prop ...` pra customizar. Devolve o nº de flats clonados.
     pub fn clone_record(&mut self, src: &str, dst: &str, names: &NameDb) -> Result<usize, String> {
         let src_id = tweak_db_id(src);
@@ -406,7 +406,7 @@ impl Model {
         Ok(cloned)
     }
 
-    /// Cria `dst` do ZERO a partir de uma CLASSE RED (`$type` do TweakXL). O
+    /// Cria `dst` do ZERO a partir de uma CLASSE RED (`$type`). O
     /// schema é inferido offline: acha um record de AMOSTRA da mesma classe
     /// (type_key = murmur3 do nome, ver [`bwms_primitives::record_type_key`]) e o
     /// clona — `dst` herda todos os flats da classe com os valores da amostra,
@@ -438,13 +438,13 @@ impl Model {
 
 // `EditOp` mora em `bwms_primitives::operacoes`: é o tipo de INTENÇÃO (Op::Edit), não do writer
 // offline — o runtime (cp77-console) usa o mesmo parser sem arrastar `writer.rs`/`tweakdb.rs`/`kraken`
-// nem a dependência nativa do Kraken (build.rs+ooz) pro dylib do jogo. Re-exportado aqui (`pub use`)
+// nem a dependência nativa do Kraken (build.rs) pro dylib do jogo. Re-exportado aqui (`pub use`)
 // pra o `mod.rs` do `tweak` enxergar `writer::EditOp`.
 pub use bwms_primitives::operacoes::EditOp;
 
 /// Resultado de aplicar um edit a um flat.
 pub enum SetOutcome {
-    /// Editado; rótulo do tipo (ex.: "CFloat", "array:TweakDBID").
+    /// Editado; rótulo do tipo (ex.: "Float", "array:TweakDBID").
     Applied(String),
     /// Nenhum flat com esse nome neste tweakdb.
     NotFound,
@@ -459,71 +459,85 @@ pub struct OpResult {
     pub detail: String,
 }
 
-/// Aplica as ops de um arquivo (de `tweakxl::interpret_from`/`tweak_source::parse`) a um Model: o conjunto de um arquivo só, sem mapa de
+/// Aplica as ops de um arquivo (de `tweaks::interpret_from`/`tweak_source::parse`) a um Model: o conjunto de um arquivo só, sem mapa de
 /// herança. Um resultado por record, atribuição e mutação.
 pub fn apply_ops(model: &mut Model, names: &NameDb, ops: Vec<Op>) -> Vec<OpResult> {
     apply_conjunto(model, names, Conjunto::montar([ops]), None)
 }
 
-/// Aplica um [`Conjunto`] nas fases do commit do TweakXL, a mesma ordem do runtime (`cp77-console/src/tweakdb/mod.rs::aplicar_conjunto`):
-/// records; a mutação do base nos clones e a re-herança pelo mapa (perguntas sobre o `tweakdb.bin` de antes); atribuições (flat que não
-/// existe nasce com o tipo da operação); mutações, todas calculadas antes de qualquer uma ser gravada.
+/// Aplica um [`Conjunto`] (vários arquivos de tweak juntos) ao modelo e devolve um resultado por operação.
+/// A ordem das fases é a do aplicador do runtime: records, mutações dos clones, herança do mapa, atribuições, arrays novos e mutações.
 pub fn apply_conjunto(model: &mut Model, names: &NameDb, mut conjunto: Conjunto, mapa: Option<&MapaDeHeranca>) -> Vec<OpResult> {
-    let mut out = Vec::new();
+    let mut resultados = Vec::new();
+
     for op in &conjunto.registros {
-        out.push(match op {
+        let (desc, saida) = match op {
             Op::Clone { record, base } => match model.clone_record(base, record, names) {
-                Ok(n) => OpResult { desc: format!("$base {record} ⟵ {base}"), ok: true, detail: format!("{n} flats clonados") },
-                Err(e) => OpResult { desc: format!("$base {record}"), ok: false, detail: e },
+                Ok(n) => (format!("$base {record} ⟵ {base}"), Ok(format!("{n} flats clonados"))),
+                Err(e) => (format!("$base {record}"), Err(e)),
             },
-            Op::Create { record, class } => match model.create_record(record, class, names) {
-                Ok((sample, n)) => OpResult {
-                    desc: format!("$type {record} ({class})"),
-                    ok: true,
-                    detail: format!("criado de amostra {sample} — {n} flats"),
-                },
-                Err(e) => OpResult { desc: format!("$type {record} ({class})"), ok: false, detail: e },
-            },
+            Op::Create { record, class } => (
+                format!("$type {record} ({class})"),
+                model
+                    .create_record(record, class, names)
+                    .map(|(amostra, n)| format!("criado de amostra {amostra} — {n} flats")),
+            ),
             Op::Edit { .. } | Op::Criar { .. } => continue,
+        };
+        resultados.push(match saida {
+            Ok(detail) => OpResult { desc, ok: true, detail },
+            Err(detail) => OpResult { desc, ok: false, detail },
         });
     }
+
     conjunto.herdar_mutacoes_dos_clones();
+
+    // A herança pergunta pelo tweakdb de ANTES das atribuições: o filho "tinha o mesmo valor" do base original.
     if let Some(mapa) = mapa {
         let n = conjunto.herdar_do_mapa(mapa, &ConsultaDoModel(model));
-        out.push(OpResult { desc: "herança do mapa".into(), ok: true, detail: format!("{n} flat(s) de descendentes") });
+        resultados.push(OpResult { desc: "herança do mapa".into(), ok: true, detail: format!("{n} flat(s) de descendentes") });
     }
+
     for a in &conjunto.atribuicoes {
-        out.push(match (model.apply(&a.flat, &EditOp::Assign(a.valor.clone())), &a.tipo) {
-            (SetOutcome::Applied(ty), _) => OpResult { desc: a.flat.clone(), ok: true, detail: ty },
-            (SetOutcome::NotFound, Some(tipo)) => match model.criar_flat(&a.flat, tipo, &a.valor) {
-                Ok(()) => OpResult { desc: a.flat.clone(), ok: true, detail: format!("flat novo {tipo}") },
-                Err(e) => OpResult { desc: a.flat.clone(), ok: false, detail: e },
+        let (ok, detail) = match model.apply(&a.flat, &EditOp::Assign(a.valor.clone())) {
+            SetOutcome::Applied(ty) => (true, ty),
+            SetOutcome::NotFound => match &a.tipo {
+                Some(tipo) => match model.criar_flat(&a.flat, tipo, &a.valor) {
+                    Ok(()) => (true, format!("flat novo {tipo}")),
+                    Err(e) => (false, e),
+                },
+                None => (false, "flat inexistente".to_string()),
             },
-            (SetOutcome::NotFound, None) => OpResult { desc: a.flat.clone(), ok: false, detail: "flat inexistente".into() },
-            (SetOutcome::NotEditable { ty, reason }, _) => OpResult { desc: a.flat.clone(), ok: false, detail: format!("{ty}: {reason}") },
-        });
+            SetOutcome::NotEditable { ty, reason } => (false, format!("{ty}: {reason}")),
+        };
+        resultados.push(OpResult { desc: a.flat.clone(), ok, detail });
     }
+
+    // Array que só existe pela mutação nasce vazio, para a cadeia ter onde anexar.
     for m in &conjunto.mutacoes {
-        if model.locate(tweak_db_id(&m.flat)).is_none() {
-            if let Some(tipo) = m.tipo.as_deref().filter(|t| t.starts_with("array:")) {
-                if let Err(e) = model.criar_flat(&m.flat, tipo, "[]") {
-                    out.push(OpResult { desc: m.flat.clone(), ok: false, detail: e });
-                }
-            }
+        let Some(tipo) = m.tipo.as_deref().filter(|t| t.starts_with("array:")) else { continue };
+        if model.locate(tweak_db_id(&m.flat)).is_some() {
+            continue;
+        }
+        if let Err(e) = model.criar_flat(&m.flat, tipo, "[]") {
+            resultados.push(OpResult { desc: m.flat.clone(), ok: false, detail: e });
         }
     }
-    let calculadas: Vec<(String, Result<(usize, usize, Vec<u8>, usize), String>)> =
-        conjunto.mutacoes.iter().map(|m| (m.flat.clone(), model.mutacao_calculada(&conjunto, &m.flat))).collect();
-    for (flat, r) in calculadas {
-        out.push(match r {
+
+    // Calcula todas antes de gravar: `!append-from` lê a fonte como estava antes das mutações do conjunto.
+    let calculadas: Vec<_> = conjunto.mutacoes.iter().map(|m| model.mutacao_calculada(&conjunto, &m.flat)).collect();
+    for (m, calculada) in conjunto.mutacoes.iter().zip(calculadas) {
+        match calculada {
             Ok((gi, ki, bytes, n)) => {
+                let rotulo = model.label(gi);
                 model.gravar_valor(gi, ki, bytes);
-                OpResult { desc: flat, ok: true, detail: format!("{} com {n} elemento(s)", model.label(gi)) }
+                resultados.push(OpResult { desc: m.flat.clone(), ok: true, detail: format!("{rotulo} com {n} elemento(s)") });
             }
-            Err(e) => OpResult { desc: flat, ok: false, detail: e },
-        });
+            Err(e) => resultados.push(OpResult { desc: m.flat.clone(), ok: false, detail: e }),
+        }
     }
-    out
+
+    resultados
 }
 
 /// As perguntas da re-herança respondidas pelo `tweakdb.bin`: mesmo valor = mesmo índice no pool do tipo.
@@ -577,7 +591,7 @@ impl Model {
         }
     }
 
-    /// Cria o flat `name`, que não existe, com o tipo `tipo` e o valor `texto` (o `AssignFlat` do TweakXL num flat inexistente).
+    /// Cria o flat `name`, que não existe, com o tipo `tipo` e o valor `texto` (atribuição num flat inexistente).
     pub fn criar_flat(&mut self, name: &str, tipo: &str, texto: &str) -> Result<(), String> {
         let id = tweak_db_id(name);
         if self.locate(id).is_some() {
@@ -690,7 +704,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bwms_primitives::tweakxl::{interpret_from, yaml};
+    use bwms_primitives::tweaks::{interpret_from, yaml};
 
     fn i32s(v: &[i32]) -> Vec<u8> {
         tweakdb::encode_array(&v.iter().map(|x| x.to_le_bytes().to_vec()).collect::<Vec<_>>())

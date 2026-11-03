@@ -1,17 +1,17 @@
 // bwms-aparencia.reds — funções do BWMS sobre aliases de `resource.link`, aparência dinâmica, tags visuais, override de aparência e
-// deslocamento de roupa. O ArchiveXL resolve esses problemas por dentro, sem expor a script, e nenhum mod do Windows as chama: por isso
-// moram numa classe do BWMS, e `ArchiveXL` fica só com a fachada da referência (`ponte-fachada-de-recursos.reds`).
+// deslocamento de roupa. Nenhum mod do Windows chama essas funções: por isso
+// moram numa classe do BWMS, e a classe-fachada de recursos fica só com os métodos que os mods chamam (`ponte-fachada-de-recursos.reds`).
 //
 // `RegisterLink` registra um par de `resource.link` na mesma tabela do `.xl`; `ResourcePath` é só o hash, então os aliases saem como
 // `Uint64` e a lista vira `GetAliasCount` + `GetAliasHash(índice)`.
 //
-// Aparência dinâmica (o `DynamicAppearanceController` do ArchiveXL):
+// Aparência dinâmica:
 //   - `IsDynamicValue`: valor dinâmico começa com `*`. `ProcessDynamicString` troca `{attrName}` por `attrValue` (um atributo só) e
 //     devolve vazio se a string não resolve; `ExpandResourcePath` é o mesmo com o atributo `material`.
 //   - `ResolveName`/`ResolvePath`: resolvem os atributos pelo estado da entidade (gênero, câmera, sufixos de aparência, customização, cor
 //     do cabelo). Assinatura reduzida `(entity, valor)`: sem a variante da referência e sem o item equipado no estado.
 //   - `IsDynamicAppearanceRef`/`AppearanceRef*` leem a referência `nome!v1!v2&c1&c2`; `IsDynamicAppearanceName`/`AppearanceName*` leem o
-//     nome `nome!variante[+parte[=valor]]...[&condição...][%contexto]` — o contexto só vale no fim da string, como no ArchiveXL. Os
+//     nome `nome!variante[+parte[=valor]]...[&condição...][%contexto]` — o contexto só vale no fim da string. Os
 //     hashes saem como `Uint64`.
 //   - `AppearanceMatchesReference`: o `MatchReference` sem estado de entidade, então referência com condição nunca casa.
 //   - `IsUniqueAppearanceName`: falso para `default`, `random` e `empty_appearance_default`.
@@ -49,7 +49,7 @@ public abstract native class BwmsAparencia {
   public static native func AppearanceMatchesReference(appearanceName: String, reference: String) -> Bool;
   public static native func GetBaseAppearanceName(name: String) -> String;
 
-  // O estado de aparência por entidade (`EntityState` do ArchiveXL). `LinkComponentToPart`/`LinkPartToAppearanceName`/
+  // O estado de aparência por entidade (`EntityState`).`LinkComponentToPart`/`LinkPartToAppearanceName`/
   // `AddAppearanceOverrideForComponent` montam o estado; sem ele, `ApplyAppearanceOverride` devolve `false` e
   // `ToggleConditionalComponents` pula os componentes condicionais. `ApplyAppearanceOverride` grava a aparência do override no
   // componente e refaz a aparência; `ToggleConditionalComponents` liga e desliga os componentes condicionais da entidade pelo
@@ -64,8 +64,8 @@ public abstract native class BwmsAparencia {
 
   // Deslocamento de roupa por entidade e recurso (`AddOffsetOverride`/`RemoveOffsetOverrides`/`GetOffsetOverride` do `EntityState`).
   // Só o registro do BWMS muda, nunca a memória do motor; quem lê é a montagem da roupa (`ComputePlayerGarment`), com
-  // `ArchiveXL.EnableGarmentOffsets` ligado. `resourcePath` é o hash; `modHash` identifica quem registrou, pra desfazer só o dele ao desequipar.
-  // BACKLOG: o hook do `ComputePlayerGarment` só é instalado pelo teste do `#22` (selftest); fora dele os deslocamentos não chegam à roupa.
+  // `EnableGarmentOffsets` da fachada de recursos ligado. `resourcePath` é o hash; `modHash` identifica quem registrou, pra desfazer só o dele
+  // ao desequipar.
   public static native func AddOffsetOverride(entity: wref<Entity>, modHash: Uint64, resourcePath: Uint64, offset: Int32) -> Bool;
   public static native func RemoveOffsetOverrides(entity: wref<Entity>, modHash: Uint64) -> Uint32;
   public static native func GetOffsetOverride(entity: wref<Entity>, resourcePath: Uint64) -> Int32;

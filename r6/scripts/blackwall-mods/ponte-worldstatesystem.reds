@@ -1,13 +1,12 @@
-// ponte-worldstatesystem.reds — Codeware `#84` (`WorldStateSystem`).
+// ponte-worldstatesystem.reds — `WorldStateSystem`.
 //
-// A classe da referência é um sistema de jogo nativo novo; aqui é um objeto de script sem estado com os mesmos métodos e aliases, criado pelo
+// Não é um sistema de jogo nativo novo: é um objeto de script sem estado com os mesmos métodos e aliases, criado pelo
 // `GameInstance.GetWorldStateSystem()` (todo o estado fica no motor). Tudo é native do BWMS (mundo/mod.rs, bloco do `#84`), que acha os sistemas da
 // sessão pelo lado nativo — o `GetCommunitySystem(GetGameInstance())` do script volta nulo quando chamado pelo tick do BWMS:
 // - `IsReady`/`GetStreamingWorld`: `QuestsSystem` com a fase raiz e o `worldStreamingWorld` do runtime system 27 (dentro de um `BwmsSerializable`).
-// - `ToggleNode`/`ToggleVariant`: `questWorldDataManagerNodeDefinition` sintético executado pelo `ExecuteNode` do motor na fase raiz, como o
-//   `QuestPhaseExecutor` da referência.
+// - `ToggleNode`/`ToggleVariant`: `questWorldDataManagerNodeDefinition` sintético executado pelo `ExecuteNode` do motor na fase raiz.
 // - Comunidade e spawner: o NodeRef resolvido pelo `ResolveNodeRef` vanilla, os slots do `CommunitySystem` do motor (`#77`) e o
-//   `CommunitySystem::Update(true)` do motor depois, como a referência. O spawner volta como o `BwmsPopulationSpawner` do `#80`.
+//   `CommunitySystem::Update(true)` do motor depois. O spawner volta como o `BwmsPopulationSpawner` do `#80`.
 
 native func BwmsWorldStateIsReady() -> Bool
 native func BwmsWorldStateStreamingWorld() -> ref<IScriptable>

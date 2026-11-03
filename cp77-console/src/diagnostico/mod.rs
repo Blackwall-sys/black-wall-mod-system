@@ -71,7 +71,7 @@ pub(crate) unsafe extern "C" fn tramp_ping(_ctx: *mut c_void, _frame: *mut c_voi
     write_bool_ret(out, true);
 }
 
-/// Codeware `#118`: quantos eventos têm ouvinte agora, de instância ou estático — os que a referência mantém ativados (`ActivateEvent` no 1º ouvinte,
+/// Quantos eventos têm ouvinte agora, de instância ou estático — os que ficam ativados (`ActivateEvent` no 1º ouvinte,
 /// `DeactivateEvent` quando sai o último). Lê a tabela que decide os hooks (`has_listener_for`), não um estado de instalação: conta eventos, não hooks.
 #[cfg(any(test, feature = "devtools"))]
 pub fn eventos_ativos() -> usize {
@@ -93,12 +93,12 @@ pub(crate) unsafe fn register_scriptref_proof(reg: &Registry, proto: *mut c_void
         crate::log_dev!("[reg] register_scriptref_proof: compose_params_from_types falhou (script_ref:String)");
         false
     };
-    crate::log_dev!("[reg] register_all: red4ext-323 BwmsScriptRefStrEcho={ok}");
+    crate::log_dev!("[reg] register_all: BwmsScriptRefStrEcho={ok}");
 }
 
 pub(crate) unsafe fn register_ativacao_118_utils(reg: &Registry, proto: *mut c_void) {
     let a = registro_de_prova!(register_argful_by_types(reg, proto, &["String", "Int32"], "BwmsHookAtivacao", "BwmsHookAtivacao", corpo_de_prova!(tramp_hook_ativacao)));
-    crate::log_dev!("[reg] register_all: Codeware.#118 HookAtivacao={a}");
+    crate::log_dev!("[reg] register_all: HookAtivacao={a}");
 }
 
 pub(crate) unsafe fn register_variant_natives(reg: &Registry, proto: *mut c_void) {
@@ -251,7 +251,7 @@ pub(crate) unsafe fn register_a11_natives(reg: &Registry, proto: *mut c_void) {
 pub(crate) const FUNC_POD_SIZE: usize = 0x100;
 
 /// `BwmsPuppetStateArmRecovery(self: ref<IScriptable>) -> Bool` — 2026-08-02, iteração 2 do
-/// `axl-puppet-state-apply`. A saída IMEDIATA (`this.SwitchToScenario(Idle)` na mesma call-chain
+/// estado do puppet. A saída IMEDIATA (`this.SwitchToScenario(Idle)` na mesma call-chain
 /// síncrona de `OnEnterScenario`) já provou escapar o soft-lock sem crash, mas é rápida demais:
 /// zero disparo real confirmado de `GenitalsController::OnAttach`/`HairstyleController::OnDetach`
 /// (o puppet-setup assíncrono do `OpenMenu` nunca chega a rodar). Esta native captura o ponteiro
@@ -299,7 +299,7 @@ pub(crate) unsafe fn puppetstate_recovery_tick(reg: &Registry) {
     }
 }
 
-/// axl-garment-apply / axl-transmog-apply (2026-08-03, /goal): 4ª arquitetura, evita os 2 bugs reais
+/// Garment/transmog (2026-08-03, /goal): 4ª arquitetura, evita os 2 bugs reais
 /// já diagnosticados nesta madrugada (ver HISTORICO.md cont.17/19): (1) 2 `call_func` TOP-LEVEL
 /// consecutivas retornando `ref<T>` crasham na 2ª (`equiprawv2`); (2) 1 native com 2 args
 /// `handle:IScriptable` chamado ANINHADO de bytecode crasha no despacho (`equiprawonce`/`equipctxonce`).
@@ -344,7 +344,7 @@ pub(crate) fn entity_recordid_targets_allow(criteria: &[u64], entity_record_id: 
 /// `bwms_primitives::targets::component_bate`, chamada pelo `alvo_casa`, que BLOQUEIA quando o alvo
 /// tem campo setado e o componente do evento não resolve (alvo todo curinga casa sem ler o
 /// componente); aqui a falta de dado deixa passar.
-/// A fonte real (`ComponentTarget.hpp::Matches`) trata `ID`/`Name` como 2 checks AND dentro da MESMA
+/// O `Matches` trata `ID`/`Name` como 2 checks AND dentro da MESMA
 /// instância — mas cada instância nossa (via `.ID(...)`/`.Name(...)`, 2 factories SEPARADAS) só
 /// popula UM dos 2 campos por vez, e o dispatcher real (`CallbackSystemHandler::operator()`,
 /// `std::ranges::find_if`) já usa semântica OR entre TODOS os targets da lista (confirmado lendo o
@@ -369,7 +369,7 @@ pub(crate) fn component_target_targets_allow(
     }
 }
 
-/// Codeware `#136` (`InputTarget::Matches`) — só de teste (decisão do dono D5): o despacho NÃO usa
+/// `InputTarget::Matches` — só de teste (decisão do dono D5): o despacho NÃO usa
 /// esta função. A regra viva é `bwms_primitives::targets::input_bate`, chamada pelo `alvo_casa` com os
 /// critérios de `inputtarget_criteria`, e o `alvo_casa` BLOQUEIA quando o alvo tem campo setado e o evento não
 /// tem tecla ou ação registrada (alvo `(IK_NONE, IACT_NONE)` casa sem ler o evento); aqui a falta de
@@ -383,7 +383,7 @@ pub(crate) fn component_target_targets_allow(
 /// descida e `IACT_RELEASE` na subida), então `action` passou a ser dado REAL e a razão de
 /// excluí-lo deixou de existir.
 ///
-/// As 2 guardas do C++ (`InputTarget.hpp::Matches`), cada uma com sentinela próprio:
+/// As 2 guardas do `Matches`, cada uma com sentinela próprio:
 /// `if (key != IK_None && key != event->key) return false;` e
 /// `if (action != IACT_None && action != event->action) return false;`. Com o evento resolvido,
 /// esta função decide igual; a diferença é só o evento sem dado.
@@ -411,7 +411,7 @@ pub(crate) fn input_target_targets_allow(
     })
 }
 
-/// Codeware `#137` (`ResourceTarget::Matches`) — só de teste (decisão do dono D5): o despacho NÃO
+/// `ResourceTarget::Matches` — só de teste (decisão do dono D5): o despacho NÃO
 /// usa esta função. A regra viva, com `Path` e `Type`, está no `alvo_casa` e BLOQUEIA quando o
 /// evento não tem caminho; aqui a falta de dado deixa passar.
 #[cfg(test)]
@@ -425,13 +425,12 @@ pub(crate) fn resource_target_targets_allow(path_criteria: &[u64], event_path: O
     }
 }
 
-/// Codeware `#25` (`EntityBuilderWrapper.hpp`/`EntityBuilderWrapper.reds`, 2026-08-18, madrugada
+/// `EntityBuilderWrapper` (2026-08-18, madrugada
 /// continuação 20 — item NUNCA tocado desde o catálogo original de 2026-08-07, 0/21 métodos
-/// portados): fonte real (`App/Entity/EntityBuilderWrapper.hpp`) confirma que TODOS os 21 métodos
+/// feitos): TODOS os 21 métodos
 /// (12 em `EntityBuilderWrapper` + 5 em `EntityBuilderTemplateWrapper` + 4 em
 /// `EntityBuilderAppearanceWrapper`) são leitura pura de campo sobre `Red::EntityBuilder`
-/// (`Red/EntityBuilder.hpp`, offsets confirmados por `RED4EXT_ASSERT_OFFSET` do próprio autor:
-/// `appearance@0x20`/`appearances@0x80`/`entityTemplate@0x90`/`request@0xA0`/`components@0xC0`/
+/// (offsets confirmados: `appearance@0x20`/`appearances@0x80`/`entityTemplate@0x90`/`request@0xA0`/`components@0xC0`/
 /// `visualTags@0xF8`/`flags@0x110`) — ZERO `Core::RawFunc`, exceto `ExtractComponentsJob`/
 /// `ScheduleExtractComponentsJob` (agendamento assíncrono, fora do escopo desta rodada — nenhum
 /// método exposto ao redscript precisa deles). Nenhuma das 3 classes é CMesh-trap: todas
@@ -530,7 +529,7 @@ pub unsafe fn reflection_live_once(player: *mut c_void) {
     crate::log(&rtti::reflection_probe_cls(cls, "player(class_of)", player));
 }
 
-/// Igual a [`res_loader_signature`], mas para o layout que o **SDK** documenta: `tokens` no offset
+/// Igual a [`res_loader_signature`], mas para o layout **Windows** documentado: `tokens` no offset
 /// `0x00` da struct (`indexTable@+0x00`, `size@+0x08`, `capacity@+0x0C`, `nodes@+0x10`,
 /// stride@`+0x1C`), com `failed`@0x30 e `tokenLock`@0x40 depois.
 ///
@@ -566,7 +565,7 @@ pub(crate) fn res_loader_signature_sdk(win: &[u8], min_size: u32) -> Option<(u32
 ///
 /// A função trava um spinlock em `this+0x18` e anda um **HashMap do RED** em `this+0x20`:
 /// `indexTable@+0x20`, `size@+0x28`, `capacity@+0x2c`, `nodes@+0x30`, stride-do-nó@`+0x3c`.
-/// O SDK diz que `ResourceLoader::FindToken` é LOOKUP nesse mapa — então achar o objeto vale mais
+/// `ResourceLoader::FindToken` é LOOKUP nesse mapa — então achar o objeto vale mais
 /// que resolver a função: vira leitura de dado.
 ///
 /// Núcleo PURO (recebe a janela de 0x40 bytes já lida) porque scan de memória viva é onde um
@@ -625,7 +624,7 @@ pub(crate) fn wrapped_array_elem_offsets(cap: u32, size: u32, stride: usize, max
     (0..(size as usize).min(max)).map(|i| i * stride).collect()
 }
 
-/// Codeware `#199`: núcleo de `probe_resource_helper_type11` contra qualquer instância — a sintética
+/// Núcleo de `probe_resource_helper_type11` contra qualquer instância — a sintética
 /// do `res11probe` ou a REAL do `res11rec` (record de TweakDB vivo, achado via `get_records_of_class`).
 /// Parametrizado pelo `obj`/label do log, pra não duplicar a leitura de token.
 #[cfg(feature = "devtools")]
@@ -674,7 +673,7 @@ pub(crate) unsafe fn register_targets_utils(reg: &Registry, proto: *mut c_void) 
     let a = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64", "Uint64", "Uint64", "Uint64"], "BwmsTargetInkWidgetMatches", "BwmsTargetInkWidgetMatches", corpo_de_prova!(tramp_target_inkwidget)));
     let b = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64", "Uint64", "Uint64", "Uint64"], "BwmsTargetComponentMatches", "BwmsTargetComponentMatches", corpo_de_prova!(tramp_target_component)));
     let c = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint32", "Uint32", "Uint32", "Uint32"], "BwmsTargetInputMatches", "BwmsTargetInputMatches", corpo_de_prova!(tramp_target_input)));
-    crate::log_dev!("[reg] register_all: Codeware.#132/#135/#136 InkWidget={a} Component={b} Input={c}");
+    crate::log_dev!("[reg] register_all: alvos InkWidget={a} Component={b} Input={c}");
 }
 
 /// Maior clonagem desde o boot: objetos clonados e handles que ficaram no original pelo teto.
@@ -896,7 +895,7 @@ pub(crate) const COMMUNITY_HASHES_ARQUIVO: &str = ".bwms-community-hashes.txt";
 #[cfg(feature = "devtools")]
 pub(crate) static RECORDS_PRE_RESOLVIDOS: [AtomicUsize; 2] = [const { AtomicUsize::new(0) }; 2];
 
-/// Codeware `#129`/`PlayerSpawnedHook`: o `Session/Ready` do spawn do objeto principal do jogador, anotado pelo hook `selftest::player_main_object_spawned_hook` (a thread do
+/// O `Session/Ready` do spawn do objeto principal do jogador, anotado pelo hook `selftest::player_main_object_spawned_hook` (a thread do
 /// spawner não é conhecida) e despachado aqui, na thread do jogo. `restored` é o que o hook anotou (a carga de save marcada pelo `OnGameLoad`);
 /// `pregame` vem do script `BwmsSessaoEstado`, o `IsPreGame` do handler de pedidos do sistema (o que a referência lê no `OnWorldAttached`). Como a
 /// referência, sessão carregada de save não despacha aqui (o dela sai do `OnGameRestored`). Cada despacho fica em `C129_DESPACHOS` como
@@ -953,7 +952,7 @@ pub(crate) fn es20_desligar_parte(entidade: u64, parte: u64) {
     }
 }
 
-/// O estado de aparência que o smoke de `BwmsAparencia` (`codeware-componentwrapper-smoke.reds`) muda no componente do V: o `ComponentState` do nome base,
+/// O estado de aparência que o smoke de `BwmsAparencia` (o do component wrapper) muda no componente do V: o `ComponentState` do nome base,
 /// a parte ligada a ele e o `ResourceState` da parte de teste. `BwmsAparencia` grava na loja que o pipeline do #20 lê; sem a volta, o override do smoke
 /// seria aplicado em todo `ReassembleAppearance` do V.
 struct Es22EstadoGuardado {
@@ -1004,7 +1003,7 @@ pub(crate) fn es22_restaurar_estado() -> bool {
     true
 }
 
-/// O estado que o smoke das tags visuais (`archivexl-tagoverride-multimod-smoke.reds`) muda na entidade: o `ComponentState` de cada nome das 14
+/// O estado que o smoke das tags visuais (override de tag com vários mods) muda na entidade: o `ComponentState` de cada nome das 14
 /// tags. A remoção deixa o estado com `ChangesChunkMask` (a original volta a cada aplicação, como na referência); sem a volta, todo
 /// `ReassembleAppearance` do V no pipeline do #20 gravaria a máscara desses componentes fora do teste.
 struct Es20TagsGuardadas {
@@ -1015,21 +1014,21 @@ struct Es20TagsGuardadas {
 
 static ES20_TAGS_GUARDADAS: Mutex<Option<Es20TagsGuardadas>> = Mutex::new(None);
 
-/// Guarda o estado dos nomes das 14 tags na entidade; uma guarda nova troca a anterior.
+/// Guarda o estado de todos os nomes da entidade na loja; uma guarda nova troca a anterior.
 pub(crate) fn es20_guardar_tags(entidade: u64) -> bool {
-    let mut nomes: Vec<u64> = TAGS_EMBUTIDAS.iter().flat_map(|(_, entradas)| entradas.iter().map(|(nome, _, _)| nome.valor())).collect();
-    nomes.sort_unstable();
-    nomes.dedup();
-    let estados = nomes.into_iter().map(|nome| (nome, es20_estado(entidade, nome))).collect();
+    let Ok(m) = es20_componentes().lock() else { return false };
+    let estados = m.iter().filter(|((e, _), _)| *e == entidade).map(|((_, nome), s)| (*nome, Some(s.clone()))).collect();
+    drop(m);
     let Ok(mut g) = ES20_TAGS_GUARDADAS.lock() else { return false };
     *g = Some(Es20TagsGuardadas { entidade, estados });
     true
 }
 
-/// Volta o que `es20_guardar_tags` guardou: nome sem estado na guarda sai da loja. `false` sem guarda.
+/// Volta o que `es20_guardar_tags` guardou: a entidade fica na loja só com os nomes e estados da guarda. `false` sem guarda.
 pub(crate) fn es20_restaurar_tags() -> bool {
     let Some(g) = ES20_TAGS_GUARDADAS.lock().ok().and_then(|mut g| g.take()) else { return false };
     let Ok(mut m) = es20_componentes().lock() else { return false };
+    m.retain(|(e, _), _| *e != g.entidade);
     for (nome, estado) in g.estados {
         match estado {
             Some(estado) => {
@@ -1137,75 +1136,6 @@ pub(crate) unsafe fn regmethod_selftest(reg: &Registry) {
     crate::log_dev!(
         "[regmethod-test] T2 register_method real: {class}.BwmsRegTest ok={ok2} size {size_before}->{size_after} (esperado +1)"
     );
-}
-
-/// Núcleo PURO (sem `unsafe`, sem mutex, sem leitura de memória nativa) da semântica de
-/// `EntityState::ApplyOffsetOverrides` (`States.cpp:734-745`): dado um snapshot já resolvido
-/// (resource_path_hash -> offset) e a lista ORDENADA de resource hashes que `ComputePlayerGarment`
-/// recebeu, devolve os offsets na MESMA ordem (0 pra qualquer hash sem override). 100% testável
-/// offline — ver `es67_offset_override_tests` abaixo.
-#[cfg(any(test, feature = "devtools"))]
-pub(crate) fn apply_offset_overrides_from(snapshot: &std::collections::HashMap<u64, i32>, resources: &[u64]) -> Vec<i32> {
-    resources.iter().map(|p| snapshot.get(p).copied().unwrap_or(0)).collect()
-}
-
-/// Wrapper `unsafe` de `apply_offset_overrides_from`: snapshota `ES67_RESOURCE_OFFSET` pra
-/// `entity` e aplica o núcleo puro. Usado (a) pelo probe observe-only de `ComputePlayerGarment`
-/// (`selftest.rs`, só pra LOG — nunca escreve de volta em `aOffsets`) e (b) disponível pra uma
-/// futura native `ArchiveXL.ApplyOffsetOverrides`-com-array (fora de escopo desta rodada — exigiria
-/// marshalling de `array<Uint64>`/`array<Int32>`, categoria de risco que já crashou este projeto
-/// uma vez, `TweakXL #43`/array-retorno; adiado de propósito, mesma disciplina já aplicada a
-/// `#21`/`ExpandResourcePath` acima).
-#[cfg(any(test, feature = "devtools"))]
-pub(crate) unsafe fn run_apply_offset_overrides(entity: u64, resources: &[u64]) -> Vec<i32> {
-    let snapshot: std::collections::HashMap<u64, i32> = ES67_RESOURCE_OFFSET
-        .lock()
-        .map(|g| {
-            g.iter()
-                .filter(|((e, _), _)| *e == entity)
-                .map(|((_, p), s)| (*p, s.get_overridden_offset()))
-                .collect()
-        })
-        .unwrap_or_default();
-    apply_offset_overrides_from(&snapshot, resources)
-}
-
-/// **ESCRITA REAL (rodada 44, 2026-08-16)** — porte fiel de `EntityState::ApplyOffsetOverrides`
-/// (`States.cpp:734-745`, ver bloco de comentário grande acima, "RODADA 44"): `aOffsets.Clear();
-/// for (path : aResources) aOffsets.PushBack(GetOffsetOverride(path));`. Usa os primitivos novos
-/// (`dynarray_clear`+`dynarray_push_i32`) — MESMA técnica já em produção pra
-/// `GameObject.AddTag`/`CClass.props`/`CClass.funcs`/`ReflectionEnum.AddConstant`
-/// (`dynarray_push_ptr`/`dynarray_push_handle16`), só com stride de 4 bytes (`int32_t`).
-///
-/// `aoffsets_ptr` é o ponteiro CRU pro `DynArray<int32_t>` real (arg `offsets` de
-/// `garment_computeplayergarment_probe`/`ComputePlayerGarment`, SEM indireção de `SharedPtr` —
-/// diferente de `aData`). Devolve `None` se `aoffsets_ptr` for ilegível ou se algum `PushBack`
-/// falhar no meio (aborta cedo — nunca deixa o array num estado parcial silencioso sem avisar).
-/// Devolve `Some(computed)` com os valores REALMENTE escritos (mesmo vetor que
-/// `run_apply_offset_overrides` já computava, agora também persistido em memória).
-///
-/// **Chamada só atrás do marcador de escrita dedicado `~/.bwms-garmentprobe-write`
-/// (`selftest.rs::try_write_offsets_synthetic`) — NUNCA em produção/caminho padrão.**
-#[cfg(any(test, feature = "devtools"))]
-pub(crate) unsafe fn run_apply_offset_overrides_write(entity: u64, aoffsets_ptr: u64, resources: &[u64]) -> Option<Vec<i32>> {
-    if aoffsets_ptr == 0 || !crate::memoria::is_readable(aoffsets_ptr as *const c_void, 0x10) {
-        crate::log_dev!("[reg] #67 run_apply_offset_overrides_write: aoffsets_ptr nulo/ilegível, abortado");
-        return None;
-    }
-    let computed = run_apply_offset_overrides(entity, resources);
-    if !dynarray_clear(aoffsets_ptr as *mut c_void) {
-        crate::log_dev!("[reg] #67 run_apply_offset_overrides_write: dynarray_clear falhou, abortado");
-        return None;
-    }
-    for &v in &computed {
-        if dynarray_push_i32(aoffsets_ptr as *mut c_void, v).is_none() {
-            crate::log_dev!(
-                "[reg] #67 run_apply_offset_overrides_write: dynarray_push_i32({v}) falhou no meio do replay — array pode ter ficado PARCIAL"
-            );
-            return None;
-        }
-    }
-    Some(computed)
 }
 
 /// Todas as entradas `(chave, valor)` do mapa, pelos buckets e cadeias (no máximo `size`).
@@ -1352,7 +1282,7 @@ pub(crate) static COPYTEST_ARMED: AtomicBool = AtomicBool::new(false);
 pub(crate) static EQUIP_DEFERRED_DONE: AtomicBool = AtomicBool::new(false);
 
 
-/// `red4ext-reloc-universal` (in-game) — prova o relocador arm64 num prólogo REAL do jogo com o
+/// Relocador universal (in-game) — prova o relocador arm64 num prólogo REAL do jogo com o
 /// caso DIFÍCIL (BL, PC-relativo). Alvo: `game::MuppetStateMachines<MuppetLogicStateMachineState>
 /// ::~dtor` @vm 0x104697a94 — prólogo [stp x29,x30,[sp,#-0x10]! | mov x29,sp | BL <helper> | ldp
 /// x29,x30]. NO MENU esse dtor de IA de NPC está dormente (mundo não carregado) → hookar+dumpar+
@@ -1447,7 +1377,7 @@ pub(crate) unsafe fn prove_relocreal() {
     );
 }
 
-/// `tweakxl-registername` — prova a fn nativa PURA de derive de TweakDBID (`CreateTweakDBID` core,
+/// Registro de nome de tweak — prova a fn nativa PURA de derive de TweakDBID (`CreateTweakDBID` core,
 /// achada por RE 2026-07-16 @vmaddr 0x102176964): `u64 derive(const char* data, u32 len, u64 base)`
 /// = CRC32-IEEE seeded com length telescópico. base=0 → `tweak_db_id(name)` (nome→id, o forward que
 /// o gap pede: "resolver 'Items.X' → id no jogo vivo"). base=parent_id → `tweak_db_id_derive`.
@@ -1477,7 +1407,7 @@ pub(crate) unsafe fn prove_derive() {
     let exp2_full = bwms_primitives::tweak_db_id("Items.Preset_Lexington.Cool");
     let ok2 = got2 == exp2 && got2 == exp2_full;
     let verdict = if ok1 && ok2 {
-        ">>> TWEAKXL-REGISTERNAME OK: derive nativo do jogo == bwms_primitives (nome→id forward provado no jogo vivo) <<<"
+        ">>> REGISTERNAME OK: derive nativo do jogo == bwms_primitives (nome→id forward provado no jogo vivo) <<<"
     } else {
         "FALHA/verificar: derive nativo divergiu do bwms_primitives"
     };
@@ -1486,9 +1416,9 @@ pub(crate) unsafe fn prove_derive() {
     );
 }
 
-// ===== `axl-copy-makeexist`: fazer um path INEXISTENTE "existir" via redirect (resource.copy) =====
+// ===== Redirect de path inexistente: fazer um path INEXISTENTE "existir" via redirect (resource.copy) =====
 // Achado por RE 2026-07-16 (workflow #2): ResourceDepot::CheckResource/ResourceExists @0x10151aa2c
-// `bool(depot* x0, ResourcePath x1 /*u64 hash*/)`. O ArchiveXL copy usa HookBefore nessa fn: se o
+// `bool(depot* x0, ResourcePath x1 /*u64 hash*/)`. O `resource.copy` usa um gancho antes dessa fn: se o
 // path pedido é o "copy" (inexistente), reescreve pro path do asset real → o path passa a "existir".
 // Depot singleton = [rebase(0x109d23188)+0x1f8] (já usado no projeto). PROVA log-only, menu-safe.
 pub(crate) type CheckResFn = unsafe extern "C" fn(*mut c_void, u64) -> u8;
@@ -1508,7 +1438,7 @@ pub(crate) static COPY_PHASE: AtomicU32 = AtomicU32::new(0);
 /// Replacement do CheckResource: (1) CAPTURA o `this` real do depot (x0) e o 1º path real (orig=true)
 /// das chamadas naturais do jogo — corrige o crash anterior (o singleton [0x109d23188+0x1f8] era o
 /// subobjeto ERRADO); (2) quando ARMADO, redireciona o path X (nosso copy inexistente) pro Y real
-/// (estilo resource.copy do ArchiveXL) → CheckResource passa a devolver true pra X.
+/// (estilo resource.copy) → CheckResource passa a devolver true pra X.
 pub(crate) unsafe extern "C" fn check_res_replacement(depot: *mut c_void, path: u64) -> u8 {
     let orig = COPY_ORIG.load(Ordering::Relaxed);
     let f: CheckResFn = core::mem::transmute(orig);
@@ -1529,7 +1459,7 @@ pub(crate) unsafe extern "C" fn check_res_replacement(depot: *mut c_void, path: 
     r
 }
 
-/// `axl-copy-makeexist` (menu, log-only) — máquina de estados DIRIGIDA PELO TICK (não one-shot):
+/// Redirect de path inexistente (menu, log-only) — máquina de estados DIRIGIDA PELO TICK (não one-shot):
 /// fase 0 instala o hook (captura o `this` real do depot + um Y real das chamadas do jogo), fase 1
 /// espera a captura, fase 2 roda o golden (CheckResource(X) false→true via redirect) e reverte.
 /// Corrige o crash da 1ª tentativa (usava o depot-singleton, subobjeto errado → SIGSEGV no field-deref).
@@ -1594,13 +1524,13 @@ pub(crate) unsafe fn prove_copy_tick() {
     }
 }
 
-// ===== `red4ext-attach-detach-contract`: 2 hooks EMPILHADOS no MESMO alvo (LIFO) + Detach único =====
+// ===== Contrato de attach/detach: 2 hooks EMPILHADOS no MESMO alvo (LIFO) + Detach único =====
 // Alvo: um stub JIT NOSSO de 1 instrução (`ret`), NÃO uma fn Rust compilada no nosso próprio
 // dylib — ver `ganchos::stub_que_so_retorna` (achado 2026-07-16: hookar uma fn compilada aqui mesmo
 // arriscou auto-modificação da página que o PRÓPRIO `prove_attach_detach` estava executando,
 // crash silencioso confirmado ao vivo). Isola o que está sendo provado (o CONTRATO de
 // empilhamento attach/detach) do relocador de opcode (já provado em separado, gap
-// `red4ext-reloc-universal`) E de qualquer risco de self-modificação.
+// relocador universal) E de qualquer risco de self-modificação.
 pub(crate) static AD_ORIG_HITS: AtomicU32 = AtomicU32::new(0);
 
 pub(crate) static AD_H1_HITS: AtomicU32 = AtomicU32::new(0);
@@ -1646,7 +1576,7 @@ pub(crate) unsafe extern "C" fn ad_repl2() {
     }
 }
 
-/// `red4ext-attach-detach-contract` (in-process, menu-oneshot): prova (1) 2 hooks empilhados no
+/// Contrato de attach/detach (in-process, menu-oneshot): prova (1) 2 hooks empilhados no
 /// MESMO alvo simultaneamente, (2) a cadeia LIFO (repl2 chama repl1 chama o stub — cada um
 /// EXATAMENTE 1x), (3) `remover_todos` (Detach) remove OS DOIS num call só e restaura os 16 bytes
 /// ORIGINAIS byte-exato, (4) depois do Detach só o stub roda (os replacements não disparam
@@ -1901,7 +1831,7 @@ pub(crate) static A51_NAO_PRONTOS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) const A51B_TESTE_ALVO: &str = "base\\characters\\garment\\player_equipment\\torso\\t1_001_pma_shirt__militech_agent.ent";
 
-// ===== ArchiveXL `#51` — checagens da referência: depot e classe do recurso do patch (2026-09-12) =====
+// ===== `#51` — checagens: depot e classe do recurso do patch (2026-09-12) =====
 // O `Configure` tira patch que o depot não tem; o `OnAppearanceResourceLoad`/`OnEntityTemplateLoad` pulam `partsValues`/`resolvedDependencies` inexistentes; o
 // `GetPatchToken` só devolve recurso do tipo pedido (`IsInstanceOf<T>`). Depot = `ResourceDepot::CheckResource` (`0x10151aa2c`, `bool(depot, caminho)`) com o
 // depot autêntico capturado no `InitializeArchives` (`PATHB_DEPOT`, o mesmo do `BwmsResourceExists`), chamado direto, sem hook e sem log — o jogo chama a
@@ -2281,7 +2211,7 @@ pub(crate) static A48_ESTADOS_CRIADOS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static A48_TRAVA_OCUPADA: AtomicU64 = AtomicU64::new(0);
 
-/// Codeware `#130` (`Entity/Extract`): despachos com algum ouvinte feitos no hook do job do builder.
+/// `Entity/Extract`: despachos com algum ouvinte feitos no hook do job do builder.
 pub(crate) static C130D_DESPACHOS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static C130D_SEM_ANOTACAO: AtomicU64 = AtomicU64::new(0);
@@ -2332,7 +2262,7 @@ pub(crate) static A34_RECUSADAS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static A35_RECRIADAS: AtomicU64 = AtomicU64::new(0);
 
-// ===== ArchiveXL `#55`/`#35`: início forçado de nó de fase na restauração (2026-09-18) =====
+// ===== `#55`/`#35`: início forçado de nó de fase na restauração (2026-09-18) =====
 // O hook do `QuestsSystem::OnGameRestored` (`0x102a0b26c`, slot `+0x158`) chama `register::questphase_forcar_na_restauracao` antes da original. Com
 // `~/.bwms-hook-a55-teste` e a trava confirmada (depois do #34 no mesmo boot), a mesma função de produção roda sobre uma quest viva: um nó
 // `questFactsDBManagerNodeDefinition` sintético (grava `bwms_fs_test = 1`, sem sockets) entra no fim do `nodes` do grafo da fase dela e no registro de
@@ -2341,8 +2271,8 @@ pub(crate) static A35_RECRIADAS: AtomicU64 = AtomicU64::new(0);
 // quando falta fica na memória (o motor não tem remoção por chave, e o `OnGameSave` não grava o mapa).
 pub(crate) static A55_FORCADOS_NA_RESTAURACAO: AtomicU64 = AtomicU64::new(0);
 
-// ===== ArchiveXL `#35`: patch de `.quest` na recriação e início forçado do nó de mod (2026-09-18) =====
-// Com `~/.bwms-hook-a35-teste` e a tabela `bwms-questphase.txt` do teste (`bwms-teste-35q`: nó de fase de mod `mod\bwms\teste\archivexl_35_quest.questphase`,
+// ===== `#35`: patch de `.quest` na recriação e início forçado do nó de mod (2026-09-18) =====
+// Com `~/.bwms-hook-a35-teste` e a tabela `bwms-questphase.txt` do teste (`bwms-teste-35q`: nó de fase de mod `mod\bwms\teste\fase_35_quest.questphase`,
 // que não existe, pendurado no nó de início do `base\quest\cyberpunk2077.quest`): na carga do save, o hook da recriação (`0x102812f24`) aplica o patch
 // no `.quest` antes da instância ser recriada e registra o nó como forçado. O `OnGameRestored` roda antes da trava de save, então o teste adia o
 // forçamento e, com a trava confirmada, chama a mesma função de produção: o `ForceStartNode` do motor executa o nó de fase, que pede o recurso ao
@@ -2356,19 +2286,19 @@ pub(crate) static POSTLOAD_CNT_CMESH: AtomicU64 = AtomicU64::new(0);
 #[cfg(feature = "devlog")]
 pub(crate) static POSTLOAD_CNT_MORPHTGT: AtomicU64 = AtomicU64::new(0);
 
-// ArchiveXL `#51`: EntityTemplate::PostLoad / AppearanceResource::PostLoad (candidatos 2026-08-12).
+// `#51`: EntityTemplate::PostLoad / AppearanceResource::PostLoad (candidatos 2026-08-12).
 #[cfg(feature = "devlog")]
 pub(crate) static POSTLOAD_CNT_ENTITYTEMPLATE:      AtomicU64 = AtomicU64::new(0);
 
 #[cfg(feature = "devlog")]
 pub(crate) static POSTLOAD_CNT_APPEARANCERESOURCE:  AtomicU64 = AtomicU64::new(0);
 
-// ArchiveXL `#49`: worldStreamingSector::PostLoad candidato #2 (diverge de SL26, ver nota do const).
+// `#49`: worldStreamingSector::PostLoad candidato #2 (diverge de SL26, ver nota do const).
 pub(crate) static POSTLOAD_CNT_WSSECTOR_C2:  AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static QUESTSYS_ONGAMERESTORED_CNT: AtomicU64 = AtomicU64::new(0);
 
-// ===== ArchiveXL `#49` parte 4b (2026-09-11): `worldStreamingSector::PostLoad` (`0x101c05360`), só observando, gate PRÓPRIO =====
+// ===== `#49` parte 4b (2026-09-11): `worldStreamingSector::PostLoad` (`0x101c05360`), só observando, gate PRÓPRIO =====
 // Layout da parte 4a (DATABASE, "layout do setor e do setup"): hash do path em `+0x30`; `nodeSetups` (DataBuffer) em `+0x40`, dados em
 // `+0x00` e tamanho u32 em `+0x08`, elemento `0x90`; `nodes` (`DynArray<Handle<worldNode>>`) em `+0x70`, size `+0x7c` (2.5); no setup, `node*` em
 // `+0x50` e índice de 19 bits em `+0x70` (2.5). Chama a original PRIMEIRO — o bind dela é quem grava `setup+0x50` — e só então lê. Roda em
@@ -2397,7 +2327,7 @@ pub(crate) const VPTRS_COM_TRATAMENTO: [u64; 5] =
 pub(crate) static WSSECTOR_CENSO_LOGS: AtomicU64 = AtomicU64::new(0);
 
 // Parte 4c-2 (2026-09-11): deleção de teste com `~/.bwms-hook-wssector-delete-teste` (lido 1x no instalador; a thread de job não abre
-// arquivo). Regra do ArchiveXL pra `worldStaticMeshNode`: zerar o `scale` do setup. Cada regra confere a contagem de setups, o índice e o
+// arquivo). Regra pra `worldStaticMeshNode`: zerar o `scale` do setup. Cada regra confere a contagem de setups, o índice e o
 // vptr do nó antes de gravar. Alvo do censo do boot 46: setor `0xbdf83cfce7456500`, 20 setups, static mesh no 18. Os outros 3 são controles
 // que têm que recusar sem gravar.
 #[cfg(feature = "devtools")]
@@ -2420,7 +2350,7 @@ pub(crate) const DELECAO_TESTE: [(u64, usize, usize, &str); 4] = [
     (SETOR_DELECAO_TESTE_HASH, 20, 18, "positivo"),
 ];
 
-// Codeware `#80` parte 80b (2026-09-11): censo dos `worldPopulationSpawnerNode` (vptr `0x107c6da60`, RE da 80a) no mesmo hook, guardando o
+// `#80` parte 80b (2026-09-11): censo dos `worldPopulationSpawnerNode` (vptr `0x107c6da60`, RE da 80a) no mesmo hook, guardando o
 // `globalNodeID` do setup (`+0x58`) — candidato a chave do `CommunitySystem::GetSpawner` (busca binária num array de u64; a instância do
 // spawner usa `+0x80` no attach). A 80c chama o `GetSpawner` com esses ids em gameplay. Só leitura; até 256 ids distintos.
 #[cfg(feature = "devtools")]
@@ -2506,7 +2436,7 @@ pub(crate) enum PlanoDelecao {
     Destrutiveis { dados: *mut u8, inicio: usize, n: usize, faixa: Vec<usize> },
     /// Colisão: `Position.z` em -2000 m nos atores `faixa` (índices do nó) dos `n` atores a partir de `atores`.
     Atores { atores: *mut u8, n: usize, faixa: Vec<usize> },
-    /// Colisão, ArchiveXL 1.27.0: as `shapes` (índices na lista de shapes) do nó passam a usar o preset `No Collision`, achado nos presets do nó ou
+    /// Colisão: as `shapes` (índices na lista de shapes) do nó passam a usar o preset `No Collision`, achado nos presets do nó ou
     /// acrescentado no fim deles (o buffer do nó é realocado pelo alocador dele).
     ShapesSemColisao { no: *mut u8, shapes: Vec<usize> },
     /// Troca de nó: setup `indice` apontando pro nó `doador` (o [`no_fantasma`]); `vizinho` é conferido byte a byte.
@@ -2522,16 +2452,15 @@ pub(crate) enum PlanoDelecao {
     SubNoI32 { dados: *mut u8, tam: usize, j: usize, off: usize, valores: Vec<i32>, inicio: usize, n: usize },
     /// Mutação 4f-3 num campo do nó: `valor` gravado (ou somado, no `proxy`) em `no+off`, com `largura` 8 ou 4 bytes.
     Campo { no: *mut u8, off: usize, largura: usize, valor: u64, soma: bool },
-    /// Mutação 4f-4 no destrutível: o elemento `j` guarda o transform da instância relativo ao setup (a referência grava `T_novo * setup.Inverse()`).
-    /// Na aplicação o elemento atual vira mundo (`local * setup`), a posição (`pos`) ou a orientação (`rot`) do mundo é trocada e o resultado volta
-    /// pra local. Diferença deliberada: a referência parte do transform do setup, então trocar só a posição zera a rotação própria da instância;
-    /// aqui a componente não pedida fica como está. Com posição e orientação juntas (o que os exportadores gravam), o resultado é o mesmo.
+    /// Mutação 4f-4 no destrutível: o elemento `j` guarda o transform da instância relativo ao setup. Na aplicação o elemento atual vira mundo
+    /// (`local * setup`), a posição (`pos`) ou a orientação (`rot`) do mundo é trocada e o resultado volta pra local; a componente não pedida fica
+    /// como está.
     SubNoLocal { dados: *mut u8, j: usize, inicio: usize, n: usize, setup: Xf, pos: Option<[f32; 3]>, rot: Option<[f32; 4]> },
 }
 
 // Parte 4e-2 (2026-09-12): buffer do `worldInstancedDestructibleMeshNode` (RE da 4e) — `cookedInstanceTransforms` em `+0x60` com o mesmo layout de buffer
-// do instanced mesh; elemento de 0x20 B com `position.Z` (f32) em `+0x08`. A deleção da referência põe Z em -2000; antes da escrita, todo Z do nó tem
-// que ser finito e dentro de ±20000 (controle do layout).
+// do instanced mesh; elemento de 0x20 B com `position.Z` (f32) em `+0x08`. Antes da escrita, todo Z do nó tem que ser finito e dentro de ±20000
+// (controle do layout).
 pub(crate) const DESTRUTIVEL_BUFFER_OFF: usize = 0x60;
 
 pub(crate) const DESTRUTIVEL_TAM: usize = 0x20;
@@ -2600,7 +2529,7 @@ pub(crate) struct ListasDeColisao {
 
 pub(crate) const COLISAO_LISTA_PRESETS: usize = 6;
 
-/// Preset de física sem colisão (`engine\physics\collision_presets.json` da 2.5), o que a referência põe na shape apagada.
+/// Preset de física sem colisão (`engine\physics\collision_presets.json` da 2.5).
 pub(crate) const PRESET_SEM_COLISAO: &str = "No Collision";
 
 /// `presetIndex` (u8) da shape de colisão de 0x20 B.
@@ -2609,63 +2538,70 @@ pub(crate) const SHAPE_PRESET_OFF: usize = 0x18;
 /// Tamanho do elemento de cada lista; o da última (bytes soltos) é 1.
 pub(crate) const COLISAO_ELEMENTO: [usize; 9] = [0x30, 0x20, 0xc, 0x10, 0xc, 8, 8, 4, 1];
 
-/// Índice do preset `nome` (CName) já presente nas listas do nó, se houver.
+/// Índice do preset `nome` (CName) já presente nas listas do nó.
 pub(crate) fn indice_do_preset(dados: &[u8], l: &ListasDeColisao, nome: u64) -> Option<u8> {
-    let inicio = l.offsets[COLISAO_LISTA_PRESETS] as usize;
-    (0..l.contagens[COLISAO_LISTA_PRESETS] as usize)
-        .find(|i| dados.get(inicio + i * 8..inicio + i * 8 + 8).is_some_and(|b| u64::from_le_bytes(b.try_into().unwrap_or([0; 8])) == nome))
-        .and_then(|i| u8::try_from(i).ok())
+    let ini = l.offsets[COLISAO_LISTA_PRESETS] as usize;
+    let presets = dados.get(ini..ini.checked_add(l.contagens[COLISAO_LISTA_PRESETS] as usize * 8)?)?;
+    let i = presets.chunks_exact(8).position(|p| p == nome.to_le_bytes())?;
+    u8::try_from(i).ok()
 }
 
-/// O buffer do nó com `nome` acrescentado no fim dos presets (ArchiveXL 1.27.0 põe `No Collision` na shape apagada): as listas depois dela andam 8 B
-/// e a contagem de presets sobe 1, de modo que o slot `0x30`, se recalcular os offsets pelas contagens, chega aos mesmos. Devolve o buffer, as listas e
-/// o índice do preset novo (o `presetIndex` u8 da shape). `None` com o buffer menor que as listas ou sem índice livre em u8.
+/// Fim (exclusivo) da lista `k` no buffer.
+fn fim_da_lista(l: &ListasDeColisao, k: usize) -> usize {
+    l.offsets[k] as usize + l.contagens[k] as usize * COLISAO_ELEMENTO[k]
+}
+
+/// O buffer do nó com `nome` acrescentado no fim dos presets, as listas novas e o índice do preset novo.
 pub(crate) fn buffer_com_preset(dados: &[u8], l: &ListasDeColisao, nome: u64) -> Option<(Vec<u8>, ListasDeColisao, u8)> {
-    let p = COLISAO_LISTA_PRESETS;
-    let fim = |k: usize| l.offsets[k] as usize + l.contagens[k] as usize * COLISAO_ELEMENTO[k];
-    if (0..9).any(|k| fim(k) > dados.len()) || l.contagens[p] >= u8::MAX as u16 {
+    if (0..9).any(|k| fim_da_lista(l, k) > dados.len()) {
         return None;
     }
-    let corte = fim(p);
+    // `presetIndex` da shape é u8: o 256º preset não teria índice.
+    let indice = u8::try_from(l.contagens[COLISAO_LISTA_PRESETS]).ok().filter(|&i| i < u8::MAX)?;
+    let ponto = fim_da_lista(l, COLISAO_LISTA_PRESETS);
     let mut novo = Vec::with_capacity(dados.len() + 8);
-    novo.extend_from_slice(&dados[..corte]);
+    novo.extend_from_slice(&dados[..ponto]);
     novo.extend_from_slice(&nome.to_le_bytes());
-    novo.extend_from_slice(&dados[corte..]);
+    novo.extend_from_slice(&dados[ponto..]);
     let mut listas = *l;
-    for k in p + 1..9 {
+    listas.contagens[COLISAO_LISTA_PRESETS] += 1;
+    for k in COLISAO_LISTA_PRESETS + 1..9 {
         listas.offsets[k] += 8;
     }
-    listas.contagens[p] += 1;
-    Some((novo, listas, l.contagens[p] as u8))
+    Some((novo, listas, indice))
 }
 
-/// `(dados, bytes, listas)` do nó de colisão, conferidos: buffer não vazio (o slot `0x30` já rodou) e cada lista dentro dele.
+/// `(dados, bytes, listas)` do nó de colisão, conferidos.
 pub(crate) unsafe fn listas_de_colisao(no: *const u8) -> Result<(*mut u8, usize, ListasDeColisao), String> {
-    if !crate::memoria::is_readable(no as *const c_void, 0x9a) {
+    if no.is_null() || !crate::memoria::is_readable(no as *const c_void, 0x9a) {
         return Err("nó ilegível".to_string());
     }
     let dados = (no.add(COLISAO_DADOS_OFF) as *const u64).read_unaligned() as *mut u8;
     let bytes = (no.add(COLISAO_DADOS_OFF + 8) as *const u32).read_unaligned() as usize;
+    if dados.is_null() || bytes == 0 {
+        return Err("buffer do nó vazio: o slot 0x30 ainda não rodou".to_string());
+    }
     let mut l = ListasDeColisao { offsets: [0; 9], contagens: [0; 9] };
     for k in 0..9 {
         l.offsets[k] = (no.add(COLISAO_ATORES_OFF + 4 * k) as *const u32).read_unaligned();
         l.contagens[k] = (no.add(COLISAO_NUM_ATORES_OFF + 2 * k) as *const u16).read_unaligned();
     }
-    if dados.is_null() || bytes == 0 {
-        return Err("buffer do nó vazio: o slot 0x30 ainda não rodou".to_string());
-    }
-    if (0..9).any(|k| l.offsets[k] as usize + l.contagens[k] as usize * COLISAO_ELEMENTO[k] > bytes) || !crate::memoria::is_readable(dados as *const c_void, bytes) {
+    if (0..9).any(|k| fim_da_lista(&l, k) > bytes) || !crate::memoria::is_readable(dados as *const c_void, bytes) {
         return Err(format!("listas do nó não cabem no buffer de {bytes:#x} B"));
     }
     Ok((dados, bytes, l))
 }
 
-/// Shapes (índice na lista de shapes do nó) de um `subshape <atores esperados> <ator> <shape> ...`: a shape `s` do ator `a` é a
-/// `shapeStartIndex + s` (`+0x20` do ator, u16), com `s < numShapes` (`+0x22`).
-pub(crate) unsafe fn shapes_do_subshape(valores: &str, dados: *const u8, l: &ListasDeColisao) -> Result<Vec<usize>, String> {
-    let campos: Vec<usize> = valores.split_whitespace().map(|v| v.parse::<usize>().map_err(|_| "subshape com número inválido".to_string())).collect::<Result<_, _>>()?;
-    let Some((&esperados, pares)) = campos.split_first() else { return Err("subshape sem contagem".to_string()) };
-    let atores = l.contagens[0] as usize;
+/// `<atores esperados> <ator> <shape> [...]` lido e conferido contra `atores` e as shapes de cada ator: os pares `(ator, shape)` na ordem.
+/// `cabe(ator, shape)` é a conferência extra da shape contra a lista do nó.
+fn pares_do_subshape(
+    valores: &str,
+    atores: usize,
+    shapes_do_ator: impl Fn(usize) -> usize,
+    cabe: impl Fn(usize, usize) -> bool,
+) -> Result<Vec<(usize, usize)>, String> {
+    let campos = valores.split_whitespace().map(|c| c.parse::<usize>()).collect::<Result<Vec<usize>, _>>().map_err(|_| "subshape com número inválido".to_string())?;
+    let (&esperados, pares) = campos.split_first().ok_or_else(|| "subshape sem contagem".to_string())?;
     if esperados != atores {
         return Err(format!("atores (nó tem {atores}, .xl espera {esperados})"));
     }
@@ -2673,72 +2609,345 @@ pub(crate) unsafe fn shapes_do_subshape(valores: &str, dados: *const u8, l: &Lis
         return Err("subshape sem pares [ator, shape]".to_string());
     }
     pares
-        .chunks(2)
-        .map(|p| {
-            let (a, s) = (p[0], p[1]);
+        .chunks_exact(2)
+        .map(|par| {
+            let (a, s) = (par[0], par[1]);
             if a >= atores {
                 return Err(format!("ator {a} >= {atores}"));
             }
-            let ator = dados.add(l.offsets[0] as usize + a * ATOR_TAM);
-            let (inicio, n) = ((ator.add(0x20) as *const u16).read_unaligned() as usize, (ator.add(0x22) as *const u16).read_unaligned() as usize);
-            if s >= n || inicio + s >= l.contagens[1] as usize {
+            let n = shapes_do_ator(a);
+            if s >= n || !cabe(a, s) {
                 return Err(format!("shape {s} do ator {a} fora das {n} dele"));
             }
-            Ok(inicio + s)
+            Ok((a, s))
         })
         .collect()
 }
 
-/// Atores que um `subshape <atores esperados> <ator> <shape> ...` desce em colisão cozida. A lista de shapes do nó cozido não tem o preset
-/// `No Collision` para trocar: ator de 1 shape desce inteiro, e o de 2 ou mais fica como está, como na referência.
-pub(crate) fn atores_do_subshape_cozido(valores: &str, atores: usize, shapes_do_ator: impl Fn(usize) -> usize) -> Result<Vec<usize>, String> {
-    let campos: Vec<usize> = valores.split_whitespace().map(|v| v.parse::<usize>().map_err(|_| "subshape com número inválido".to_string())).collect::<Result<_, _>>()?;
-    let Some((&esperados, pares)) = campos.split_first() else { return Err("subshape sem contagem".to_string()) };
-    if esperados != atores {
-        return Err(format!("atores (nó tem {atores}, .xl espera {esperados})"));
-    }
-    if pares.is_empty() || pares.len() % 2 != 0 {
-        return Err("subshape sem pares [ator, shape]".to_string());
-    }
-    let mut faixa = Vec::with_capacity(pares.len() / 2);
-    for p in pares.chunks(2) {
-        let (a, s) = (p[0], p[1]);
-        if a >= atores {
-            return Err(format!("ator {a} >= {atores}"));
-        }
-        let n = shapes_do_ator(a);
-        if s >= n {
-            return Err(format!("shape {s} do ator {a} fora das {n} dele"));
-        }
-        if n == 1 && !faixa.contains(&a) {
-            faixa.push(a);
-        }
-    }
-    Ok(faixa)
+/// Shapes (índice na lista de shapes do nó) de um `subshape <atores esperados> <ator> <shape> ...`.
+pub(crate) unsafe fn shapes_do_subshape(valores: &str, dados: *const u8, l: &ListasDeColisao) -> Result<Vec<usize>, String> {
+    let ator = |a: usize| dados.add(l.offsets[0] as usize + a * COLISAO_ELEMENTO[0]);
+    let atores = l.contagens[0] as usize;
+    let shapes_do_no = l.contagens[1] as usize;
+    // `shapeStartIndex` u16 `+0x20` e `numShapes` u16 `+0x22` do ator; a shape que passa da lista do nó conta como fora do ator.
+    let inicio = |a: usize| (ator(a).add(0x20) as *const u16).read_unaligned() as usize;
+    let numero = |a: usize| (ator(a).add(0x22) as *const u16).read_unaligned() as usize;
+    let pares = pares_do_subshape(valores, atores, numero, |a, s| inicio(a) + s < shapes_do_no)?;
+    Ok(pares.into_iter().map(|(a, s)| inicio(a) + s).collect())
 }
 
-/// `worldStaticMeshNode` invisível que toma o lugar do nó apagado, como o `s_dummyNode` da referência. Os setores da 2.5 não têm esse tipo para
-/// servir de doador (0 de 91 na amostra). Criado na thread do jogo: o `PostLoad`, em thread de job, só lê o ponteiro.
+/// Atores que um `subshape <atores esperados> <ator> <shape> ...` desce em colisão cozida.
+pub(crate) fn atores_do_subshape_cozido(valores: &str, atores: usize, shapes_do_ator: impl Fn(usize) -> usize) -> Result<Vec<usize>, String> {
+    let pares = pares_do_subshape(valores, atores, &shapes_do_ator, |_, _| true)?;
+    // O nó cozido não tem preset para trocar por shape: só o ator de 1 shape desce inteiro.
+    let mut descem: Vec<usize> = Vec::new();
+    for (a, _) in pares {
+        if shapes_do_ator(a) == 1 && !descem.contains(&a) {
+            descem.push(a);
+        }
+    }
+    Ok(descem)
+}
+
+/// O nó invisível que toma o lugar do nó apagado, criado uma vez na thread do jogo; o `PostLoad`, em thread de job, só lê o ponteiro. Os setores da
+/// 2.5 não têm `worldStaticMeshNode` para servir de doador (0 de 91 na amostra).
 static NO_FANTASMA: AtomicU64 = AtomicU64::new(0);
 
+/// Cria o nó invisível (thread do jogo, no `register_all`).
 pub(crate) unsafe fn criar_no_fantasma(reg: &crate::rtti::Registry) {
-    if NO_FANTASMA.load(Ordering::Relaxed) != 0 {
+    if NO_FANTASMA.load(Ordering::Acquire) != 0 {
         return;
     }
     let no = crate::rtti::new_object(reg, "worldStaticMeshNode");
     if no.is_null() {
         return;
     }
-    if let Some((off, _, no_holder)) = crate::rtti::resolve_prop_in_class(crate::rtti::class_of(no), "isVisibleInGame") {
-        (crate::rtti::field_ptr(no, off, no_holder) as *mut u8).write(0);
+    let Some((off, _, no_holder)) = crate::rtti::resolve_prop_in_class(crate::rtti::class_of(no), "isVisibleInGame") else {
+        crate::log_dev!("[axl-streaming-xl] nó invisível: worldStaticMeshNode sem isVisibleInGame; fica sem doador");
+        return;
+    };
+    let campo = crate::rtti::field_ptr(no, off, no_holder) as *mut u8;
+    if campo.is_null() {
+        return;
     }
-    NO_FANTASMA.store(no as u64, Ordering::Relaxed);
+    campo.write(0);
+    NO_FANTASMA.store(no as u64, Ordering::Release);
 }
 
+/// O nó invisível, ou o erro de quando ainda não existe.
 pub(crate) fn no_fantasma() -> Result<u64, String> {
-    match NO_FANTASMA.load(Ordering::Relaxed) {
+    match NO_FANTASMA.load(Ordering::Acquire) {
         0 => Err("nó invisível de deleção ainda não criado".to_string()),
         no => Ok(no),
+    }
+}
+
+/// Vetores `B5|diag|*` de `B5-vetores.txt`. No harness o `rebase` dá 0: o vptr esperado de nó com vtable conhecida é 0.
+#[cfg(test)]
+mod vetores_b5 {
+    use super::*;
+
+    fn str_err<T>(r: Result<T, String>) -> String {
+        r.err().unwrap_or_default()
+    }
+
+    /// Buffer com as 9 listas contíguas, cada elemento preenchido com o número da lista + 1.
+    fn sintetico(contagens: [u16; 9]) -> (Vec<u8>, ListasDeColisao) {
+        let mut dados = Vec::new();
+        let mut offsets = [0u32; 9];
+        for k in 0..9 {
+            offsets[k] = dados.len() as u32;
+            dados.extend(std::iter::repeat(k as u8 + 1).take(contagens[k] as usize * COLISAO_ELEMENTO[k]));
+        }
+        (dados, ListasDeColisao { offsets, contagens })
+    }
+
+    #[test]
+    fn preset_sem_colisao() {
+        assert_eq!(cname(PRESET_SEM_COLISAO), 0xd50f938bf00ea64e);
+        let nome = cname(PRESET_SEM_COLISAO);
+        let (dados, l) = sintetico([2, 3, 1, 1, 1, 2, 2, 3, 5]);
+        assert_eq!((l.offsets, dados.len()), ([0, 96, 192, 204, 220, 232, 248, 264, 276], 281));
+        let (novo, n, idx) = buffer_com_preset(&dados, &l, nome).expect("preset novo");
+        assert_eq!((idx, n.offsets, n.contagens), (2, [0, 96, 192, 204, 220, 232, 248, 272, 284], [2, 3, 1, 1, 1, 2, 3, 3, 5]));
+        let hex: String = novo.iter().map(|b| format!("{b:02x}")).collect();
+        let esperado = "01".repeat(96) + &"02".repeat(96) + &"03".repeat(12) + &"04".repeat(16) + &"05".repeat(12) + &"06".repeat(16) + &"07".repeat(16) + "4ea60ef08b930fd5" + &"08".repeat(12) + &"09".repeat(5);
+        assert_eq!(hex, esperado);
+        assert_eq!((indice_do_preset(&novo, &n, nome), indice_do_preset(&dados, &l, nome)), (Some(2), None));
+
+        let mut com_nome = dados.clone();
+        com_nome[256..264].copy_from_slice(&nome.to_le_bytes());
+        assert_eq!((indice_do_preset(&com_nome, &l, nome), indice_do_preset(&com_nome, &l, 7)), (Some(1), None));
+
+        let (um, l1) = sintetico([1; 9]);
+        assert!(buffer_com_preset(&um[..um.len() - 1], &l1, nome).is_none(), "buffer 1 B curto");
+        let (d255, l255) = sintetico([1, 1, 1, 1, 1, 1, 255, 1, 1]);
+        assert!(buffer_com_preset(&d255, &l255, nome).is_none(), "255 presets");
+        let (d254, l254) = sintetico([1, 1, 1, 1, 1, 1, 254, 1, 1]);
+        assert_eq!(buffer_com_preset(&d254, &l254, nome).map(|(_, l, i)| (i, l.contagens[COLISAO_LISTA_PRESETS])), Some((254, 255)));
+    }
+
+    /// Nó de colisão de 0xa0 B com o `DataBuffer` em `+0x58` e as listas.
+    fn no_de_colisao(dados: &[u8], bytes: u32, l: &ListasDeColisao) -> [u8; 0xa0] {
+        let mut no = [0u8; 0xa0];
+        no[COLISAO_DADOS_OFF..COLISAO_DADOS_OFF + 8].copy_from_slice(&(dados.as_ptr() as u64).to_le_bytes());
+        no[COLISAO_DADOS_OFF + 8..COLISAO_DADOS_OFF + 12].copy_from_slice(&bytes.to_le_bytes());
+        for k in 0..9 {
+            no[COLISAO_ATORES_OFF + 4 * k..COLISAO_ATORES_OFF + 4 * k + 4].copy_from_slice(&l.offsets[k].to_le_bytes());
+            no[COLISAO_NUM_ATORES_OFF + 2 * k..COLISAO_NUM_ATORES_OFF + 2 * k + 2].copy_from_slice(&l.contagens[k].to_le_bytes());
+        }
+        no
+    }
+
+    #[test]
+    fn listas() {
+        let (dados, l) = sintetico([2, 3, 1, 1, 1, 2, 2, 3, 5]);
+        let r = unsafe { listas_de_colisao(no_de_colisao(&dados, 281, &l).as_ptr()) }.map(|(d, b, ls)| (d as usize == dados.as_ptr() as usize, b, ls));
+        assert_eq!(r, Ok((true, 281, l)));
+        assert_eq!(str_err(unsafe { listas_de_colisao(no_de_colisao(&dados, 280, &l).as_ptr()) }), "listas do nó não cabem no buffer de 0x118 B");
+        assert_eq!(str_err(unsafe { listas_de_colisao(no_de_colisao(&dados, 0, &l).as_ptr()) }), "buffer do nó vazio: o slot 0x30 ainda não rodou");
+        let mut nulo = no_de_colisao(&dados, 281, &l);
+        nulo[COLISAO_DADOS_OFF..COLISAO_DADOS_OFF + 8].fill(0);
+        assert_eq!(str_err(unsafe { listas_de_colisao(nulo.as_ptr()) }), "buffer do nó vazio: o slot 0x30 ainda não rodou");
+    }
+
+    #[test]
+    fn subshape() {
+        // Atores `[início 0, n 1]` e `[início 1, n 2]`; o nó tem 3 shapes.
+        let mut dados = vec![0u8; 2 * 0x30];
+        dados[0x22..0x24].copy_from_slice(&1u16.to_le_bytes());
+        dados[0x30 + 0x20..0x30 + 0x22].copy_from_slice(&1u16.to_le_bytes());
+        dados[0x30 + 0x22..0x30 + 0x24].copy_from_slice(&2u16.to_le_bytes());
+        let mut l = ListasDeColisao { offsets: [0; 9], contagens: [0; 9] };
+        l.contagens[0] = 2;
+        l.contagens[1] = 3;
+        let s = |v: &str| unsafe { shapes_do_subshape(v, dados.as_ptr(), &l) };
+        let ok = |v: Vec<usize>| -> Result<Vec<usize>, String> { Ok(v) };
+        let err = |m: &str| -> Result<Vec<usize>, String> { Err(m.to_string()) };
+        assert_eq!(s("2 0 0"), ok(vec![0]));
+        assert_eq!(s("2 1 0 1 1"), ok(vec![1, 2]));
+        assert_eq!(s("2 1 2"), err("shape 2 do ator 1 fora das 2 dele"));
+        assert_eq!(s("2 2 0"), err("ator 2 >= 2"));
+        assert_eq!(s("3 0 0"), err("atores (nó tem 2, .xl espera 3)"));
+        assert_eq!(s("2 0"), err("subshape sem pares [ator, shape]"));
+        assert_eq!(s("2"), err("subshape sem pares [ator, shape]"));
+        assert_eq!(s("2 a b"), err("subshape com número inválido"));
+        assert_eq!(s("2 0 0 1 1 0 0"), ok(vec![0, 2, 0]));
+        dados[0x30 + 0x20..0x30 + 0x22].copy_from_slice(&2u16.to_le_bytes());
+        assert_eq!(unsafe { shapes_do_subshape("2 1 1", dados.as_ptr(), &l) }, err("shape 1 do ator 1 fora das 2 dele"));
+
+        let c = |v: &str| atores_do_subshape_cozido(v, 4, |a| [1, 3, 1, 0][a]);
+        assert_eq!(c("4 0 0 1 2 2 0"), ok(vec![0, 2]));
+        assert_eq!(c("4 0 0 0 0"), ok(vec![0]));
+        assert_eq!(c("4 1 0"), ok(vec![]));
+        assert_eq!(c("4 2 0 0 0"), ok(vec![2, 0]));
+        assert_eq!(c("4 0 1"), err("shape 1 do ator 0 fora das 1 dele"));
+        assert_eq!(c("4 4 0"), err("ator 4 >= 4"));
+        assert_eq!(c("3 0 0"), err("atores (nó tem 4, .xl espera 3)"));
+        assert_eq!(c("4 0"), err("subshape sem pares [ator, shape]"));
+        assert_eq!(c("4"), err("subshape sem pares [ator, shape]"));
+        assert_eq!(c(""), err("subshape sem contagem"));
+        assert_eq!(c("4 x 0"), err("subshape com número inválido"));
+        assert_eq!(c("4 3 0"), err("shape 0 do ator 3 fora das 0 dele"));
+        assert_eq!(c("  4   0   0  "), ok(vec![0]));
+    }
+
+    #[test]
+    fn no_cozido() {
+        let tipos = ["worldCookedStaticMeshNode", "worldCookedGenericProxyMeshNode", "worldCookedStaticDecalNode", "worldCookedAcousticSectorNode", "worldStaticMeshNode", "worldCookedCollisionNode"];
+        let mut tabela = Vec::new();
+        for t in tipos {
+            for op in ["res", "app", "proxy", "rec", "", "subdel"] {
+                if let Some(c) = campo_do_item_cozido(t, op) {
+                    tabela.push((t, op, c));
+                }
+            }
+        }
+        assert_eq!(
+            tabela,
+            vec![
+                ("worldCookedStaticMeshNode", "res", (33, 0, 8)),
+                ("worldCookedStaticMeshNode", "app", (33, 8, 8)),
+                ("worldCookedGenericProxyMeshNode", "res", (41, 0, 8)),
+                ("worldCookedGenericProxyMeshNode", "app", (41, 8, 8)),
+                ("worldCookedGenericProxyMeshNode", "proxy", (41, 33, 4)),
+                ("worldCookedStaticDecalNode", "res", (36, 0, 8)),
+                ("worldCookedAcousticSectorNode", "res", (21, 0, 8)),
+            ]
+        );
+
+        let itens = vec![0u8; 3 * 0x21];
+        let mut no = [0u8; 0x58];
+        no[NO_COZIDO_DADOS..NO_COZIDO_DADOS + 8].copy_from_slice(&(itens.as_ptr() as u64).to_le_bytes());
+        no[NO_COZIDO_BYTES..NO_COZIDO_BYTES + 4].copy_from_slice(&(itens.len() as u32).to_le_bytes());
+        no[NO_COZIDO_PASSO..NO_COZIDO_PASSO + 4].copy_from_slice(&0x21u32.to_le_bytes());
+        let item = |no: &[u8; 0x58], idx: u32, passo: usize| {
+            let mut setup = [0u8; 0x90];
+            setup[SETUP_INDICE_DE_INSTANCIA..SETUP_INDICE_DE_INSTANCIA + 4].copy_from_slice(&idx.to_le_bytes());
+            unsafe { item_cozido_do_setup(no.as_ptr(), setup.as_ptr(), passo) }.map(|p| p as usize - itens.as_ptr() as usize)
+        };
+        assert_eq!(item(&no, 0, 0x21), Ok(0));
+        assert_eq!(item(&no, 2, 0x21), Ok(0x42));
+        assert_eq!(item(&no, 3, 0x21), Err("instanceIndex 3 fora dos 3 item(ns) do nó cozido".to_string()));
+        assert_eq!(item(&no, 1, 0x29), Err("passo do item cozido 0x21, o tipo espera 0x29".to_string()));
+        assert_eq!(item(&no, u32::MAX, 0x21), Err("instanceIndex 4294967295 fora dos 3 item(ns) do nó cozido".to_string()));
+        no[NO_COZIDO_DADOS..NO_COZIDO_DADOS + 8].fill(0);
+        assert_eq!(item(&no, 0, 0x21), Err("instanceIndex 0 fora dos 3 item(ns) do nó cozido".to_string()));
+    }
+
+    #[test]
+    fn constantes_e_no_fantasma() {
+        assert_eq!((NO_COZIDO_DADOS, NO_COZIDO_BYTES, NO_COZIDO_PASSO, COLISAO_COZIDA_DADOS_OFF), (0x40, 0x4c, 0x50, 0x58));
+        assert_eq!((ATOR_Z_DELETADO, DESTRUTIVEL_Z_DELETADO), (-262144000, -2000.0));
+        assert_eq!((COLISAO_ELEMENTO, SHAPE_PRESET_OFF), ([0x30, 0x20, 0xc, 0x10, 0xc, 8, 8, 4, 1], 0x18));
+        assert_eq!(no_fantasma(), Err("nó invisível de deleção ainda não criado".to_string()));
+    }
+
+    /// O plano como o vetor o escreve, com os ponteiros relativos aos buffers do teste.
+    fn texto(p: &PlanoDelecao, base: &[(&str, usize)]) -> String {
+        let rel = |d: *mut u8| {
+            base.iter().filter_map(|(n, b)| (d as usize).checked_sub(*b).map(|o| (n, o))).min_by_key(|(_, o)| *o).map(|(n, o)| format!("{n}+{o:#x}")).unwrap_or_default()
+        };
+        match p {
+            PlanoDelecao::ScaleSetup(i) => format!("ScaleSetup({i})"),
+            PlanoDelecao::Setup { indice, off, valores, vizinho } => format!("Setup{{indice={indice}, off={off:#x}, valores={valores:?}, vizinho={vizinho:?}}}"),
+            PlanoDelecao::Instancias { dados, inicio, n, faixa, vizinho } => format!("Instancias{{dados={}, inicio={inicio}, n={n}, faixa={faixa:?}, vizinho={vizinho:?}}}", rel(*dados)),
+            PlanoDelecao::Atores { atores, n, faixa } => format!("Atores{{atores={}, n={n}, faixa={faixa:?}}}", rel(*atores)),
+            PlanoDelecao::SubNo { dados, tam, j, off, valores, inicio, n } => {
+                format!("SubNo{{dados={}, tam={tam:#x}, j={j}, off={off:#x}, valores={valores:?}, inicio={inicio}, n={n}}}", rel(*dados))
+            }
+            PlanoDelecao::SubNoI32 { dados, tam, j, off, valores, inicio, n } => {
+                format!("SubNoI32{{dados={}, tam={tam:#x}, j={j}, off={off:#x}, valores={valores:?}, inicio={inicio}, n={n}}}", rel(*dados))
+            }
+            _ => "outro".to_string(),
+        }
+    }
+
+    /// Setor de 3 setups: 0 static mesh, 1 instanced mesh (instâncias 1..4 de 5 no buffer), 2 colisão (2 atores em `+0x10` dos dados).
+    #[test]
+    fn planejar() {
+        let mut inst = vec![0u8; 5 * INSTANCIA_TAM];
+        for e in 0..5 {
+            inst[e * INSTANCIA_TAM + 0x1c..e * INSTANCIA_TAM + 0x20].copy_from_slice(&1f32.to_le_bytes());
+            for k in 0..3 {
+                inst[e * INSTANCIA_TAM + 0x20 + 4 * k..e * INSTANCIA_TAM + 0x24 + 4 * k].copy_from_slice(&1f32.to_le_bytes());
+            }
+        }
+        let faixas = [1u16, 3];
+        let mut no_inst = vec![0u8; 0x98];
+        no_inst[NO_INSTANCIADO_BUFFER..NO_INSTANCIADO_BUFFER + 8].copy_from_slice(&(inst.as_ptr() as u64).to_le_bytes());
+        no_inst[NO_INSTANCIADO_BUFFER + 8..NO_INSTANCIADO_BUFFER + 12].copy_from_slice(&(inst.len() as u32).to_le_bytes());
+        no_inst[NO_INSTANCIADO_FAIXAS..NO_INSTANCIADO_FAIXAS + 8].copy_from_slice(&(faixas.as_ptr() as u64).to_le_bytes());
+        no_inst[NO_INSTANCIADO_FAIXAS + 0x0c..NO_INSTANCIADO_FAIXAS + 0x10].copy_from_slice(&1u32.to_le_bytes());
+
+        let mut atores = vec![0u8; 0x10 + 2 * ATOR_TAM];
+        for a in 0..2 {
+            atores[0x10 + a * ATOR_TAM + 0x1c..0x10 + a * ATOR_TAM + 0x20].copy_from_slice(&1f32.to_le_bytes());
+        }
+        let mut no_col = vec![0u8; 0xa0];
+        no_col[COLISAO_DADOS_OFF..COLISAO_DADOS_OFF + 8].copy_from_slice(&(atores.as_ptr() as u64).to_le_bytes());
+        no_col[COLISAO_DADOS_OFF + 8..COLISAO_DADOS_OFF + 12].copy_from_slice(&(atores.len() as u32).to_le_bytes());
+        no_col[COLISAO_ATORES_OFF..COLISAO_ATORES_OFF + 4].copy_from_slice(&0x10u32.to_le_bytes());
+        no_col[COLISAO_ATORES_OFF + 4..COLISAO_ATORES_OFF + 8].copy_from_slice(&0x70u32.to_le_bytes());
+        no_col[COLISAO_NUM_ATORES_OFF..COLISAO_NUM_ATORES_OFF + 2].copy_from_slice(&2u16.to_le_bytes());
+
+        let mut no_static = vec![0u8; 0x60];
+        let mut setups = vec![0u8; 3 * 0x90];
+        for (i, no) in [no_static.as_ptr(), no_inst.as_ptr(), no_col.as_ptr()].into_iter().enumerate() {
+            setups[i * 0x90 + 0x50..i * 0x90 + 0x58].copy_from_slice(&(no as u64).to_le_bytes());
+        }
+        let base = [("inst", inst.as_ptr() as usize), ("atores", atores.as_ptr() as usize)];
+        let mut plano = |esperado: usize, indice: usize, tipo: &str, op: &str, valores: &str, setups_n: usize, legivel: bool| {
+            let d = DelecaoDeNode { modulo: "m".into(), setor: 1, esperado, indice, tipo: tipo.into(), op: op.into(), valores: valores.into() };
+            match unsafe { planejar_delecao(&d, setups.as_mut_ptr(), setups_n, legivel) } {
+                Ok(p) => texto(&p, &base),
+                Err(e) => format!("Err({e:?})"),
+            }
+        };
+        let casos: &[(usize, usize, &str, &str, &str, &str)] = &[
+            (4, 0, "worldStaticMeshNode", "", "", r#"Err("contagem (setor tem 3, .xl espera 4)")"#),
+            (3, 3, "worldStaticMeshNode", "", "", r#"Err("índice 3 >= 3")"#),
+            (3, 0, "worldStaticMeshNode", "", "", "ScaleSetup(0)"),
+            (3, 0, "worldCookedStaticMeshNode", "", "", r#"Err("índice 0 não é worldCookedStaticMeshNode (vptr 0x0, classe None)")"#),
+            (3, 0, "worldStaticMeshNode", "pos", "1 2 3 1", "Setup{indice=0, off=0x0, valores=[1.0, 2.0, 3.0, 1.0], vizinho=Some(1)}"),
+            (3, 0, "worldStaticMeshNode", "rot", "0 0 0 1", "Setup{indice=0, off=0x10, valores=[0.0, 0.0, 0.0, 1.0], vizinho=Some(1)}"),
+            (3, 0, "worldStaticMeshNode", "scale", "2 2 2", "Setup{indice=0, off=0x20, valores=[2.0, 2.0, 2.0], vizinho=Some(1)}"),
+            (3, 2, "worldCollisionNode", "pos", "1 2 3 1", "Setup{indice=2, off=0x0, valores=[1.0, 2.0, 3.0, 1.0], vizinho=Some(1)}"),
+            (3, 0, "worldStaticMeshNode", "pos", "1 2 3", r#"Err("pos com 3 valor(es), espera 4")"#),
+            (3, 0, "worldStaticMeshNode", "scale", "1 NaN 1", r#"Err("scale com 3 valor(es), espera 3")"#),
+            (3, 0, "worldStaticMeshNode", "scale", "1 x 1", r#"Err("scale com valor inválido")"#),
+            (3, 0, "worldStaticMeshNode", "foo", "", r#"Err("op foo sem suporte")"#),
+            (3, 1, "worldInstancedMeshNode", "", "", "Instancias{dados=inst+0x0, inicio=1, n=3, faixa=[1, 2, 3], vizinho=Some(4)}"),
+            (3, 1, "worldInstancedMeshNode", "subdel", "3 0 2", "Instancias{dados=inst+0x0, inicio=1, n=3, faixa=[1, 3], vizinho=Some(4)}"),
+            (3, 1, "worldInstancedMeshNode", "subdel", "4 0", r#"Err("instâncias (nó tem 3, .xl espera 4)")"#),
+            (3, 1, "worldInstancedMeshNode", "subdel", "3 3", r#"Err("instância 3 >= 3")"#),
+            (3, 1, "worldInstancedMeshNode", "subdel", "3", r#"Err("subdel sem índices")"#),
+            (3, 1, "worldInstancedMeshNode", "subscale", "3 1 2 2 2", "SubNo{dados=inst+0x0, tam=0x30, j=2, off=0x20, valores=[2.0, 2.0, 2.0], inicio=1, n=3}"),
+            (3, 1, "worldInstancedMeshNode", "subrot", "3 0 0 0 0 1", "SubNo{dados=inst+0x0, tam=0x30, j=1, off=0x10, valores=[0.0, 0.0, 0.0, 1.0], inicio=1, n=3}"),
+            (3, 1, "worldInstancedMeshNode", "subpos", "3 2 1 2 3 1", "SubNoI32{dados=inst+0x0, tam=0x30, j=3, off=0x0, valores=[131072, 262144, 393216], inicio=1, n=3}"),
+            (3, 1, "worldInstancedMeshNode", "subpos", "3 2 1 2 16000 1", r#"Err("subpos fora do alcance do ponto fixo (±16000 m)")"#),
+            (3, 1, "worldInstancedMeshNode", "subscale", "3 1 2 2", r#"Err("subscale com 2 valor(es), espera 3")"#),
+            (3, 2, "worldCollisionNode", "subdel", "2 1", "Atores{atores=atores+0x10, n=2, faixa=[1]}"),
+            (3, 2, "worldCollisionNode", "subpos", "2 1 1.5 -2 3 1", "SubNoI32{dados=atores+0x10, tam=0x30, j=1, off=0x0, valores=[196608, -262144, 393216], inicio=0, n=2}"),
+            (3, 2, "worldCollisionNode", "subrot", "2 0 0 0 0 1", "SubNo{dados=atores+0x10, tam=0x30, j=0, off=0x10, valores=[0.0, 0.0, 0.0, 1.0], inicio=0, n=2}"),
+            (3, 2, "worldCollisionNode", "subscale", "2 0 1 1 1", r#"Err("subscale não cabe no ator de colisão (o WorldTransform não tem scale)")"#),
+            (3, 2, "worldCollisionNode", "subpos", "2 1 1 2 3", r#"Err("subpos com 3 valor(es), espera 4")"#),
+            (3, 2, "worldCollisionNode", "subpos", "3 1 1 2 3 1", r#"Err("atores (nó tem 2, .xl espera 3)")"#),
+            (3, 0, "worldAdvertisementNode", "", "", r#"Err("nó invisível de deleção ainda não criado")"#),
+            (3, 0, "worldStaticMeshNode", "res", "0xabc", r#"Err("classe do nó não decodificada")"#),
+            (3, 2, "worldStaticMeshNode", "pos", "1 2 3 1", "Setup{indice=2, off=0x0, valores=[1.0, 2.0, 3.0, 1.0], vizinho=Some(1)}"),
+        ];
+        for &(esperado, indice, tipo, op, valores, saida) in casos {
+            assert_eq!(plano(esperado, indice, tipo, op, valores, 3, true), saida, "{tipo} {op:?} {valores:?}");
+        }
+        for (op, valores) in [("res", "0xdeadbeef"), ("app", "beef"), ("proxy", "3"), ("proxy", "0"), ("proxy", "-2"), ("res", "zz")] {
+            assert_eq!(plano(3, 0, "worldCookedGenericProxyMeshNode", op, valores, 3, true), r#"Err("índice 0 não é worldCookedGenericProxyMeshNode (vptr 0x0, classe None)")"#);
+        }
+        assert_eq!(plano(3, 0, "worldStaticMeshNode", "", "", 3, false), r#"Err("setups ilegíveis")"#);
+        assert_eq!(plano(1, 0, "worldStaticMeshNode", "pos", "1 2 3 1", 1, true), "Setup{indice=0, off=0x0, valores=[1.0, 2.0, 3.0, 1.0], vizinho=None}");
+        no_static[..8].copy_from_slice(&0xdead_0000u64.to_le_bytes());
+        let d = DelecaoDeNode { modulo: "m".into(), setor: 1, esperado: 3, indice: 0, tipo: "worldStaticMeshNode".into(), op: String::new(), valores: String::new() };
+        assert_eq!(str_err(unsafe { planejar_delecao(&d, setups.as_mut_ptr(), 3, true) }), "índice 0 não é worldStaticMeshNode (vptr 0xdead0000)");
     }
 }
 
@@ -2842,7 +3051,7 @@ pub(crate) unsafe fn atores_do_no(no: *const u8) -> Result<(*mut u8, usize), Str
 pub(crate) const COLISAO_COZIDA_DADOS_OFF: usize = 0x58;
 
 /// Atores do item cozido do setup (`worldCookedCollisionNode`, item de 0x30 B): as seções do item ficam contíguas em `compiledData` a partir do
-/// `dataOffset` (`+0x18`), atores primeiro (`numActors` u16 `+0x1c`, 0x30 B cada), como o `CollisionDataView` da referência.
+/// `dataOffset` (`+0x18`), atores primeiro (`numActors` u16 `+0x1c`, 0x30 B cada).
 pub(crate) unsafe fn atores_do_no_cozido(no: *const u8, setup: *const u8) -> Result<(*mut u8, usize), String> {
     let item = item_cozido_do_setup(no, setup, 0x30)?;
     if !crate::memoria::is_readable(no.add(COLISAO_COZIDA_DADOS_OFF) as *const c_void, 0x10) {
@@ -2896,7 +3105,7 @@ pub(crate) unsafe fn instancia_scale(dados: *const u8, j: usize) -> [f32; 3] {
     [s.read_unaligned(), s.add(1).read_unaligned(), s.add(2).read_unaligned()]
 }
 
-// Nós cozidos da 2.5 (`worldCooked*Node`, ArchiveXL 1.28, SDK `e3da571b`): `mesh`/`meshAppearance`/`material`/`data`/`nbNodesUnderProxy` moram no
+// Nós cozidos da 2.5 (`worldCooked*Node`, cobertura 1.28): `mesh`/`meshAppearance`/`material`/`data`/`nbNodesUnderProxy` moram no
 // item de `cookedData` (`DynArray<u8>`: dados `+0x40`, bytes `+0x4c`) do `instanceIndex` do setup, com o passo do item gravado pelo construtor em
 // `+0x50` (`worldCookedStaticMeshNode`, `0x1046c6774`: `0x21`). O passo lido no nó tem de bater com o item do tipo.
 pub(crate) const NO_COZIDO_DADOS: usize = 0x40;
@@ -2905,28 +3114,27 @@ pub(crate) const NO_COZIDO_BYTES: usize = 0x4c;
 
 pub(crate) const NO_COZIDO_PASSO: usize = 0x50;
 
-/// Item cozido do tipo: `(passo, offset no item, largura)` do campo da op (`res`, `app`, `proxy`); itens empacotados (SDK: mesh `0x21` com `mesh`
-/// `+0` e `meshAppearance` `+8`; proxy genérico `0x29` com `nbNodesUnderProxy` `+0x21`; decal `0x24` com `material` `+0`; acústico `0x15` com
-/// `data` `+0`).
+/// `(passo do item, offset no item, largura)` do campo da op (`res`, `app`, `proxy`) no item cozido do tipo.
 pub(crate) fn campo_do_item_cozido(tipo: &str, op: &str) -> Option<(usize, usize, usize)> {
-    let (passo, app, proxy) = match tipo {
-        "worldCookedStaticMeshNode" => (0x21, Some(8), None),
-        "worldCookedGenericProxyMeshNode" => (0x29, Some(8), Some(0x21)),
-        "worldCookedStaticDecalNode" => (0x24, None, None),
-        "worldCookedAcousticSectorNode" => (0x15, None, None),
-        _ => return None,
-    };
-    match op {
-        "res" => Some((passo, 0, 8)),
-        "app" => Some((passo, app?, 8)),
-        "proxy" => Some((passo, proxy?, 4)),
+    match (tipo, op) {
+        ("worldCookedStaticMeshNode", "res") => Some((0x21, 0, 8)),
+        ("worldCookedStaticMeshNode", "app") => Some((0x21, 8, 8)),
+        ("worldCookedGenericProxyMeshNode", "res") => Some((0x29, 0, 8)),
+        ("worldCookedGenericProxyMeshNode", "app") => Some((0x29, 8, 8)),
+        ("worldCookedGenericProxyMeshNode", "proxy") => Some((0x29, 0x21, 4)),
+        ("worldCookedStaticDecalNode", "res") => Some((0x24, 0, 8)),
+        ("worldCookedAcousticSectorNode", "res") => Some((0x15, 0, 8)),
         _ => None,
     }
 }
 
-/// Item do `instanceIndex` do setup em `cookedData` do nó cozido, com o passo do nó igual a `passo` e o item inteiro dentro dos bytes.
+/// Item do `instanceIndex` do setup em `cookedData` do nó cozido, com o passo do nó igual a `passo`.
 pub(crate) unsafe fn item_cozido_do_setup(no: *const u8, setup: *const u8, passo: usize) -> Result<*mut u8, String> {
-    if !crate::memoria::is_readable(no.add(NO_COZIDO_DADOS) as *const c_void, 0x14) || !crate::memoria::is_readable(setup as *const c_void, 0x90) {
+    if no.is_null()
+        || setup.is_null()
+        || !crate::memoria::is_readable(no.add(NO_COZIDO_DADOS) as *const c_void, NO_COZIDO_PASSO + 4 - NO_COZIDO_DADOS)
+        || !crate::memoria::is_readable(setup as *const c_void, 0x90)
+    {
         return Err("nó cozido ou setup ilegível".to_string());
     }
     let lido = (no.add(NO_COZIDO_PASSO) as *const u32).read_unaligned() as usize;
@@ -2936,10 +3144,16 @@ pub(crate) unsafe fn item_cozido_do_setup(no: *const u8, setup: *const u8, passo
     let dados = (no.add(NO_COZIDO_DADOS) as *const u64).read_unaligned() as *mut u8;
     let bytes = (no.add(NO_COZIDO_BYTES) as *const u32).read_unaligned() as usize;
     let idx = (setup.add(SETUP_INDICE_DE_INSTANCIA) as *const u32).read_unaligned() as usize;
-    if dados.is_null() || (idx + 1) * passo > bytes || !crate::memoria::is_readable(dados.add(idx * passo) as *const c_void, passo) {
-        return Err(format!("instanceIndex {idx} fora dos {} item(ns) do nó cozido", bytes / passo));
+    let fora = || format!("instanceIndex {idx} fora dos {} item(ns) do nó cozido", bytes / passo.max(1));
+    let fim = idx.checked_add(1).and_then(|n| n.checked_mul(passo)).ok_or_else(fora)?;
+    if dados.is_null() || passo == 0 || fim > bytes {
+        return Err(fora());
     }
-    Ok(dados.add(idx * passo))
+    let item = dados.add(idx * passo);
+    if !crate::memoria::is_readable(item as *const c_void, passo) {
+        return Err(fora());
+    }
+    Ok(item)
 }
 
 #[cfg(test)]
@@ -3044,260 +3258,238 @@ pub(crate) unsafe fn instancias_do_no(no: *const u8, setup: *const u8) -> Result
     Ok((dados, inicio, n, tam, vizinho.then_some(inicio + n)))
 }
 
-/// Confere 1 linha da tabela contra o setor e devolve o plano de escrita (ou o motivo da recusa).
+/// Confere 1 linha da tabela contra o setor (`setups` setups de 0x90 B a partir de `setups_ptr`) e devolve o plano de escrita ou o motivo da recusa.
 pub(crate) unsafe fn planejar_delecao(d: &DelecaoDeNode, setups_ptr: *mut u8, setups: usize, legivel: bool) -> Result<PlanoDelecao, String> {
     if d.esperado != setups {
         return Err(format!("contagem (setor tem {setups}, .xl espera {})", d.esperado));
     }
-    if d.indice >= setups {
-        return Err(format!("índice {} >= {setups}", d.indice));
+    let i = d.indice;
+    if i >= setups {
+        return Err(format!("índice {i} >= {setups}"));
     }
     if !legivel {
         return Err("setups ilegíveis".to_string());
     }
-    let no = (setups_ptr.add(d.indice * 0x90 + 0x50) as *const u64).read_unaligned();
-    let vt = if no >= 0x1_0000_0000 && no & 7 == 0 { (no as *const u64).read_unaligned() } else { 0 };
-    match vptr_do_tipo_de_node(&d.tipo) {
-        Some(vptr_vm) => {
-            if vt != crate::rebase(vptr_vm) as u64 {
-                return Err(format!("índice {} não é {} (vptr {:#x})", d.indice, d.tipo, vm_do_jogo(vt)));
-            }
-        }
+    let (tipo, op, valores) = (d.tipo.as_str(), d.op.as_str(), d.valores.as_str());
+    let setup = setups_ptr.add(i * SETUP_TAM);
+    let no = (setup.add(SETUP_NO_OFF) as *const u64).read_unaligned() as *mut u8;
+    let vptr = if no as u64 >= 0x1_0000_0000 && no as u64 & 7 == 0 && crate::memoria::is_readable(no as *const c_void, 8) {
+        (no as *const u64).read_unaligned()
+    } else {
+        0
+    };
+    match vptr_do_tipo_de_node(tipo) {
+        Some(vm) if vptr != crate::rebase(vm) as u64 => return Err(format!("índice {i} não é {tipo} (vptr {:#x})", vm_do_jogo(vptr))),
+        Some(_) => {}
         None => {
-            let classe = if vt != 0 { classe_hash_do_vptr(vt) } else { None };
-            if classe != Some(tipo_hash(&d.tipo)) {
-                return Err(format!("índice {} não é {} (vptr {:#x}, classe {:?})", d.indice, d.tipo, vm_do_jogo(vt), classe.map(|h| format!("{h:#x}"))));
+            let classe = if vptr != 0 { classe_hash_do_vptr(vptr) } else { None };
+            if classe != Some(tipo_hash(tipo)) {
+                return Err(format!("índice {i} não é {tipo} (vptr {:#x}, classe {:?})", vm_do_jogo(vptr), classe.map(|h| format!("{h:#x}"))));
             }
         }
     }
-    if let Some((passo, off, largura)) = campo_do_item_cozido(&d.tipo, &d.op) {
-        let item = item_cozido_do_setup(no as *const u8, setups_ptr.add(d.indice * 0x90), passo)?;
-        let texto = d.valores.trim();
-        let valor = if d.op == "proxy" {
-            let diff: i64 = texto.parse().map_err(|_| "proxy com valor inválido".to_string())?;
-            if diff <= 0 {
-                return Err("proxy só soma diferença positiva".to_string());
-            }
-            diff as u64
-        } else {
-            u64::from_str_radix(texto.trim_start_matches("0x"), 16).map_err(|_| format!("{} com valor inválido", d.op))?
-        };
-        return Ok(PlanoDelecao::Campo { no: item, off, largura, valor, soma: d.op == "proxy" });
+    if let Some((passo, off, largura)) = campo_do_item_cozido(tipo, op) {
+        let item = item_cozido_do_setup(no, setup, passo)?;
+        return Ok(PlanoDelecao::Campo { no: item, off, largura, valor: valor_do_campo(op, valores)?, soma: op == "proxy" });
     }
-    match (d.tipo.as_str(), d.op.as_str()) {
-        // A referência apaga o mesh cozido pela escala do setup, como o estático.
-        ("worldStaticMeshNode" | "worldCookedStaticMeshNode", "") => Ok(PlanoDelecao::ScaleSetup(d.indice)),
-        ("worldInstancedMeshNode", "") | ("worldInstancedMeshNode", "subdel") => {
-            let (dados, inicio, n, _tam, vizinho) = instancias_do_no(no as *const u8, setups_ptr.add(d.indice * 0x90))?;
-            let faixa: Vec<usize> = if d.op.is_empty() { (inicio..inicio + n).collect() } else { faixa_subdel(&d.valores, inicio, n)? };
+    let vizinho = if i + 1 < setups { Some(i + 1) } else { i.checked_sub(1) };
+    let colisao = matches!(tipo, "worldCollisionNode" | "worldCookedCollisionNode");
+    let instanciado = tipo == "worldInstancedMeshNode";
+    let destrutivel = tipo == "worldInstancedDestructibleMeshNode";
+    let sub = matches!(op, "subpos" | "subrot" | "subscale");
+    match (tipo, op) {
+        ("worldStaticMeshNode" | "worldCookedStaticMeshNode", "") => Ok(PlanoDelecao::ScaleSetup(i)),
+        ("worldInstancedMeshNode", "" | "subdel") => {
+            let (dados, inicio, n, _, vizinho) = instancias_do_no(no, setup)?;
+            let faixa = if op.is_empty() { (inicio..inicio + n).collect() } else { faixa_subdel(valores, inicio, n)? };
             Ok(PlanoDelecao::Instancias { dados, inicio, n, faixa, vizinho })
         }
         ("worldInstancedDestructibleMeshNode", "subdel") => {
-            let (dados, inicio, n) = destrutiveis_do_no(no as *const u8)?;
-            let faixa = faixa_subdel(&d.valores, inicio, n)?;
-            Ok(PlanoDelecao::Destrutiveis { dados, inicio, n, faixa })
+            let (dados, inicio, n) = destrutiveis_do_no(no)?;
+            Ok(PlanoDelecao::Destrutiveis { dados, inicio, n, faixa: faixa_subdel(valores, inicio, n)? })
         }
-        (tipo @ ("worldCollisionNode" | "worldCookedCollisionNode"), "subdel") => {
-            let (atores, n) = atores_por_tipo(tipo, no as *const u8, setups_ptr.add(d.indice * 0x90))?;
-            let faixa = faixa_subdel(&d.valores, 0, n)?;
-            Ok(PlanoDelecao::Atores { atores, n, faixa })
+        ("worldCollisionNode" | "worldCookedCollisionNode", "subdel") => {
+            let (atores, n) = atores_por_tipo(tipo, no, setup)?;
+            Ok(PlanoDelecao::Atores { atores, n, faixa: faixa_subdel(valores, 0, n)? })
         }
-        // A referência apaga o nó de colisão cozido descendo todos os atores do item.
         ("worldCookedCollisionNode", "") => {
-            let (atores, n) = atores_do_no_cozido(no as *const u8, setups_ptr.add(d.indice * 0x90))?;
+            let (atores, n) = atores_do_no_cozido(no, setup)?;
             Ok(PlanoDelecao::Atores { atores, n, faixa: (0..n).collect() })
         }
         ("worldCollisionNode", "subshape") => {
-            let (dados, bytes, l) = listas_de_colisao(no as *const u8)?;
-            let shapes = shapes_do_subshape(&d.valores, dados, &l)?;
-            // Sem o preset no nó, ele entra realocando o buffer: só com o alocador conferido do `RawBuffer` (`+0x10` dele).
-            let tem_preset = indice_do_preset(std::slice::from_raw_parts(dados, bytes), &l, crate::cname::cname(PRESET_SEM_COLISAO)).is_some();
-            if !tem_preset && crate::jogo::buffers::vtable_do_alocador_rawbuffer((no as *const u8).add(COLISAO_DADOS_OFF + 0x10)).is_none() {
+            let (dados, bytes, listas) = listas_de_colisao(no)?;
+            let shapes = shapes_do_subshape(valores, dados, &listas)?;
+            let tem_preset = indice_do_preset(std::slice::from_raw_parts(dados, bytes), &listas, cname(PRESET_SEM_COLISAO)).is_some();
+            // Sem o preset no nó, ele entra num buffer novo pelo alocador do `RawBuffer` do nó.
+            if !tem_preset && crate::jogo::buffers::vtable_do_alocador_rawbuffer(no.add(COLISAO_DADOS_OFF + 0x10)).is_none() {
                 return Err("buffer do nó sem o alocador conferido: o preset No Collision não pode entrar".to_string());
             }
-            Ok(PlanoDelecao::ShapesSemColisao { no: no as *mut u8, shapes })
+            Ok(PlanoDelecao::ShapesSemColisao { no, shapes })
         }
         ("worldCookedCollisionNode", "subshape") => {
-            let (atores, n) = atores_do_no_cozido(no as *const u8, setups_ptr.add(d.indice * 0x90))?;
-            let faixa = atores_do_subshape_cozido(&d.valores, n, |a| (atores.add(a * ATOR_TAM + 0x22) as *const u16).read_unaligned() as usize)?;
+            let (atores, n) = atores_do_no_cozido(no, setup)?;
+            let faixa = atores_do_subshape_cozido(valores, n, |a| (atores.add(a * ATOR_TAM + 0x22) as *const u16).read_unaligned() as usize)?;
             Ok(PlanoDelecao::Atores { atores, n, faixa })
         }
-        ("worldAdvertisementNode", "") => {
-            let doador = no_fantasma()?;
-            let vizinho = if d.indice + 1 < setups { Some(d.indice + 1) } else { d.indice.checked_sub(1) };
-            Ok(PlanoDelecao::Doador { indice: d.indice, doador, vizinho })
-        }
-        (tipo @ ("worldCollisionNode" | "worldCookedCollisionNode"), op @ ("subpos" | "subrot" | "subscale")) => {
-            let (atores, n) = atores_por_tipo(tipo, no as *const u8, setups_ptr.add(d.indice * 0x90))?;
+        ("worldAdvertisementNode", "") => Ok(PlanoDelecao::Doador { indice: i, doador: no_fantasma()?, vizinho }),
+        (_, _) if colisao && sub => {
+            let (atores, n) = atores_por_tipo(tipo, no, setup)?;
             if op == "subscale" {
                 return Err("subscale não cabe no ator de colisão (o WorldTransform não tem scale)".to_string());
             }
-            let campos: Vec<&str> = d.valores.split_whitespace().collect();
-            let esperadas: usize = campos.first().and_then(|v| v.parse().ok()).ok_or_else(|| format!("{op} sem contagem"))?;
-            if esperadas != n {
-                return Err(format!("atores (nó tem {n}, .xl espera {esperadas})"));
-            }
-            let i: usize = campos.get(1).and_then(|v| v.parse().ok()).ok_or_else(|| format!("{op} sem índice"))?;
-            if i >= n {
-                return Err(format!("ator {i} >= {n}"));
-            }
-            let valores: Vec<f32> =
-                campos[2..].iter().map(|v| v.parse::<f32>()).collect::<Result<_, _>>().map_err(|_| format!("{op} com valor inválido"))?;
-            if valores.len() != 4 || valores.iter().any(|v| !v.is_finite()) {
-                return Err(format!("{op} com {} valor(es), espera 4", valores.len()));
-            }
-            // Controle do layout do ator: a orientação `@0x10` de todo ator do nó tem que ser um quaternion unitário.
-            let unitario = |j: usize| {
-                let s: f32 = (0..4).map(|k| (atores.add(j * ATOR_TAM + 0x10 + k * 4) as *const f32).read_unaligned().powi(2)).sum();
-                (s - 1.0).abs() < 0.01
-            };
-            if !(0..n).all(unitario) {
+            let (j, v) = valores_do_sub(op, valores, n, "atores", "ator", 4)?;
+            if !(0..n).all(|a| unitaria(f32s::<4>(atores.add(a * ATOR_TAM + 0x10)))) {
                 return Err("orientação não unitária nos atores de colisão (layout do ator não confirmado)".to_string());
             }
             if op == "subpos" {
-                if valores[..3].iter().any(|v| v.abs() >= 16000.0) {
-                    return Err("subpos fora do alcance do ponto fixo (±16000 m)".to_string());
-                }
-                let fixos: Vec<i32> = valores[..3].iter().map(|v| ((*v as f64) * 131072.0).round() as i32).collect();
-                Ok(PlanoDelecao::SubNoI32 { dados: atores, tam: ATOR_TAM, j: i, off: 0, valores: fixos, inicio: 0, n })
-            } else {
-                Ok(PlanoDelecao::SubNo { dados: atores, tam: ATOR_TAM, j: i, off: 0x10, valores, inicio: 0, n })
+                return Ok(PlanoDelecao::SubNoI32 { dados: atores, tam: ATOR_TAM, j, off: 0, valores: ponto_fixo(&v[..3])?, inicio: 0, n });
             }
+            Ok(PlanoDelecao::SubNo { dados: atores, tam: ATOR_TAM, j, off: 0x10, valores: v, inicio: 0, n })
         }
-        (tipo @ ("worldInstancedMeshNode" | "worldInstancedDestructibleMeshNode"), op @ ("subpos" | "subrot" | "subscale")) => {
-            let destrutivel = tipo == "worldInstancedDestructibleMeshNode";
-            let (dados, inicio, n, tam) = if !destrutivel {
-                let (dados, inicio, n, _t, _v) = instancias_do_no(no as *const u8, setups_ptr.add(d.indice * 0x90))?;
+        (_, _) if (instanciado || destrutivel) && sub => {
+            let (dados, inicio, n, tam) = if instanciado {
+                let (dados, inicio, n, _, _) = instancias_do_no(no, setup)?;
                 (dados, inicio, n, INSTANCIA_TAM)
             } else {
-                let (dados, inicio, n) = destrutiveis_do_no(no as *const u8)?;
+                let (dados, inicio, n) = destrutiveis_do_no(no)?;
                 (dados, inicio, n, DESTRUTIVEL_TAM)
             };
             let (off, qtd) = match op {
-                "subpos" => (0x00, 4),
+                "subpos" => (0, 4),
                 "subrot" => (0x10, 4),
                 _ => (0x20, 3),
             };
-            if off + qtd * 4 > tam {
+            if off + 4 * qtd > tam {
                 return Err(format!("{op} não cabe no elemento de {tam:#x} B de {tipo}"));
             }
-            let campos: Vec<&str> = d.valores.split_whitespace().collect();
-            let esperadas: usize = campos.first().and_then(|v| v.parse().ok()).ok_or_else(|| format!("{op} sem contagem"))?;
-            if esperadas != n {
-                return Err(format!("instâncias (nó tem {n}, .xl espera {esperadas})"));
-            }
-            let i: usize = campos.get(1).and_then(|v| v.parse().ok()).ok_or_else(|| format!("{op} sem índice"))?;
-            if i >= n {
-                return Err(format!("instância {i} >= {n}"));
-            }
-            let valores: Vec<f32> =
-                campos[2..].iter().map(|v| v.parse::<f32>()).collect::<Result<_, _>>().map_err(|_| format!("{op} com valor inválido"))?;
-            if valores.len() != qtd || valores.iter().any(|v| !v.is_finite()) {
-                return Err(format!("{op} com {} valor(es), espera {qtd}", valores.len()));
-            }
-            // Controle do layout do elemento: a orientação `@0x10` de toda instância do nó tem que ser um quaternion unitário.
-            let unitario = |j: usize| {
-                let s: f32 = (0..4).map(|k| (dados.add(j * tam + 0x10 + k * 4) as *const f32).read_unaligned().powi(2)).sum();
-                (s - 1.0).abs() < 0.01
-            };
-            if !(inicio..inicio + n).all(unitario) {
+            let (k, v) = valores_do_sub(op, valores, n, "instâncias", "instância", qtd)?;
+            let j = inicio + k;
+            if !(inicio..inicio + n).all(|e| unitaria(f32s::<4>(dados.add(e * tam + 0x10)))) {
                 return Err(format!("orientação não unitária em {tipo} (layout do elemento não confirmado)"));
             }
-            if destrutivel && op != "subscale" {
-                // 4f-4: o elemento do destrutível é relativo ao setup do nó; a troca acontece no mundo, na aplicação.
-                let s = setups_ptr.add(d.indice * 0x90) as *const f32;
-                let setup = Xf {
-                    p: [s.read_unaligned(), s.add(1).read_unaligned(), s.add(2).read_unaligned()],
-                    q: [s.add(4).read_unaligned(), s.add(5).read_unaligned(), s.add(6).read_unaligned(), s.add(7).read_unaligned()],
-                };
-                let norma: f32 = setup.q.iter().map(|v| v * v).sum();
-                if (norma - 1.0).abs() > 0.01 || setup.p.iter().any(|v| !v.is_finite()) {
+            if destrutivel {
+                let xf = Xf { p: f32s::<3>(setup), q: f32s::<4>(setup.add(0x10)) };
+                if !unitaria(xf.q) || !xf.p.iter().all(|c| c.is_finite()) {
                     return Err("orientação do setup não unitária (layout do setup não confirmado)".to_string());
                 }
-                let (pos, rot) = if op == "subpos" { (Some([valores[0], valores[1], valores[2]]), None) } else { (None, Some([valores[0], valores[1], valores[2], valores[3]])) };
-                return Ok(PlanoDelecao::SubNoLocal { dados, j: inicio + i, inicio, n, setup, pos, rot });
+                let (pos, rot) = if op == "subpos" { (Some([v[0], v[1], v[2]]), None) } else { (None, Some([v[0], v[1], v[2], v[3]])) };
+                return Ok(PlanoDelecao::SubNoLocal { dados, j, inicio, n, setup: xf, pos, rot });
             }
-            if !destrutivel && op == "subpos" {
-                // 4f-4: a posição do instanced mesh é `WorldPosition` (ponto fixo, 1/131072 m), como a do ator de colisão. Controle do layout: lido
-                // como ponto fixo, o Z de toda instância fica entre -1000 e 3000 m (um f32 lido assim passaria de ±6000 m).
-                let z_ok = |j: usize| {
-                    let z = (dados.add(j * tam + 0x08) as *const i32).read_unaligned() as f64 / 131072.0;
+            if op == "subpos" {
+                let plausivel = (inicio..inicio + n).all(|e| {
+                    let z = (dados.add(e * tam + 0x08) as *const i32).read_unaligned() as f64 / FIXEDPOINT_ESCALA as f64;
                     (-1000.0..3000.0).contains(&z)
-                };
-                if !(inicio..inicio + n).all(z_ok) {
+                });
+                if !plausivel {
                     return Err("posição do instanced mesh fora do ponto fixo plausível (layout do elemento não confirmado)".to_string());
                 }
-                if valores[..3].iter().any(|v| v.abs() >= 16000.0) {
-                    return Err("subpos fora do alcance do ponto fixo (±16000 m)".to_string());
-                }
-                let fixos: Vec<i32> = valores[..3].iter().map(|v| ((*v as f64) * 131072.0).round() as i32).collect();
-                return Ok(PlanoDelecao::SubNoI32 { dados, tam, j: inicio + i, off: 0, valores: fixos, inicio, n });
+                return Ok(PlanoDelecao::SubNoI32 { dados, tam, j, off: 0, valores: ponto_fixo(&v[..3])?, inicio, n });
             }
-            Ok(PlanoDelecao::SubNo { dados, tam, j: inicio + i, off, valores, inicio, n })
+            Ok(PlanoDelecao::SubNo { dados, tam, j, off, valores: v, inicio, n })
         }
-        ("worldInstancedMeshNode", op @ ("res" | "app")) => {
-            // Na 2.5 o `mesh`/`meshAppearance` do nó cozido moram no elemento do setup em `cookedInstances`, fora do RTTI do nó.
-            let (dados, idx) = elemento_do_setup(no as *const u8, setups_ptr.add(d.indice * 0x90), NO_INSTANCIADO_DADOS, DADO_COZIDO_TAM)?;
+        ("worldInstancedMeshNode", "res" | "app") => {
+            let (dados, idx) = elemento_do_setup(no, setup, NO_INSTANCIADO_DADOS, DADO_COZIDO_TAM)?;
             let off = idx * DADO_COZIDO_TAM + if op == "res" { DADO_COZIDO_MESH } else { DADO_COZIDO_APARENCIA };
-            let valor = u64::from_str_radix(d.valores.trim().trim_start_matches("0x"), 16).map_err(|_| format!("{op} com valor inválido"))?;
-            Ok(PlanoDelecao::Campo { no: dados, off, largura: 8, valor, soma: false })
+            Ok(PlanoDelecao::Campo { no: dados, off, largura: 8, valor: valor_do_campo(op, valores)?, soma: false })
         }
-        (_, op @ ("res" | "app" | "rec" | "proxy")) => {
-            let cls = if vt != 0 { classe_do_vptr(vt) } else { None }.ok_or_else(|| "classe do nó não decodificada".to_string())?;
-            let (candidatos, largura): (&[&str], usize) = match op {
-                "res" => (&["mesh", "entityTemplate", "effect", "material", "meshRef"], 8),
-                "app" => (&["meshAppearance", "appearanceName"], 8),
-                "rec" => (&["objectRecordId"], 8),
-                _ => (&["nbNodesUnderProxy"], 4),
+        (_, "res" | "app" | "rec" | "proxy") => {
+            let classe = if vptr != 0 { classe_do_vptr(vptr) } else { None }.ok_or_else(|| "classe do nó não decodificada".to_string())?;
+            let nomes: &[&str] = match op {
+                "res" => &["mesh", "entityTemplate", "effect", "material", "meshRef"],
+                "app" => &["meshAppearance", "appearanceName"],
+                "rec" => &["objectRecordId"],
+                _ => &["nbNodesUnderProxy"],
             };
-            let off = candidatos
+            let largura = if op == "proxy" { 4 } else { 8 };
+            let off = nomes
                 .iter()
-                .find_map(|c| offset_do_campo(cls as *mut c_void, bwms_primitives::fnv1a64(c.as_bytes())))
-                .ok_or_else(|| format!("{op}: a classe {} não tem {}", d.tipo, candidatos.join("/")))?;
-            let texto = d.valores.trim();
-            let valor = if op == "proxy" {
-                let diff: i64 = texto.parse().map_err(|_| "proxy com valor inválido".to_string())?;
-                if diff <= 0 {
-                    return Err("proxy só soma diferença positiva".to_string());
-                }
-                diff as u64
-            } else {
-                u64::from_str_radix(texto.trim_start_matches("0x"), 16).map_err(|_| format!("{op} com valor inválido"))?
-            };
-            let no_ptr = no as *mut u8;
-            if !crate::memoria::is_readable(no_ptr.add(off) as *const c_void, largura) {
+                .find_map(|n| offset_do_campo(classe as *mut c_void, bwms_primitives::fnv1a64(n.as_bytes())))
+                .ok_or_else(|| format!("{op}: a classe {tipo} não tem {}", nomes.join("/")))?;
+            let valor = valor_do_campo(op, valores)?;
+            if !crate::memoria::is_readable(no.add(off) as *const c_void, largura) {
                 return Err(format!("{op}: campo ilegível"));
             }
-            Ok(PlanoDelecao::Campo { no: no_ptr, off, largura, valor, soma: op == "proxy" })
+            Ok(PlanoDelecao::Campo { no, off, largura, valor, soma: op == "proxy" })
         }
-        (_, op @ ("pos" | "rot" | "scale")) => {
+        (_, "pos" | "rot" | "scale") => {
             let (off, n) = match op {
-                "pos" => (0x00, 4),
+                "pos" => (0, 4),
                 "rot" => (0x10, 4),
                 _ => (0x20, 3),
             };
-            let valores: Vec<f32> =
-                d.valores.split_whitespace().map(|v| v.parse::<f32>()).collect::<Result<_, _>>().map_err(|_| format!("{op} com valor inválido"))?;
-            if valores.len() != n || valores.iter().any(|v| !v.is_finite()) {
-                return Err(format!("{op} com {} valor(es), espera {n}", valores.len()));
-            }
-            let vizinho = if d.indice + 1 < setups { Some(d.indice + 1) } else { d.indice.checked_sub(1) };
-            Ok(PlanoDelecao::Setup { indice: d.indice, off, valores, vizinho })
+            let v = floats_do_xl(op, valores.split_whitespace(), n)?;
+            Ok(PlanoDelecao::Setup { indice: i, off, valores: v, vizinho })
         }
-        (_, "") if vptr_do_tipo_de_node(&d.tipo).is_none() => {
-            let doador = no_fantasma()?;
-            let vizinho = if d.indice + 1 < setups { Some(d.indice + 1) } else { d.indice.checked_sub(1) };
-            Ok(PlanoDelecao::Generica { indice: d.indice, doador, vizinho })
-        }
-        (_, op) if !op.is_empty() => Err(format!("op {op} sem suporte")),
-        _ => Err(format!("tipo {} sem suporte", d.tipo)),
+        (_, "") if vptr_do_tipo_de_node(tipo).is_none() => Ok(PlanoDelecao::Generica { indice: i, doador: no_fantasma()?, vizinho }),
+        (_, "") => Err(format!("tipo {tipo} sem suporte")),
+        (_, _) => Err(format!("op {op} sem suporte")),
     }
+}
+
+/// Setup de nó no setor: 0x90 B, com o ponteiro do nó em `+0x50`.
+const SETUP_TAM: usize = 0x90;
+
+const SETUP_NO_OFF: usize = 0x50;
+
+/// `N` floats a partir de `p`.
+unsafe fn f32s<const N: usize>(p: *const u8) -> [f32; N] {
+    std::array::from_fn(|k| (p.add(4 * k) as *const f32).read_unaligned())
+}
+
+/// Quaternion de módulo 1 com folga de 0,01: o controle de que o offset lido é mesmo uma orientação.
+fn unitaria(q: [f32; 4]) -> bool {
+    (q.iter().map(|v| v * v).sum::<f32>() - 1.0).abs() < 0.01
+}
+
+/// Posição em metros no ponto fixo do motor (1/131072 m); fora de ±16000 m o `i32` estoura.
+fn ponto_fixo(v: &[f32]) -> Result<Vec<i32>, String> {
+    if v.iter().any(|c| c.abs() >= 16000.0) {
+        return Err("subpos fora do alcance do ponto fixo (±16000 m)".to_string());
+    }
+    Ok(v.iter().map(|&c| (c as f64 * FIXEDPOINT_ESCALA as f64).round() as i32).collect())
+}
+
+/// `n` floats finitos dos campos.
+fn floats_do_xl<'a>(op: &str, campos: impl Iterator<Item = &'a str>, n: usize) -> Result<Vec<f32>, String> {
+    let v = campos.map(|c| c.parse::<f32>()).collect::<Result<Vec<f32>, _>>().map_err(|_| format!("{op} com valor inválido"))?;
+    if v.len() != n || !v.iter().all(|c| c.is_finite()) {
+        return Err(format!("{op} com {} valor(es), espera {n}", v.len()));
+    }
+    Ok(v)
+}
+
+/// `<contagem> <índice> <valores...>` de uma mutação de sub-nó: o índice conferido contra os `n` elementos e `qtd` floats.
+fn valores_do_sub(op: &str, valores: &str, n: usize, elementos: &str, elemento: &str, qtd: usize) -> Result<(usize, Vec<f32>), String> {
+    let mut campos = valores.split_whitespace();
+    let contagem = campos.next().and_then(|c| c.parse::<usize>().ok()).ok_or_else(|| format!("{op} sem contagem"))?;
+    if contagem != n {
+        return Err(format!("{elementos} (nó tem {n}, .xl espera {contagem})"));
+    }
+    let i = campos.next().and_then(|c| c.parse::<usize>().ok()).ok_or_else(|| format!("{op} sem índice"))?;
+    if i >= n {
+        return Err(format!("{elemento} {i} >= {n}"));
+    }
+    Ok((i, floats_do_xl(op, campos, qtd)?))
+}
+
+/// Valor de uma mutação de campo: `proxy` é a diferença decimal positiva que se soma; as outras, hash em hex, com ou sem `0x`.
+fn valor_do_campo(op: &str, valores: &str) -> Result<u64, String> {
+    let t = valores.trim();
+    if op == "proxy" {
+        let v = t.parse::<i64>().map_err(|_| "proxy com valor inválido".to_string())?;
+        if v <= 0 {
+            return Err("proxy só soma diferença positiva".to_string());
+        }
+        return Ok(v as u64);
+    }
+    let hex = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")).unwrap_or(t);
+    u64::from_str_radix(hex, 16).map_err(|_| format!("{op} com valor inválido"))
 }
 
 #[cfg(feature = "devtools")]
 pub(crate) static VPTR_CENSO_SETORES: AtomicU64 = AtomicU64::new(0);
 
-// ArchiveXL `#49` 4e-1, teste automático (`~/.bwms-hook-wssector-inst-teste`, 2026-09-11): o boot 54 mostrou que o índice 3 do setor do menu não é nó
+// `#49` 4e-1, teste automático (`~/.bwms-hook-wssector-inst-teste`, 2026-09-11): o boot 54 mostrou que o índice 3 do setor do menu não é nó
 // de instâncias. Aqui o alvo sai do próprio setor. O hook do `PostLoad` roda em thread de job e só lê memória: a 1ª versão perguntava a classe pelo
 // RTTI (GetType + nome do CName) e o boot 55 parou no 1º setor. O alvo agora é achado pelo vptr (`worldInstancedMeshNode` `0x1078e5130`), e os 4
 // primeiros setores logam os vptrs distintos de nó (pra conferir a constante offline). No 1º setor com esse vptr e buffer válido com ≥ 2 instâncias,
@@ -3435,7 +3627,7 @@ pub(crate) static COZIDO_TESTE_FEITO: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "devtools")]
 static COZIDO_SETORES_VISTOS: AtomicU64 = AtomicU64::new(0);
 
-// ArchiveXL 1.28 (nós cozidos da 2.5), teste automático (mesmo marcador do teste de instâncias): no 1º setor com `worldCookedStaticMeshNode` cujo
+// Nós cozidos da 2.5 (cobertura 1.28), teste automático (mesmo marcador do teste de instâncias): no 1º setor com `worldCookedStaticMeshNode` cujo
 // item do setup está dentro de `cookedData`, um `app` pelo caminho do `.xl` com o `meshAppearance` de outro item do mesmo nó; relido, os outros itens
 // intactos, devolvido. Sem nó cozido nos primeiros 60 setores, o veredito diz isso.
 #[cfg(feature = "devtools")]
@@ -3508,7 +3700,7 @@ pub(crate) static COLISAO_COZIDA_TESTE_FEITO: AtomicBool = AtomicBool::new(false
 #[cfg(feature = "devtools")]
 static COLISAO_COZIDA_SETORES_VISTOS: AtomicU64 = AtomicU64::new(0);
 
-// ArchiveXL 1.28, colisão cozida (mesmo marcador): no 1º `worldCookedCollisionNode` com 2+ atores no item do setup, o ator 0 vai a Z -2000 pelo caminho
+// Colisão cozida da 2.5 (cobertura 1.28, mesmo marcador): no 1º `worldCookedCollisionNode` com 2+ atores no item do setup, o ator 0 vai a Z -2000 pelo caminho
 // do `.xl` (`subdel`), o ator 1 fica; o Z do ator 0 volta.
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn setor_teste_colisao_cozida(this: *mut c_void, hash: u64) {
@@ -4108,7 +4300,7 @@ pub(crate) unsafe fn setor_teste_colisao(this: *mut c_void, hash: u64) {
     crate::veredito_dev!(
         "[axl-colisao-teste] VEREDITO setor {hash:#018x}: Z do ator 0 depois do .xl = {gravado} (esperado {ATOR_Z_DELETADO}), restaurado={restaurado}"
     );
-    // ArchiveXL 1.27.0 (`subshape`): no 1º ator do nó com 2+ shapes, a shape 0 passa ao preset `No Collision` pelo caminho do `.xl` e a shape 1 fica;
+    // `subshape` (cobertura 1.27.0): no 1º ator do nó com 2+ shapes, a shape 0 passa ao preset `No Collision` pelo caminho do `.xl` e a shape 1 fica;
     // depois a shape volta ao preset de antes (o preset acrescentado e o buffer realocado ficam, sem efeito em shape nenhuma).
     let no = (setups_ptr.add(i0 * 0x90 + 0x50) as *const u64).read_unaligned() as *const u8;
     let fim_shape = |texto: String| crate::veredito_dev!("[axl-colisao-teste] VEREDITO-SHAPE setor {hash:#018x}: {texto}");
@@ -4520,7 +4712,7 @@ mod testes_de_eventos_ativos {
     use crate::tipos_do_motor::CALLBACKS;
     use crate::tipos_do_motor::STATIC_CALLBACKS;
 
-    // Codeware `#118`: registro cujo hook não sobe não vira "instalado" em lugar nenhum. `Bwms/TesteAtivos` não tem hook no BWMS, então o
+    // Registro cujo hook não sobe não vira "instalado" em lugar nenhum. `Bwms/TesteAtivos` não tem hook no BWMS, então o
     // `ativar_hooks_do_evento` do registro não instala nada: o mesmo resultado físico de uma instalação que falhou. Offline é a única falha que não passa
     // pelo `rebase`, que aqui varreria o binário de teste atrás das assinaturas. O número segue só a tabela de ouvintes: sobe no registro de instância e
     // no estático e desce em qualquer saída da tabela (`Unregister` do handler, `RunMode.Once`, varredura do `Session/End`), não só no `UnregisterCallback`.

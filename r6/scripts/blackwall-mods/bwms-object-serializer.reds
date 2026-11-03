@@ -1,4 +1,4 @@
-// bwms-object-serializer.reds — gravar e ler objetos do motor em arquivo (Codeware `#252`, `ObjectSerializer::SaveToFile`/`ReadFromFile`).
+// bwms-object-serializer.reds — gravar e ler objetos do motor em arquivo (`ObjectSerializer::SaveToFile`/`ReadFromFile`).
 // Os arquivos ficam em `r6/storage/bwms/objetos/`, e o caminho é relativo a essa pasta: partes de letras, dígitos, `_`, `-` e `.` separadas por `/`, sem `..`.
 // O arquivo guarda o nome da classe, então a leitura não pede o tipo. Guarde o retorno numa variável antes de comparar.
 

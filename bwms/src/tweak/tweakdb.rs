@@ -1,5 +1,4 @@
-//! Leitor do `tweakdb.bin` do Cyberpunk 2077 — port do codec do WolvenKit
-//! (`WolvenKit.RED4/TweakDB`). Os flats NÃO são comprimidos, então é tudo
+//! Leitor do `tweakdb.bin` do Cyberpunk 2077. Os flats NÃO são comprimidos, então é tudo
 //! leitura direta (sem Kraken).
 //!
 //! Layout (little-endian):
@@ -27,29 +26,30 @@ pub const MAGIC: u32 = 0x0BB1_DB47;
 pub const BLOB_VERSION: i32 = 8;
 pub const PARSER_VERSION: i32 = 4;
 
-/// Os 20 `ETweakType`, em ordem, com (rótulo, nome RED). O nome RED é o que
-/// entra no FNV-1a64 para formar o `typeHash`.
+/// Os 20 tipos de flat, pelo índice que `encode_value`/`read_scalar`/`writer` usam, com (rótulo impresso, nome do tipo no motor).
+/// O nome do motor é o que entra no FNV-1a64 para formar o `typeHash`; o rótulo impresso é o mesmo nome, para a saída da CLI
+/// falar a língua do `tweakdb.bin` e dos arquivos de tweak.
 pub const TWEAK_TYPES: [(&str, &str); 20] = [
     ("CName", "CName"),
-    ("CString", "String"),
+    ("String", "String"),
     ("TweakDBID", "TweakDBID"),
-    ("CResource", "raRef:CResource"),
-    ("CFloat", "Float"),
-    ("CBool", "Bool"),
-    ("CUint8", "Uint8"),
-    ("CUint16", "Uint16"),
-    ("CUint32", "Uint32"),
-    ("CUint64", "Uint64"),
-    ("CInt8", "Int8"),
-    ("CInt16", "Int16"),
-    ("CInt32", "Int32"),
-    ("CInt64", "Int64"),
-    ("CColor", "Color"),
-    ("CEulerAngles", "EulerAngles"),
-    ("CQuaternion", "Quaternion"),
-    ("CVector2", "Vector2"),
-    ("CVector3", "Vector3"),
-    ("LocKey", "gamedataLocKeyWrapper"),
+    ("raRef:CResource", "raRef:CResource"),
+    ("Float", "Float"),
+    ("Bool", "Bool"),
+    ("Uint8", "Uint8"),
+    ("Uint16", "Uint16"),
+    ("Uint32", "Uint32"),
+    ("Uint64", "Uint64"),
+    ("Int8", "Int8"),
+    ("Int16", "Int16"),
+    ("Int32", "Int32"),
+    ("Int64", "Int64"),
+    ("Color", "Color"),
+    ("EulerAngles", "EulerAngles"),
+    ("Quaternion", "Quaternion"),
+    ("Vector2", "Vector2"),
+    ("Vector3", "Vector3"),
+    ("gamedataLocKeyWrapper", "gamedataLocKeyWrapper"),
 ];
 
 #[derive(Debug)]
@@ -170,7 +170,7 @@ pub struct RawGroup {
 }
 
 /// Codifica um valor ESCALAR editável a partir de texto, nos bytes que o tweakdb
-/// espera. Cobre os 20 ETweakType escalares: numéricos/bool (parse direto = faixa
+/// espera. Cobre os 20 tipos de flat escalares: numéricos/bool (parse direto = faixa
 /// checada), strings (VLQ), TweakDBID/CResource (u64; aceita `$Nome`, hex `0x..`
 /// ou decimal), LocKey (u64 pela regra do runtime, [`bwms_primitives::lockey_chave`]),
 /// Color (`r,g,b,a` 0-255 ou `#RRGGBBAA`) e vetores (floats por vírgula). O writer
@@ -210,8 +210,8 @@ pub fn encode_value(type_index: usize, text: &str) -> std::result::Result<Vec<u8
 fn struct_posicional(type_index: usize, t: &str) -> String {
     let tipo = TWEAK_TYPES[type_index].1;
     match t.as_bytes().first() {
-        Some(b'{') => bwms_primitives::tweakxl::struct_em_posicional(tipo, t),
-        Some(b'(') => bwms_primitives::tweakxl::tupla_em_posicional(tipo, t),
+        Some(b'{') => bwms_primitives::tweaks::struct_em_posicional(tipo, t),
+        Some(b'(') => bwms_primitives::tweaks::tupla_em_posicional(tipo, t),
         _ => None,
     }
     .unwrap_or_else(|| t.to_string())
@@ -243,7 +243,7 @@ fn strip_quotes(s: &str) -> &str {
     }
 }
 
-/// Normaliza um CName das formas do TweakXL (`n"X"`, `CName("X")`) para o texto
+/// Normaliza um CName das formas declarativas (`n"X"`, `CName("X")`) para o texto
 /// nu. `None` e demais passam direto.
 fn normalize_cname(text: &str) -> String {
     let t = text.trim();
@@ -259,7 +259,7 @@ fn normalize_cname(text: &str) -> String {
     t.to_string()
 }
 
-/// u64 de um id/ref. Aceita as formas do TweakXL além das nossas:
+/// u64 de um id/ref. Aceita as formas declarativas dos mods além das nossas:
 /// `$Nome` · `t"Nome"`/`t'Nome'` · `TweakDBID("Nome")` · `LocKey#N` ·
 /// `<TDBID:CRC:LEN>` · `None`/vazio (=0) · `0x..` hex · decimal u64 ·
 /// e foreign-key implícito (token com `.`/letra → nome).
@@ -446,7 +446,7 @@ impl TweakDb {
         let queries_offset = cur.i32()? as u32;
         let group_tags_offset = cur.i32()? as u32;
 
-        // Mapa typeHash -> ResolvedType (escalar e array de cada ETweakType).
+        // Mapa typeHash -> ResolvedType (escalar e array de cada tipo de flat).
         let mut type_hashes = Vec::with_capacity(40);
         for (index, (_, red_name)) in TWEAK_TYPES.iter().enumerate() {
             type_hashes.push((
@@ -651,7 +651,7 @@ fn read_value(cur: &mut Cursor, ty: ResolvedType) -> Result<FlatValue> {
     }
 }
 
-/// Lê um valor escalar do `ETweakType` dado pelo índice.
+/// Lê um valor escalar do tipo de flat dado pelo índice.
 fn read_scalar(cur: &mut Cursor, type_index: usize) -> Result<FlatValue> {
     Ok(match type_index {
         0 => FlatValue::Str(cur.lp_string()?),  // CName
@@ -802,7 +802,7 @@ mod tests {
 
     #[test]
     fn type_hashes_distintos_e_resolvem() {
-        // Cada ETweakType (escalar e array) gera um typeHash distinto.
+        // Cada tipo de flat (escalar e array) gera um typeHash distinto.
         let mut seen = std::collections::HashSet::new();
         for (_, red) in TWEAK_TYPES {
             assert!(seen.insert(fnv1a64(red.as_bytes())));

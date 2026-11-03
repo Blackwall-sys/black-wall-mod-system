@@ -4,11 +4,11 @@
 //! Por dentro todo número é `f64`, como na linguagem; `Value::Integer` só existe na fronteira com o Rust, para o número inteiro chegar como
 //! inteiro a quem chama.
 
+mod casador;
 mod exec;
 mod json;
 mod lexer;
 mod padrao;
-mod padroes;
 mod parser;
 
 use std::any::{Any, TypeId};
@@ -627,7 +627,7 @@ impl Lua {
         self.e.globais.borrow().clone().expect("posta no Lua::new")
     }
 
-    /// Para onde vai o `print` dos mods (o CET manda ao console).
+    /// Para onde vai o `print` dos mods.
     pub fn set_saida(&self, f: Box<dyn Fn(&str)>) {
         *self.e.saida.borrow_mut() = Some(f);
     }

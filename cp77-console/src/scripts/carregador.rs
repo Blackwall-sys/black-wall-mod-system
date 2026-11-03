@@ -1,4 +1,4 @@
-//! Recompilação dos `.reds` pro modder (RED4ext `#97`): com `red4ext/bwms-recarga-de-scripts` na pasta do jogo, o vigia recompila o bundle
+//! Recompilação dos `.reds` pro modder: com `red4ext/bwms-recarga-de-scripts` na pasta do jogo, o vigia recompila o bundle
 //! pelo `scc` do pacote quando um `.reds` muda, e o `aplicar_tick` troca só o corpo das funções mudadas com o jogo aberto
 //! (`tradutor_de_bytecode`).
 //!
@@ -291,8 +291,8 @@ pub(crate) fn vigia_tick() {
 /// Pedido de aplicação a quente esperando a thread do jogo.
 static APLICAR: AtomicBool = AtomicBool::new(false);
 
-/// Na thread do jogo: aplica o blob que o vigia compilou, trocando o corpo das funções mudadas
-/// (RED4ext `#97`). Função criada ou removida não entra a quente — aí o relato pede reiniciar.
+/// Na thread do jogo: aplica o blob que o vigia compilou, trocando o corpo das funções mudadas.
+/// Função criada ou removida não entra a quente — aí o relato pede reiniciar.
 pub(crate) fn aplicar_tick() {
     if !APLICAR.swap(false, Ordering::AcqRel) || crate::inicio::boot::exec_nested() {
         return;

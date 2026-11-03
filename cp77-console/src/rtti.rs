@@ -2,8 +2,7 @@
 //! Resolve uma função RED por nome (CName=FNV1a64) varrendo o registry e a
 //! invoca pelo executor do jogo, montando o CScriptStackFrame na mão.
 //!
-//! Offsets/ABI = FATOS da RTTI do jogo (v2.3.1 build 5314028; os mesmos que os
-//! headers públicos do RED4ext descrevem). Chamada = ponteiro transmutado em
+//! Offsets/ABI = FATOS da RTTI do jogo (v2.3.1 build 5314028). Chamada = ponteiro transmutado em
 //! `extern "C"` (AAPCS64) — NÃO precisa de gancho (`ganchos` é só para desviar código).
 
 use std::convert::TryInto;
@@ -20,7 +19,7 @@ const ADDR_POOL_DEFAULT_ALLOC_ALIGNED: u64 = 0x1_0002_24a4;
 /// PoolDefault::Free(red::memory::Block&) — Block = {ptr, size}. Libera o que AllocateAligned deu.
 const ADDR_POOL_DEFAULT_FREE: u64 = 0x1_0002_292c;
 /// `Handle<T>::Handle(T* aPtr)` — construtor UNIVERSAL de `ref<T>` do próprio motor (RE
-/// 2026-07-18, sessão `handle-ctor-re`, fechando o bloqueador nº2 de `cw-callback-handler`
+/// 2026-07-18, sessão `handle-ctor-re`, fechando o bloqueador nº2 de handler de callback
 /// documentado em `register.rs::write_handle_ret`/HISTORICO cont.100). Achado por vizinhança:
 /// a rotina de RELEASE (teardown de locais `ref<>` compilados, já conhecida em `0x101025dc8`)
 /// tem essa função-companheira de CONSTRUÇÃO logo ANTES no mesmo objeto/arquivo — mesmo padrão
@@ -96,7 +95,7 @@ pub unsafe fn param_type_cname(p_entries: *const u8, i: usize) -> u64 {
     f(ty)
 }
 
-/// Aloca+constrói uma instância TIPADA transiente (espelha CET::HandleOverridenFunction):
+/// Aloca+constrói uma instância TIPADA transiente:
 /// PoolDefault::AllocateAligned(GetSize@0x18, GetAlignment@0x20) → memset 0 → Construct@0x40.
 /// O handler do opcode escreve o valor do param NESTA memória tipada — pra tipos complexos
 /// (String/array/handle) é obrigatório (o handler escreve o objeto inteiro; buf de pilha estoura).
@@ -341,7 +340,7 @@ unsafe fn read_params_inner(func: *mut c_void, frame: *mut c_void, consume: bool
 }
 
 /// Núcleo de `read_params_inner` + captura OPCIONAL de valores `String` (2026-07-13, fecha
-/// `cw-utils` Hash.reds/Number.reds). `strings_out[i]` = `Some(texto)` se o param `i` é String
+/// utilitários de script Hash.reds/Number.reds). `strings_out[i]` = `Some(texto)` se o param `i` é String
 /// e leu OK; senão `None`. Passar `None` (via `read_params_inner`) mantém o comportamento
 /// EXATO de antes — nenhum caller existente muda.
 unsafe fn read_params_inner_ext(
@@ -355,12 +354,11 @@ unsafe fn read_params_inner_ext(
 }
 
 /// Como `read_params_inner_ext`, com uma 4ª captura OPCIONAL: `scriptrefs_out[i]` = ponteiro cru
-/// `T*` (RED4ext.SDK `#323`, `ScriptRef<T>{...ref: T*@0x18...}`) quando o param `i` é
+/// `T*` (`ScriptRef<T>{...ref: T*@0x18...}`) quando o param `i` é
 /// `script_ref<T>` (ertti==15), pra QUALQUER `T` — generaliza o caso já provado só pra `String`
-/// (`scriptref_data_ptr` local, usado por `read_cstring` abaixo). Item Codeware `#94`/`#95`
-/// (2026-08-12, round 5): permite ESCREVER campos dentro do `T*` real (não só ler `String`),
+/// (`scriptref_data_ptr` local, usado por `read_cstring` abaixo). 2026-08-12, round 5: permite ESCREVER campos dentro do `T*` real (não só ler `String`),
 /// reusando a MESMA leitura de `ScriptRef` já confirmada — `inkWidgetRef.Set`/
-/// `inkWidgetLibraryResource.SetPath` (Codeware, `@addMethod` ESTÁTICO com `self: script_ref<T>`,
+/// `inkWidgetLibraryResource.SetPath` (`@addMethod` ESTÁTICO com `self: script_ref<T>`,
 /// evita o bug de `this`-por-struct já documentado) só escrevem 1 campo de `T` via ponteiro cru,
 /// zero vtable/RawFunc. `None` mantém comportamento IDÊNTICO (nenhum caller existente muda).
 unsafe fn read_params_inner_ext3(
@@ -378,8 +376,7 @@ unsafe fn read_params_inner_ext3(
         return ArgsLidos::vazio();
     }
     // Sanidade: frame mapeado. Lê EXATAMENTE p_count (= apFunction->params.size) args, cada um
-    // numa instância TIPADA — espelho byte-a-byte do CET::HandleOverridenFunction (FunctionOverride
-    // .cpp:269-334). O bug antigo era passar buf[16] de pilha; pra tipo complexo o handler
+    // numa instância TIPADA. O bug antigo era passar buf[16] de pilha; pra tipo complexo o handler
     // escreve o objeto inteiro e estoura = crash do AddMenuItem nativo.
     if !crate::memoria::is_readable(frame as *const c_void, 0x68) {
         return ArgsLidos::vazio();
@@ -390,7 +387,7 @@ unsafe fn read_params_inner_ext3(
     }
     let p_entries = rd_ptr((func as *const u8).add(0x28)) as *const u8;
     let f = frame as *mut u8;
-    // salva code/currentParam/data/dataType — a ORIGINAL re-lê depois (CET restaura pCode).
+    // salva code/currentParam/data/dataType — a ORIGINAL re-lê depois (o `code` é restaurado).
     let save_code = (f as *const *const u8).read_unaligned();
     let save_cnt = *f.add(0x62);
     let save_30 = (f.add(0x30) as *const u64).read_unaligned();
@@ -414,7 +411,7 @@ unsafe fn read_params_inner_ext3(
         if pinst.is_null() {
             break;
         }
-        // setup por param (igual CET): currentParam++, data/dataType = null.
+        // setup por param: currentParam++, data/dataType = null.
         *f.add(0x62) = (*f.add(0x62)).wrapping_add(1);
         (f.add(0x30) as *mut u64).write_unaligned(0);
         (f.add(0x38) as *mut u64).write_unaligned(0);
@@ -451,18 +448,16 @@ unsafe fn read_params_inner_ext3(
                 u8::MAX
             }
         };
-        // script_ref<T>=15 precisa de pinst como scriptRefOut (espelha CET: isScriptRef ?
-        // pInstance : nullptr) — senão o frame não avança e o param SEGUINTE sai 0.
+        // script_ref<T>=15 precisa de pinst como scriptRefOut (nos outros tipos, nulo) — senão o frame não avança e o param SEGUINTE sai 0.
         let scriptref_out = if categoria == ertti::SCRIPT_REFERENCE {
             pinst
         } else {
             std::ptr::null_mut()
         };
         h(ctx, frame, pinst, scriptref_out);
-        // RED4ext #323 (2026-08-10): quando ertti==15, `pinst` agora contém o wrapper
+        // 2026-08-10: quando ertti==15, `pinst` agora contém o wrapper
         // `ScriptRef<T> { unk00[0x10], innerType: IType*@0x10, ref: T*@0x18, hash: CName@0x20 }`
-        // (RED4ext.SDK NativeTypes.hpp:404 + RTTITypes.hpp::CRTTIScriptReferenceType, offsets
-        // confirmados no header). `ref@0x18` é o PONTEIRO pro dado real por trás do
+        // (`CRTTIScriptReferenceType`). `ref@0x18` é o PONTEIRO pro dado real por trás do
         // `script_ref<T>` — usado abaixo só pra extrair `String` (o caso concreto documentado
         // em `Utils/Hash.reds`/`Number.reds`: `FNV1a64(data: script_ref<String>, ...)`).
         // Generalizar pra outros T (Int32/Float/...) fica pra quando surgir caso de uso real.
@@ -474,9 +469,9 @@ unsafe fn read_params_inner_ext3(
         // lê 8 bytes de pinst+0 quando o "valor" cabe em um qword: ESCALAR (CName/Int/Float/
         // Bool/...) OU Handle(9)/WeakHandle(10) — nestes pinst+0 = PONTEIRO do objeto, que o
         // decode_arg embrulha em Handle (ex.: target:ref<ListItemController> do OnMenuItemActivated,
-        // que o NativeSettings usa p/ setar fromMods). String/array/ScriptRef/struct = 0
+        // que a página de settings de mod usa p/ setar fromMods). String/array/ScriptRef/struct = 0
         // (o callback lê do objeto destino). O objeto do Handle vive além do free (dono = menu).
-        // `ResRef` (2026-07-24): confirmado via RED4ext.SDK vendorizado que é um struct de 8 bytes
+        // `ResRef` (2026-07-24): confirmado que é um struct de 8 bytes
         // achatado envolvendo só um `ResourcePath` (u64, o mesmo FNV-1a64 que `resource.link`/
         // `bwms-primitives::resource_path_hash` já usam em todo o projeto) — categoria idêntica a
         // TweakDBID/EntityID (struct achatado de 1 qword), NÃO parente de String/CString (essa é
@@ -484,7 +479,7 @@ unsafe fn read_params_inner_ext3(
         // aloca pelo tamanho REAL do tipo via vtable, não um buffer fixo) — só ainda não é ÚTIL pro
         // lado de ESCREVER/devolver um ResRef novo (RE separada, documentada em `register.rs`
         // `register_resourceevent`).
-        // 2026-08-09 (achado ao vivo, `codeware-casts-smoke.reds`): CRUID/NodeRef são wrappers
+        // 2026-08-09 (achado ao vivo, smoke de casts): CRUID/NodeRef são wrappers
         // de 1 qword IDÊNTICOS a EntityID/TweakDBID/ResRef (mesma categoria "struct achatado"),
         // mas faltavam nesta whitelist — CRUIDToHash/NodeRefToHash como PARÂMETRO (não como
         // retorno, que já usava `write_uint_ret` sem problema) sempre lia `raw=0` (confirmado
@@ -506,23 +501,21 @@ unsafe fn read_params_inner_ext3(
             || tc == cname("TweakDBID")
             || tc == cname("entEntityID")
             || tc == cname("ResRef")
-            // 2026-08-10 (diagnóstico ao vivo pendente, `codeware-hashtoresref-smoke.reds`):
+            // 2026-08-10 (diagnóstico ao vivo pendente, smoke de hash→ResRef):
             // `ResRef` sozinho leu `raw=0` pra um param real — candidato, mesma categoria do bug
             // já achado 2x nesta whitelist (nome redscript-facing != nome interno do motor, ver
-            // EntityID/entEntityID acima). Nome do SDK vendorizado (`ResourceReferenceScriptToken.
-            // hpp`) pro tipo C++ real por trás de `ResRef`.
+            // EntityID/entEntityID acima). Nome do tipo C++ real por trás de `ResRef`.
             || tc == cname("redResourceReferenceScriptToken")
             || tc == cname("CRUID")
             || tc == cname("NodeRef")
-            // 2026-08-12 (Codeware `#22`/`EngineTime.hpp`, rodada de composição barata): `EngineTime`
-            // é `importonly struct` VANILLA (não invenção do Codeware — usado em dezenas de scripts
+            // 2026-08-12 (rodada de composição barata): `EngineTime`
+            // é `importonly struct` VANILLA (usado em dezenas de scripts
             // reais, `orphans.script:22270`, ex. `GameInstance.GetEngineTime()`), achatado num único
-            // `ticks: uint64_t` (`App/Engine/EngineTimeEx.hpp::ToTicks` = `return aTime.ticks;`) —
-            // mesma categoria "struct de 1 qword" de CRUID/NodeRef/TweakDBID/EntityID/ResRef acima.
+            // `ticks: uint64_t` — mesma categoria "struct de 1 qword" de CRUID/NodeRef/TweakDBID/EntityID/ResRef acima.
             // NUNCA confirmado ao vivo (sessão offline, sem boot) — pelo padrão já achado 2x nesta
             // MESMA whitelist (EntityID/ResRef), o nome interno real do `GetType()` PODE divergir do
-            // nome redscript-facing; aqui é um tipo genuinamente vanilla (não um alias inventado pelo
-            // SDK do Codeware como os outros 2 casos), então a hipótese de bater é mais forte, mas
+            // nome redscript-facing; aqui é um tipo genuinamente vanilla (não um alias
+            // como os outros 2 casos), então a hipótese de bater é mais forte, mas
             // ainda não é certeza — confirmar contra log real (`arg_tc_name`) na próxima sessão com
             // boot antes de contar como fechado.
             || tc == cname("EngineTime");
@@ -571,16 +564,15 @@ unsafe fn read_params_inner_ext3(
             let s = if tc == cname("String") {
                 read_cstring(pinst as *const u8)
             } else if tc == cname("LocalizationString") {
-                // Codeware `#66` (LocalizationString.reds, candidato 6ª rodada 2026-08-11): a
-                // fonte real (`RED4ext.SDK/NativeTypes.hpp:329-334`) confirma o struct
-                // `LocalizationString{int64_t unk00; CString unk08;}` (RED4EXT_ASSERT_SIZE=0x28) —
+                // Candidato da 6ª rodada (2026-08-11): o struct
+                // `LocalizationString{int64_t unk00; CString unk08;}` (tamanho 0x28) —
                 // um `int64` seguido do MESMO layout de `CString` (0x20 bytes) já lido em
                 // `pinst` pra qualquer param `String`. `type_inst_alloc(ptype)` já aloca `pinst`
                 // pelo TAMANHO REAL do tipo (via vtable GetSize, não um buffer fixo) — pra
                 // LocalizationString isso são os 0x28 bytes inteiros, então basta ler o CString
                 // embutido em `pinst+0x08` (mesmo idioma já usado abaixo pro `scriptref_data_ptr`,
                 // que também lê de um offset DENTRO de outro ponteiro). Confirmado que o tipo é
-                // genuinamente redscript-visível (não Codeware-injetado): `orphans.script:21668`
+                // genuinamente redscript-visível (não injetado por mod): `orphans.script:21668`
                 // declara `LocalizationStringComponent.GetString(key: CName) -> LocalizationString`
                 // como NATIVA VANILLA real do próprio jogo.
                 read_cstring((pinst as *const u8).add(8))
@@ -591,7 +583,7 @@ unsafe fn read_params_inner_ext3(
             };
             strs.push(s);
         }
-        // Codeware `#76`/`StaticEntitySpec.position`+`.orientation` (2026-08-15, rodada 10):
+        // `StaticEntitySpec.position`+`.orientation` (2026-08-15, rodada 10):
         // captura os 16 bytes crus de um param `Vector4`/`Quaternion` — MESMO padrão já provado
         // pra `Variant`(24B, acima)/`CString`(0x20B, `read_cstring`): `pinst` já é alocado pelo
         // TAMANHO REAL do tipo (`type_inst_alloc`, via vtable `GetSize`, CONFIRMADO 16 pra Vector4
@@ -624,7 +616,7 @@ unsafe fn read_params_inner_ext3(
             };
             vars.push(vbytes);
         }
-        // Codeware `#133` (`DynamicEntityTarget.Tags(tags: array<CName>)`, 2026-08-18): 1ª leitura
+        // `DynamicEntityTarget.Tags(tags: array<CName>)` (2026-08-18): 1ª leitura
         // deste projeto de `array<T>` como PARÂMETRO de entrada (toda leitura anterior de
         // `DynArray<T>` foi ou campo embutido num struct C++ real, ex. `find_garment_component_
         // by_cname`/`read_dynarray_len` acima em `register.rs`, ou RETORNO de native, nunca
@@ -638,8 +630,8 @@ unsafe fn read_params_inner_ext3(
         // que a VM real usa pra decodificar `[n"a",n"b"]`/uma variável `array<CName>` como argumento
         // de QUALQUER native (nossa ou vanilla), não um mecanismo novo. `tc` pro tipo `array<CName>`
         // é a CName REAL computada pelo próprio motor via `GetName()` (não uma string sintetizada
-        // por nós) — o formato `"array:<InnerTypeName>"` já está confirmado neste projeto (item
-        // Codeware `#197`, `BwmsGetInnerTypeName`, "array:Float"→"Float"), então `cname("array:
+        // por nós) — o formato `"array:<InnerTypeName>"` já está confirmado neste projeto
+        // (`BwmsGetInnerTypeName`, "array:Float"→"Float"), então `cname("array:
         // CName")` computa o MESMO hash FNV1a64 que `GetName()` devolve pro tipo do parâmetro —
         // comparação de hash puro, sem precisar internar a string no `CNamePool` real.
         if let Some(arrs) = cnamearray_out.as_deref_mut() {
@@ -708,7 +700,7 @@ pub unsafe fn read_params_consuming(func: *mut c_void, frame: *mut c_void) -> Ar
 /// Como `read_params_consuming`, mas TAMBÉM extrai o texto de qualquer param `String` (via
 /// `read_cstring`) — o vetor devolvido tem o MESMO tamanho e índices do `Vec<(u64,u64)>`
 /// principal; `strings[i]` é `Some(texto)` só quando o param `i` é String. Usado pelos
-/// handlers de `cw-utils` Hash.reds/Number.reds (`FNV1a64(data: script_ref<String>, ...)`).
+/// handlers de utilitários de script Hash.reds/Number.reds (`FNV1a64(data: script_ref<String>, ...)`).
 pub unsafe fn read_params_consuming_with_strings(func: *mut c_void, frame: *mut c_void) -> (ArgsLidos, Vec<Option<String>>) {
     let mut strings = Vec::new();
     let args = read_params_inner_ext(func, frame, true, Some(&mut strings), None);
@@ -716,10 +708,9 @@ pub unsafe fn read_params_consuming_with_strings(func: *mut c_void, frame: *mut 
 }
 
 /// Como `read_params_consuming`, mas TAMBÉM captura o ponteiro cru `T*` de qualquer param
-/// `script_ref<T>` (via `ScriptRef<T>::ref@0x18`, RED4ext.SDK `#323` já provado) — generaliza pra
+/// `script_ref<T>` (via `ScriptRef<T>::ref@0x18`, já provado) — generaliza pra
 /// QUALQUER `T` a extração que antes só existia hard-coded pra `String`. `scriptrefs[i]` = ponteiro
-/// não-nulo se o param `i` é `script_ref<T>` e leu OK; `0` caso contrário. Item Codeware `#94`/`#95`
-/// (2026-08-12, round 5): permite compor natives que ESCREVEM dentro de um `script_ref<T>` de saída
+/// não-nulo se o param `i` é `script_ref<T>` e leu OK; `0` caso contrário. 2026-08-12, round 5: permite compor natives que ESCREVEM dentro de um `script_ref<T>` de saída
 /// (ex. `inkWidgetRef.Set`/`inkWidgetLibraryResource.SetPath`), não só ler.
 pub unsafe fn read_params_consuming_with_scriptrefs(func: *mut c_void, frame: *mut c_void) -> (ArgsLidos, Vec<u64>) {
     let mut scriptrefs = Vec::new();
@@ -729,7 +720,7 @@ pub unsafe fn read_params_consuming_with_scriptrefs(func: *mut c_void, frame: *m
 
 /// Como `read_params_consuming`, mas TAMBÉM captura os 16 bytes crus de qualquer param
 /// `Vector4`/`Quaternion` (POD, 4 floats) — `raw16[i]` = `Some(bytes)` quando o param `i` é um
-/// desses 2 tipos e leu OK; `None` caso contrário. Fecha Codeware `#76`/`StaticEntitySpec.
+/// desses 2 tipos e leu OK; `None` caso contrário. Fecha `StaticEntitySpec.
 /// SetPosition`/`SetOrientation` (2026-08-15, rodada 10) — 1ª vez que struct-de-16-bytes é lido
 /// como PARÂMETRO nesta codebase (antes só como RETORNO de natives vanilla, ex. `#29`). Reusa a
 /// MESMA máquina genérica (`type_inst_alloc`+dispatch de opcode) já provada pra CString/Variant,
@@ -742,7 +733,7 @@ pub unsafe fn read_params_consuming_with_raw16(func: *mut c_void, frame: *mut c_
 
 /// Como `read_params_consuming`, mas TAMBÉM captura os valores de qualquer param `array<CName>`
 /// (`cnamearrays[i] = Some(Vec<u64>)` com os hashes CName na ORDEM real do array, ou `Some(vec![])`
-/// se o array veio vazio; `None` se o param `i` não é `array<CName>`). Item Codeware `#133`
+/// se o array veio vazio; `None` se o param `i` não é `array<CName>`).
 /// (`DynamicEntityTarget.Tags(tags: array<CName>)`/`StaticEntityTarget.Tags`, 2026-08-18) — 1ª
 /// leitura de `array<T>` como PARÂMETRO de entrada nesta codebase (ver comentário completo em
 /// `read_params_inner_ext3`, bloco `cnamearray_out`). Generaliza pra qualquer native futura que
@@ -788,7 +779,7 @@ pub fn variant_inline_u64(buf: &[u8; 24]) -> u64 {
     u64::from_le_bytes(buf[8..16].try_into().unwrap_or([0u8; 8]))
 }
 
-/// RED4ext.SDK item #316 (`PENDENCIAS-UNIFICADAS.md`, `cw-variant-marshalling`): CONSTRÓI um
+/// Item #316 (`PENDENCIAS-UNIFICADAS.md`, marshalling de Variant): CONSTRÓI um
 /// `Variant` NOVO (24 bytes) pra um tipo ≤8 bytes (Int32/Float/Bool/CName/TweakDBID/etc, os
 /// mesmos que `variant_inline_u64` já lê) — o inverso exato de `variant_type_cname`+
 /// `variant_inline_u64`: byte 0 = `(itype_ptr | 1)` (bit0=InlineFlag, mesmo truque já confirmado
@@ -808,14 +799,12 @@ pub unsafe fn build_variant_inline(reg: &Registry, type_name: &str, value: u64) 
 }
 
 /// Lê o conteúdo de um `red::CString` (o `String` nativo do redscript) a partir do ponteiro pro
-/// objeto (`pinst` — 0x20 bytes, layout confirmado pelo RED4ext.SDK vendorizado neste projeto,
-/// `RED4ext.SDK/include/RED4ext/CString.hpp`+`CString-inl.hpp`, ambos C++ open-source da mesma
-/// engine, layout de dados idêntico entre Windows/macOS — só vtable/dtor-count difere, já
+/// objeto (`pinst` — 0x20 bytes, layout de dados idêntico entre Windows/macOS — só vtable/dtor-count difere, já
 /// documentado em [[cp77-macos-rtti-vtable-offsets]]): união SSO de 20 bytes em `+0x00`
 /// (`inline_str[0x14]` OU `{ptr:8, unk:8, capacity:4}`), `length` (u32, com a flag "não-inline"
 /// no bit 30 = `0x40000000`) em `+0x14`, `allocator` em `+0x18`. `IsInline()` = `length <
 /// 0x40000000`; `Length()` = `length & 0x3FFFFFFF`; `c_str()` = inline_str OU o ponteiro heap.
-/// Fecha a represa de leitura de String nativa (bloqueava `cw-utils` Hash.reds/Number.reds) —
+/// Fecha a represa de leitura de String nativa (bloqueava utilitários de script Hash.reds/Number.reds) —
 /// achado 2026-07-13, ainda SEM confirmação in-game (layout vem do SDK, não de dump ao vivo).
 pub unsafe fn read_cstring(pinst: *const u8) -> Option<String> {
     const CSTRING_SIZE: usize = 0x20;
@@ -943,7 +932,7 @@ impl Registry {
         ty
     }
 
-    /// `IRTTISystem::GetClassByScriptName(CName) -> CClass*` (vtbl+0x108, RED4ext.SDK item
+    /// `IRTTISystem::GetClassByScriptName(CName) -> CClass*` (vtbl+0x108, item
     /// #82) — mapeamento NOME-SCRIPT→classe, distinto de `class_by_name` (que resolve
     /// `GetClass`@0x10, NOME-NATIVO). Em conteúdo vanilla os 2 nomes quase sempre coincidem
     /// (nenhum `RegisterScriptName` remapeando é usado pelo BWMS hoje), então `class_by_name`
@@ -963,18 +952,18 @@ impl Registry {
         call(self.reg, hash)
     }
 
-    /// `GetScriptClass` da referência (`Resolving.hpp:424-428`): a classe do nome nativo (`GetClass`) ou, sem ela, a do nome de script. É a
-    /// resolução de todo nome de classe que chega do script (`EntityTarget.Type`, `ResourceTarget.Type`, `inkWidgetTarget.Controller`,
-    /// `ISerializable.IsA`, `FindComponentByType`) e das classes que o BWMS cria ou estende por nome. A referência usa o `GetClass` só pelo nome
-    /// nativo nos 5 consumidores (`EntityTarget.hpp:175`, `ResourceTarget.hpp:92`, `InkWidgetTarget.hpp:23` pelo `IsInstanceOf` de
-    /// `Resolving.hpp:532-535`, `ISerializableEx.hpp:16`, `EntityEx.hpp:16`); o BWMS aceita também o apelido de script, que o mod do Windows não
-    /// alcança. `CName` vazio não nomeia classe e não chama o motor.
+    /// Classe pelo nome que o script escreveu: o nativo primeiro, o apelido de script só quando o nativo não existe.
+    /// Nulo quando nenhum dos dois resolve.
     pub unsafe fn script_class(&self, hash: u64) -> *mut c_void {
+        // CName vazio: o motor não tem classe com esse nome, e não vale a chamada.
         if hash == 0 {
             return std::ptr::null_mut();
         }
-        let c = self.class_by_hash(hash);
-        if c.is_null() { self.class_by_script_hash(hash) } else { c }
+        let nativa = self.class_by_hash(hash);
+        if !nativa.is_null() {
+            return nativa;
+        }
+        self.class_by_script_hash(hash)
     }
 
     /// `IRTTISystem::GetEnumByScriptName(CName) -> CEnum*` (vtbl+0x110, item #83). Ver nota de
@@ -1039,15 +1028,15 @@ impl Registry {
         rd_ptr(self.vtbl.add(off))
     }
 
-    // ===== RED4ext.SDK — cluster de introspecção RTTI em massa (`IRTTISystem`, offsets 0x40-0x78,
+    // ===== Cluster de introspecção RTTI em massa (`IRTTISystem`, offsets 0x40-0x78,
     // `PENDENCIAS-UNIFICADAS.md` itens #57/#58/#60/#61/#62/#63/#64). Todo método aqui devolve
     // `void Foo(DynArray<T*>& out, ...)` — o payload de saída é o MESMO DynArray de 16 bytes
     // (entries:u64@0, size:u32@8, cap:u32@12) já lido por `dispatch_scriptable_tweaks` (vtbl+0x40,
-    // TweakXL #42, "27718 tipos" confirmado ao vivo) — mecanismo genérico reaproveitado, mesma
-    // confiança. Offsets vêm direto do header vendorizado (`RTTISystem.hpp`).
+    // "27718 tipos" confirmado ao vivo) — mecanismo genérico reaproveitado, mesma
+    // confiança.
 
     /// Núcleo comum: chama `void Foo(DynArray<T*>&)` (sem args extras) e devolve (entries_ptr, count).
-    /// RED4ext.SDK #63 (2026-08-11, disassembly ARM64 real): layout do `DynArray` de saída é
+    /// Item #63 (2026-08-11, disassembly ARM64 real): layout do `DynArray` de saída é
     /// `{entries:u64@0x00, capacity:u32@0x08, size:u32@0x0C}` — `count` PRECISA vir de `size`
     /// (buf[12..16]), não `capacity` (buf[8..12], usado incorretamente antes). Pra funções sem
     /// reserve antecipado (a maioria) `capacity` fica PRÓXIMO de `size` por growth amortizado
@@ -1203,73 +1192,6 @@ impl Registry {
     }
 }
 
-// ===== Callback<void(*)()> — construção manual do type-erased "std::function" que
-// AddRegisterCallback/AddPostRegisterCallback exigem por valor (ver `Detail/Callback.hpp`
-// vendorizado: `UnboundFunctionTarget<void>{func}` + `CallbackHandlerImpl` gera
-// invoke/copy/move/destruct estáticos). Replicamos os 4 fins à mão em Rust — não precisa
-// compilar C++, só bater o LAYOUT (ABI Itanium, mesma convenção usada em todo o resto do
-// projeto pra objetos C++ do motor).
-
-#[repr(C)]
-struct CallbackHandlerRaw {
-    invoke: extern "C" fn(*const u8),
-    copy: extern "C" fn(*mut u8, *mut u8),
-    mv: extern "C" fn(*mut u8, *mut u8),
-    destruct: extern "C" fn(*mut u8),
-}
-
-/// `UnboundFunctionTarget<void>::Invoke` — `std::invoke(aTarget->func)`, sem args, sem retorno.
-extern "C" fn cb_target_invoke(target: *const u8) {
-    if target.is_null() {
-        return;
-    }
-    let raw = unsafe { (target as *const u64).read_unaligned() };
-    if raw == 0 {
-        return;
-    }
-    let f: extern "C" fn() = unsafe { std::mem::transmute(raw) };
-    f();
-}
-extern "C" fn cb_target_copy(dst: *mut u8, src: *mut u8) {
-    unsafe {
-        let v = (src as *const u64).read_unaligned();
-        (dst as *mut u64).write_unaligned(v);
-    }
-}
-extern "C" fn cb_target_move(dst: *mut u8, src: *mut u8) {
-    cb_target_copy(dst, src);
-    unsafe {
-        (src as *mut u64).write_unaligned(0);
-    }
-}
-extern "C" fn cb_target_destruct(target: *mut u8) {
-    unsafe {
-        (target as *mut u64).write_unaligned(0);
-    }
-}
-
-static CB_HANDLER: CallbackHandlerRaw = CallbackHandlerRaw {
-    invoke: cb_target_invoke,
-    copy: cb_target_copy,
-    mv: cb_target_move,
-    destruct: cb_target_destruct,
-};
-
-#[repr(C)]
-pub struct CallbackRaw {
-    buffer: [u8; 64],
-    handler: *const CallbackHandlerRaw,
-}
-
-/// Monta um `Callback<void(*)()>` (0x48 bytes na 2.5: buffer[64]+handler@0x40; o slot 0xC0 copia 0x48 e lê o handler em +0x40) envolvendo `target` —
-/// nossa própria `extern "C" fn()`, guardada nos 8 primeiros bytes do buffer (mesmo layout de
-/// `UnboundFunctionTarget<void>{func}`, o resto do buffer fica zerado/não-usado).
-pub fn build_void_callback(target: extern "C" fn()) -> CallbackRaw {
-    let mut buffer = [0u8; 64];
-    let ptr = target as usize as u64;
-    buffer[0..8].copy_from_slice(&ptr.to_le_bytes());
-    CallbackRaw { buffer, handler: &CB_HANDLER }
-}
 
 /// Prova ao vivo do cluster de introspecção em massa (#57/#58/#60/#61/#62/#63/#64) — só CONTA (não
 /// dereferencia elementos individuais, suficiente pra provar que o mecanismo funciona e os counts
@@ -1305,7 +1227,7 @@ pub unsafe fn probe_mass_enumeration(reg: &Registry) {
     }
 }
 
-/// RED4ext.SDK item #68 (`UnregisterType`, vtbl+0x98, `PENDENCIAS-UNIFICADAS.md`) — prova ao vivo
+/// Item #68 (`UnregisterType`, vtbl+0x98, `PENDENCIAS-UNIFICADAS.md`) — prova ao vivo
 /// REVERSÍVEL e AUTOCONTIDA: cria um enum de TESTE descartável via `create_scripted_enum` (já
 /// provado seguro, 2026-08-05, "zero crash até aqui"), confirma que existe, desregistra, confirma
 /// que sumiu. Não toca em NADA vanilla nem em classes forjadas usadas por outro código — o enum de
@@ -1329,182 +1251,8 @@ pub unsafe fn probe_unregister_type(reg: &Registry) {
     );
 }
 
-/// RED4ext.SDK item #68 — CAUSA RAIZ achada por disassembly ARM64 real (2026-08-11, sessão de
-/// comparação `UnregisterType` vs o irmão CONFIRMADO `UnregisterFunction`/#70): disassemblei o
-/// corpo inteiro de `UnregisterType`@vtbl+0x98, da rotina COMPARTILHADA de lookup por nome que
-/// `GetClass`@vtbl+0x10/`GetEnum`@vtbl+0x18 chamam (`0x1010bceb0` nesta build), e — pra
-/// comparação — `UnregisterFunction`@vtbl+0xA8/`GetFunction`@vtbl+0x30. Cruzado contra o layout
-/// OFICIAL de `CRTTISystem` do `RED4ext.SDK/include/RED4ext/RTTISystem.hpp` (vendorizado neste
-/// projeto): `types:HashMap<CName,IType*>@+0x10` (a PRIMÁRIA, checada PRIMEIRO por
-/// GetClass/GetEnum — se bate, retorna NA HORA sem tocar mais nada), `typesByAsyncId:
-/// HashMap<uint64_t,IType*>@+0x40`, `typeAsyncIds:HashMap<CName,uint32_t>@+0x70` (índice
-/// CName→asyncId, só usado como FALLBACK de 2 saltos quando `types`@+0x10 não tem entrada:
-/// CName→asyncId via +0x70, depois asyncId→IType* via +0x40).
-///
-/// **Achado**: o corpo nativo de `UnregisterType` só remove a entrada de `typesByAsyncId`@+0x40
-/// (lê `typeAsyncIds`@+0x70 pra achar o asyncId, mas NUNCA desengancha nada de lá nem de
-/// `types`@+0x10 — só LÊ +0x70, nunca ESCREVE). Já `UnregisterFunction` faz a dupla completa:
-/// remove de `funcs`@+0xA0 (via `bl 0x1010be840` inline) E de `funcsByHash`@+0xD0 — e é
-/// EXATAMENTE `funcsByHash`@+0xD0 que `GetFunction`@vtbl+0x30 consulta (confirmado por disasm
-/// separado), por isso `UnregisterFunction` funciona de ponta a ponta. `UnregisterType` faz só
-/// METADE do trabalho equivalente: nunca toca a estrutura (`types`@+0x10) que `GetClass`/
-/// `GetEnum` checam PRIMEIRO — por isso o tipo "desregistrado" continua resolvendo pra sempre
-/// (a entrada em `types`@+0x10, escrita no registro/primeira-resolução, nunca é invalidada).
-///
-/// **Fix** (não é bug nosso de leitura de retorno como o #63/GetClasses — é uma lacuna genuína
-/// do próprio `UnregisterType` nativo): chama o `UnregisterType` real primeiro (preserva os
-/// efeitos legítimos dele: remoção de `typesByAsyncId`+callback de notificação via
-/// `vtbl+0x88` de um singleton à parte) e DEPOIS completa manualmente a remoção que falta em
-/// `types`@+0x10 — mesmo idioma de `HashMap<CName,X>::unlink` do
-/// `roupas_e_armas::wardrobe_forget_by_tdbid_locked` (separate-chaining, node=`{next:u32@0,hashedKey:u32@4,
-/// key:CName@8,value:T@0x10}`), sob o MESMO lock CAS que o `UnregisterType` nativo usa
-/// (`this+0x220`, byte 0=livre/0x80=exclusivo — confirmado disassemblando o helper de lock que a
-/// própria função nativa chama, `CASALB` 0↔0x80, diferente do protocolo 0↔0xFF do `mutex00` do
-/// TweakDB) — nunca corre risco de colidir com uma mutação concorrente da RTTI. Deixar
-/// `typeAsyncIds`@+0x70 com uma entrada "órfã" (apontando pro asyncId já removido de
-/// `typesByAsyncId`) é INÓCUO: o fallback de 2 saltos que ela alimenta já falha corretamente no
-/// 2º salto (native já limpou +0x40), então não precisa de mais nenhuma escrita.
-pub unsafe fn unregister_type_complete(reg: &Registry, ty: *mut c_void) -> bool {
-    let native_ok = reg.unregister_type(ty);
-    if !native_ok || ty.is_null() {
-        return native_ok;
-    }
-    // Precisa do CName do tipo pra achar o node em `types`@+0x10 — mesma via de `IType::GetName()`
-    // (vtbl+0x10 do PRÓPRIO tipo, shift +0x08 macOS já documentado noutros pontos deste arquivo)
-    // que o corpo nativo de UnregisterType também usa como 1º passo.
-    if !crate::memoria::is_readable(ty as *const c_void, 8) {
-        return native_ok;
-    }
-    let type_vtbl = rd_ptr(ty as *const u8);
-    if type_vtbl.is_null() || !crate::memoria::is_readable(type_vtbl as *const c_void, 0x18) {
-        return native_ok;
-    }
-    let get_name_fn = rd_ptr((type_vtbl as *const u8).add(0x10));
-    if get_name_fn.is_null() {
-        return native_ok;
-    }
-    let get_name: extern "C" fn(*mut c_void) -> u64 = std::mem::transmute(get_name_fn);
-    let name_hash = get_name(ty);
-    let removed_from_fastpath = unregister_from_types_fastpath(reg.raw(), name_hash);
-    crate::log_dev!(
-        "[unregtype-fix] types@+0x10: removido_agora={removed_from_fastpath} (name={name_hash:#018x})"
-    );
-    native_ok
-}
 
-/// Trava `this+0x220` (mesmo CAS 0↔0x80 do lock nativo de UnregisterType/GetClass/GetEnum,
-/// confirmado por disasm de `0x1000015f0`) e desengancha `target_cname` de
-/// `types:HashMap<CName,IType*>@this+0x10`. Read-verify-write: aborta sem mudar nada se
-/// qualquer leitura cair fora de faixa plausível ou apontar pra memória ilegível.
-unsafe fn unregister_from_types_fastpath(this_ptr: *mut c_void, target_cname: u64) -> bool {
-    use std::sync::atomic::{AtomicU8, Ordering};
-    if !crate::memoria::is_readable(this_ptr as *const c_void, 0x40) {
-        return false;
-    }
-    let this = this_ptr as *mut u8;
-    let lock = &*(this.add(0x220) as *const AtomicU8);
-    let mut locked = false;
-    for i in 0..4_000_000u32 {
-        if lock.compare_exchange(0, 0x80, Ordering::Acquire, Ordering::Relaxed).is_ok() {
-            locked = true;
-            break;
-        }
-        if i & 511 == 511 {
-            std::thread::yield_now();
-        }
-    }
-    if !locked {
-        crate::log_dev!("[unregtype-fix] lock @+0x220 ocupado (spin esgotado) — types@+0x10 NÃO tocado");
-        return false;
-    }
-    let result = types_fastpath_unlink_locked(this.add(0x10), target_cname);
-    crate::jogo::travas::soltar_escrita(lock.as_ptr());
-    result
-}
-
-unsafe fn types_fastpath_unlink_locked(hm: *mut u8, target_cname: u64) -> bool {
-    const INVALID: u32 = 0xFFFF_FFFF;
-    if !crate::memoria::is_readable(hm as *const c_void, 0x20) {
-        return false;
-    }
-    let index_table = (hm as *const u64).read_unaligned() as *mut u32;
-    let size_cap = (hm.add(0x08) as *const u64).read_unaligned();
-    let capacity = (size_cap >> 32) as u32;
-    let nodes = (hm.add(0x10) as *const u64).read_unaligned() as *mut u8;
-    let stride = (hm.add(0x1c) as *const u32).read_unaligned();
-    if capacity == 0
-        || capacity > 1_000_000
-        || index_table.is_null()
-        || nodes.is_null()
-        || stride == 0
-        || stride > 256
-    {
-        crate::log_dev!("[unregtype-fix] types@+0x10 fora de faixa plausível, abortado sem mudar nada");
-        return false;
-    }
-    let hashed_key = ((target_cname & 0xFFFF_FFFF) as u32) ^ ((target_cname >> 32) as u32);
-    let bucket = (hashed_key % capacity) as usize;
-    let mut prev_next_field: *mut u32 = index_table.add(bucket);
-    let mut idx = prev_next_field.read_unaligned();
-    let mut guard = 0u32;
-    while idx != INVALID && guard < capacity + 1 {
-        guard += 1;
-        let node = nodes.add(idx as usize * stride as usize);
-        if !crate::memoria::is_readable(node as *const c_void, stride as usize) {
-            crate::log_dev!("[unregtype-fix] node ilegível no meio da cadeia, abortado sem mudar nada");
-            return false;
-        }
-        let next = (node as *const u32).read_unaligned();
-        let node_hashed = (node.add(4) as *const u32).read_unaligned();
-        let node_key = (node.add(8) as *const u64).read_unaligned();
-        if node_hashed == hashed_key && node_key == target_cname {
-            prev_next_field.write_unaligned(next);
-            // freelist push (nodeList.nextIdx @ hm+0x20, mesmo layout do HashMap.hpp vendorizado
-            // já usado em `roupas_e_armas::wardrobe_forget_by_tdbid_locked`).
-            let nextidx_ptr = hm.add(0x20) as *mut u32;
-            let old_head = nextidx_ptr.read_unaligned();
-            (node as *mut u32).write_unaligned(old_head);
-            nextidx_ptr.write_unaligned(idx);
-            let size_ptr = hm.add(0x08) as *mut u32;
-            let cur = size_ptr.read_unaligned();
-            size_ptr.write_unaligned(cur.saturating_sub(1));
-            crate::log_dev!(
-                "[unregtype-fix] types@+0x10: bucket={bucket} idx={idx} size {cur}->{}",
-                cur.saturating_sub(1)
-            );
-            return true;
-        }
-        prev_next_field = node as *mut u32;
-        idx = next;
-    }
-    crate::log_dev!("[unregtype-fix] CName não achado em types@+0x10 (talvez já não estava lá)");
-    false
-}
-
-/// Prova ao vivo do fix de `unregister_type_complete` — MESMO padrão autocontido/reversível de
-/// `probe_unregister_type` (enum de teste descartável, nasce/morre só nesta função), mas chama a
-/// via COMPLETA (nativa + fastpath manual) em vez da nativa crua, pra confirmar que o efeito
-/// esperado (some do lookup por nome) agora se confirma de verdade.
-pub unsafe fn probe_unregister_type_complete(reg: &Registry) {
-    let name = "BwmsUnregisterTestEnum2";
-    let created = crate::tipos_do_motor::create_scripted_enum(reg, name, 1, &[("A", 0), ("B", 1)]);
-    let before = reg.enum_by_name(name);
-    crate::log_dev!(
-        "[rttiunregfix] CreateScriptedEnum('{name}') call_ok={created} enum_by_name antes={before:p} (esperado: não-null)"
-    );
-    if before.is_null() {
-        crate::log_dev!("[rttiunregfix] enum de teste não resolveu — probe pulado (sem alvo seguro)");
-        return;
-    }
-    let unreg_ok = unregister_type_complete(reg, before);
-    let after = reg.enum_by_name(name);
-    crate::log_dev!(
-        "[rttiunregfix] unregister_type_complete(enum de teste) call_ok={unreg_ok} enum_by_name depois={after:p} desregistrado={}",
-        after.is_null()
-    );
-}
-
-/// RED4ext.SDK item #70 (`UnregisterFunction`, vtbl+0xA8) — mesmo padrão de `probe_unregister_type`,
+/// Item #70 (`UnregisterFunction`, vtbl+0xA8) — mesmo padrão de `probe_unregister_type`,
 /// mas pro lado das globais: registra uma global de teste descartável (`register_global`, já
 /// provado por `register_smoke`), confirma que resolve, desregistra, confirma que sumiu.
 pub unsafe fn probe_unregister_function(reg: &Registry) {
@@ -1543,7 +1291,7 @@ pub unsafe fn probe_unregister_function(reg: &Registry) {
 // ===== `CBitfield` (12 métodos, `PENDENCIAS-UNIFICADAS.md`: "nunca lido nem escrito — diferente
 // de CEnum, que já tem equivalente") — campos diretos, mesmo padrão já usado pra `CEnum`
 // (`hashList`/`valueList`): `validBits:u64@+0x28` (máscara de quais dos 64 bits possíveis estão em
-// uso) + `bitNames:CName[64]@+0x30` (header vendorizado `RTTITypes.hpp`).
+// uso) + `bitNames:CName[64]@+0x30`.
 
 /// Enumera os bits NOMEADOS de um `CBitfield*` (índice, nome). Varre `validBits` — só lê
 /// `bitNames[i]` pros bits realmente marcados (evita resolver 64 CNames à toa).
@@ -1590,9 +1338,9 @@ pub unsafe fn probe_bitfield_dump(reg: &Registry, name: &str) {
     }
 }
 
-/// Codeware `Reflection.ReflectionEnum.IsNative()`/`ReflectionBitfield.IsNative()` — `!flags.
-/// isScripted` (fonte C++ real, `ReflectionEnum.hpp`). `CEnum.flags@+0x21`/`CBitfield.flags@+0x21`
-/// (ambos 1 byte, bit0=isScripted — header vendorizado `RTTITypes.hpp`), leitura trivial, mesma
+/// `Reflection.ReflectionEnum.IsNative()`/`ReflectionBitfield.IsNative()` — `!flags.
+/// isScripted`. `CEnum.flags@+0x21`/`CBitfield.flags@+0x21`
+/// (ambos 1 byte, bit0=isScripted), leitura trivial, mesma
 /// categoria de `class_flags`/`property_flags` já fechados nesta sessão.
 #[cfg(feature = "devtools")]
 pub unsafe fn type_is_native_scripted(ty: *mut c_void) -> Option<bool> {
@@ -1619,10 +1367,10 @@ pub unsafe fn probe_type_is_native(reg: &Registry, name: &str) {
     }
 }
 
-/// RED4ext.SDK item #79 (`CreateScriptedBitfield(CName, DynArray<uint64_t>&)`, vtbl+0xF0) — via
+/// Item #79 (`CreateScriptedBitfield(CName, DynArray<uint64_t>&)`, vtbl+0xF0) — via
 /// OFICIAL de criar um bitfield, irmã de `CreateScriptedEnum` (item #78, já usada por
-/// `create_scripted_enum`/`probe_unregister_type`). Header vendorizado: "the bits array is not of
-/// type uint64_t, it is a struct containing the name and the bit" — mesma forma de
+/// `create_scripted_enum`/`probe_unregister_type`). O array de bits não é de `uint64_t`, é de
+/// struct com o nome e o bit — mesma forma de
 /// `EnumMemberEntry{name:CName, value:i64}` já provada, aqui com o campo renomeado pra `bit`
 /// (índice do bit, não um valor arbitrário). Prova: cria bitfield de teste, confirma via
 /// `bitfield_by_name` (novo, vtbl+0x20) + delta de contagem via `get_bitfields` + `dump_bitfield_names`
@@ -1655,47 +1403,8 @@ pub unsafe fn probe_create_scripted_bitfield(reg: &Registry) {
     }
 }
 
-/// RED4ext.SDK itens #73/#74 (`AddRegisterCallback`/`AddPostRegisterCallback`, vtbl+0xC0/0xC8) —
-/// registra um callback `void()` nosso via o `Callback<void(*)()>` construído à mão
-/// (`build_void_callback`). A chamada em si (materializar+passar o struct) é o que estamos
-/// provando primeiro — SE o callback dispara é uma 2ª pergunta em aberto (a nota original do
-/// catálogo suspeita que não, porque a fase de registro do RTTI já passou faz tempo quando um
-/// plugin carrega tão tarde quanto o BWMS) — por isso os 2 flags ficam em estáticos, consultáveis
-/// depois por `probe_register_callback_status` sem precisar reinstalar nada.
-static REGISTER_CB_FIRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-static POST_REGISTER_CB_FIRED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-extern "C" fn on_register_cb_fired() {
-    REGISTER_CB_FIRED.store(true, std::sync::atomic::Ordering::SeqCst);
-    crate::log_dev!("[rttiregcb] >>> AddRegisterCallback DISPAROU <<<");
-}
-extern "C" fn on_post_register_cb_fired() {
-    POST_REGISTER_CB_FIRED.store(true, std::sync::atomic::Ordering::SeqCst);
-    crate::log_dev!("[rttiregcb] >>> AddPostRegisterCallback DISPAROU <<<");
-}
-
-pub unsafe fn probe_register_callbacks(reg: &Registry) {
-    let mut cb1 = build_void_callback(on_register_cb_fired);
-    let ok1 = reg.add_register_callback(&mut cb1 as *mut CallbackRaw as *mut c_void);
-    let mut cb2 = build_void_callback(on_post_register_cb_fired);
-    let ok2 = reg.add_post_register_callback(&mut cb2 as *mut CallbackRaw as *mut c_void);
-    crate::log_dev!(
-        "[rttiregcb] AddRegisterCallback call_ok={ok1} AddPostRegisterCallback call_ok={ok2} — zero crash até aqui \
-         (fires imediatos={}/{}; rode 'regcallbackstatus' depois pra checar se disparou mais tarde, ex. em hot-reload)",
-        REGISTER_CB_FIRED.load(std::sync::atomic::Ordering::SeqCst),
-        POST_REGISTER_CB_FIRED.load(std::sync::atomic::Ordering::SeqCst)
-    );
-}
-
-pub fn probe_register_callback_status() {
-    crate::log_dev!(
-        "[rttiregcb] status atual: register_fired={} post_register_fired={}",
-        REGISTER_CB_FIRED.load(std::sync::atomic::Ordering::SeqCst),
-        POST_REGISTER_CB_FIRED.load(std::sync::atomic::Ordering::SeqCst)
-    );
-}
-
-/// RED4ext.SDK item #63 (`GetClasses`, vtbl+0x70) — investigação da anomalia achada em
+/// Item #63 (`GetClasses`, vtbl+0x70) — investigação da anomalia achada em
 /// 2026-08-08 (cont.134): com âncora `IScriptable`, devolveu o universo INTEIRO (27718, igual a
 /// `GetNativeTypes`) em vez de filtrar por ancestralidade, contradizendo `GetDerivedClasses`
 /// (mesma âncora, 1066, plausível). Testa com âncoras MENORES (classe folha sem subclasse
@@ -1720,7 +1429,7 @@ pub unsafe fn probe_getclasses_anomaly(reg: &Registry) {
     }
 }
 
-/// RED4ext.SDK item #63, continuação (2026-08-11): a anomalia de `GetClasses`(vtbl+0x70) foi
+/// Item #63, continuação (2026-08-11): a anomalia de `GetClasses`(vtbl+0x70) foi
 /// reproduzida em 3 âncoras diferentes (sempre devolve o universo inteiro, igual a
 /// `GetNativeTypes`) — hipótese nunca testada: será que o SLOT em si (o ENDEREÇO da função,
 /// não o comportamento) é literalmente o MESMO que `GetNativeTypes`(0x40)? Este projeto já
@@ -1759,7 +1468,7 @@ pub unsafe fn probe_getclasses_vtable_identity(reg: &Registry) {
     );
 }
 
-/// RED4ext.SDK item #63, continuação (2026-08-11, sessão de disassembly ARM64 real): a hipótese
+/// Item #63, continuação (2026-08-11, sessão de disassembly ARM64 real): a hipótese
 /// ICF já foi refutada (`probe_getclasses_vtable_identity`) — endereços de `GetClasses`(0x70) e
 /// `GetNativeTypes`(0x40) são genuinamente diferentes. Disassembly manual (via
 /// `rttislot` + disassembly da região) do CORPO INTEIRO dos 3 métodos (`GetNativeTypes`/`GetClasses`/
@@ -1845,13 +1554,12 @@ pub unsafe fn probe_getclasses_capacity_vs_size(reg: &Registry, anchor_name: &st
     );
 }
 
-/// Codeware item #50 (`Reflection.GetClasses`/`GetEnums`/`GetBitfields`/`GetDerivedClasses`/
-/// `GetGlobalFunctions`, "enumeração em massa nunca confirmada") — a fonte C++ real
-/// (`Reflection.hpp`) mostra que `GetClasses`/`GetEnums`/`GetBitfields` são só `rtti->types.ForEach`
+/// Item #50 (`Reflection.GetClasses`/`GetEnums`/`GetBitfields`/`GetDerivedClasses`/
+/// `GetGlobalFunctions`, "enumeração em massa nunca confirmada") — `GetClasses`/`GetEnums`/`GetBitfields` são só `rtti->types.ForEach`
 /// FILTRADO por `aType->GetType()==ERTTIType::X` — ou seja, `get_native_types()` (universo
 /// completo, já provado) + `type_kind()` (decoder de categoria, já provado) compõem a MESMA
-/// capacidade sem RE nova. `GetDerivedClasses` na fonte real usa `rtti->GetClasses(base,...,true)`
-/// — o MESMO método com a anomalia documentada nesta sessão (item #63 RED4ext.SDK, devolve o
+/// capacidade sem RE nova. O caminho direto de `GetDerivedClasses` seria `rtti->GetClasses(base,...,true)`
+/// — o MESMO método com a anomalia documentada nesta sessão (item #63, devolve o
 /// universo inteiro) — em vez de replicar o bug, uso `reg.get_derived_classes` (vtbl+0x78, método
 /// DIFERENTE e JÁ PROVADO correto) pro mesmo efeito funcional. `GetGlobalFunctions` já é
 /// `reg.get_global_functions()` (vtbl+0x48, já provado, "4435 funções globais").
@@ -2214,7 +1922,7 @@ size={tam} align={alin} | se DynArray(16)+escalares, sobram {sobra} bytes",
 /// `GetSize`/`GetAlignment` de um objeto de TIPO do RTTI, pelas virtuais dele.
 ///
 /// Offsets `+0x18`/`+0x20` na vtable, confirmados no macOS em 2026-06-20 pelo rttidump da vtable
-/// do `Vector4`. São `+0x08` vs o RED4ext.SDK (Windows) porque
+/// do `Vector4`. São `+0x08` vs o Windows porque
 /// o Itanium ABI do macOS põe DOIS slots de destrutor no topo.
 #[cfg(feature = "devtools")]
 fn tamanho_e_alinhamento(ty: *mut c_void) -> (u32, u32) {
@@ -2411,9 +2119,8 @@ pub fn sane(p: *mut c_void) -> bool {
     a > 0x1_0000 && a < 0x8000_0000_0000
 }
 
-/// Codeware `#58` (`ISerializable.ProcessPostLoad`, 2026-08-12, agente dedicado round 9) —
-/// dispatch VIRTUAL GENÉRICO via vtable slot `+0x30`. `RED4ext.SDK/include/RED4ext/
-/// ISerializable.hpp` documenta `virtual void PostLoad(const PostLoadParams&)` no slot Windows
+/// `ISerializable.ProcessPostLoad` (2026-08-12, agente dedicado round 9) —
+/// dispatch VIRTUAL GENÉRICO via vtable slot `+0x30`. No Windows, `virtual void PostLoad(const PostLoadParams&)` fica no slot
 /// `+0x28` (`GetNativeType@0x00, GetType@0x08, GetAllocator@0x10, ~ISerializable@0x18,
 /// sub_20@0x20, PostLoad@0x28`) — aplicando a MESMA convenção dual-dtor Itanium já estabelecida
 /// neste projeto (Mac tem 2 dtor slots vs 1 no MSVC, tudo DEPOIS do dtor desloca +0x08), Mac
@@ -2430,7 +2137,7 @@ pub fn sane(p: *mut c_void) -> bool {
 /// herda de `ISerializable` na hierarquia real e preserva a posição dos slots base), sem
 /// precisar de endereço por-classe. Zero RE nova.
 ///
-/// `PostLoadParams{disablePreInitialization: bool, pad[7]}` (RED4ext.SDK, 8 bytes) é passado
+/// `PostLoadParams{disablePreInitialization: bool, pad[7]}` (8 bytes) é passado
 /// POR PONTEIRO (x1), igual ao C++ real (`const PostLoadParams& aParams`) — construído numa
 /// array de bytes local, nunca alocado.
 ///
@@ -2616,7 +2323,7 @@ pub unsafe fn class_of(obj: *mut c_void) -> *mut c_void {
 }
 
 // ===== Reflection: propriedades por nome (GetValue/SetValue) =========================
-// CProperty (RED4ext.SDK, layout CONFIRMADO no macOS via reflection-test pois CProperty NÃO tem
+// CProperty (layout CONFIRMADO no macOS via reflection-test pois CProperty NÃO tem
 // vtable → sem o shift +0x08 do Itanium): type@0x00, name(CName)@0x08, group@0x10, parent@0x18,
 // valueOffset(u32)@0x20, flags@0x28; sizeof 0x30. O valor vive em `obj + valueOffset`
 // (salvo flags.inValueHolder@bit0x15 — raro; V1 ignora e lê inline).
@@ -2662,10 +2369,10 @@ pub unsafe fn find_property(reg: &Registry, class: &str, prop: &str) -> *mut c_v
     find_property_in_class(reg.class_by_name(class), prop)
 }
 
-/// `cw-reflection-class-api` (2026-07-24): lista os `CProperty*` declarados DIRETAMENTE em `cls`
+/// API de reflexão de classe (2026-07-24): lista os `CProperty*` declarados DIRETAMENTE em `cls`
 /// (mesmo nível que `propdump`/`dump_props` já usam — `props_array`, PROVADO in-game há sessões).
 /// NÃO sobe pra parents (cada classe da cadeia tem sua própria lista; um mod pode andar
-/// `GetParent()` pra ver as herdadas — mesmo modelo do Codeware real). Vetor vazio se a classe
+/// `GetParent()` pra ver as herdadas). Vetor vazio se a classe
 /// não tiver props próprias resolvíveis. Base de `BwmsReflClassGetPropertyCount`/`ByIndex`
 /// (divergência documentada: substitui `GetProperties()->array<...>` por 2 getters indexados,
 /// evitando marshalar um array<Uint64> de retorno — RE nova fora de escopo desta rodada).
@@ -2682,7 +2389,7 @@ pub unsafe fn class_own_properties(cls: *mut c_void) -> Vec<*mut c_void> {
     out
 }
 
-/// Codeware `ReflectionClass.GetFunctions()`/`GetStaticFunctions()` (`PENDENCIAS-UNIFICADAS.md`
+/// `ReflectionClass.GetFunctions()`/`GetStaticFunctions()` (`PENDENCIAS-UNIFICADAS.md`
 /// item #51, "listar TODOS os membros nunca confirmado") — espelha `class_own_properties`, mas
 /// pros arrays `funcs@+0x48`(instância)/`staticFuncs@+0x58` já andados por `resolve_in_class`
 /// (que só busca POR NOME); aqui devolve TODOS os ponteiros de uma vez. `static_only` escolhe qual
@@ -2972,8 +2679,8 @@ pub unsafe fn reflection_probe_cls(cls0: *mut c_void, label: &str, obj: *mut c_v
 /// a instância pelo `CClass::CreateInstance` do motor ([`create_instance`]): o objeto nasce pelo
 /// allocator da classe e o motor pode soltá-lo pelo mesmo allocator. Nulo se a classe não resolve.
 pub unsafe fn new_object(reg: &Registry, class_name: &str) -> *mut c_void {
-    // Nome de script (`inkText`, `inkCanvas`) cai no `GetClassByScriptName`: a classe nativa desses é `inkTextWidget`/`inkCanvasWidget`, e o 176c do
-    // Codeware `#176` (boot 151) recebeu nulo pedindo `inkCanvas`.
+    // Nome de script (`inkText`, `inkCanvas`) cai no `GetClassByScriptName`: a classe nativa desses é `inkTextWidget`/`inkCanvasWidget`, e o
+    // teste do boot 151 recebeu nulo pedindo `inkCanvas`.
     let mut cls = reg.class_by_name(class_name);
     if cls.is_null() {
         cls = reg.class_by_script_name(class_name);
@@ -2996,7 +2703,7 @@ pub unsafe fn new_object(reg: &Registry, class_name: &str) -> *mut c_void {
     new_object_from_class_named(cls, class_name)
 }
 
-/// `Codeware.Reflection.ReflectionClass.MakeHandle()` (`PENDENCIAS-UNIFICADAS.md` item #51) —
+/// `Reflection.ReflectionClass.MakeHandle()` (`PENDENCIAS-UNIFICADAS.md` item #51) —
 /// mesmo núcleo de `new_object`, mas a partir de um `CClass*` JÁ RESOLVIDO (o caso real de
 /// `MakeHandle`: um mod já tem o ponteiro opaco de uma classe, via `BwmsReflGetClass` ou
 /// `GetDerivedClasses`, não o nome de novo). Sem nome pra log/trace (usa o endereço cru).
@@ -3042,11 +2749,11 @@ pub unsafe fn make_handle(out: *mut c_void, obj: *mut c_void) {
     ctor(out, obj);
 }
 
-/// Constrói um `wref<T>` REAL (RED4ext.SDK item #387) — mesmos 16 bytes `{instance,
+/// Constrói um `wref<T>` REAL (item #387) — mesmos 16 bytes `{instance,
 /// refCountBlock}` de `make_handle`, mas incrementa o contador FRACO (`weakRefs`, u32 @
-/// `refCountBlock+0x04`) em vez do forte. Layout confirmado via `RED4ext.SDK/Memory/SharedPtr.hpp`:
+/// `refCountBlock+0x04`) em vez do forte. Layout confirmado:
 /// `RefCnt{strongRefs@0x00(u32), weakRefs@0x04(u32)}` — MESMO bloco que `make_handle`/`Handle_ctor`
-/// já usa e já é real (RE confirmada, `cw-callback-handler`, 2026-08-10). `IncWeakRef()` real é
+/// já usa e já é real (RE confirmada, handler de callback, 2026-08-10). `IncWeakRef()` real é
 /// um incremento atômico puro (sem endereço nativo, `InterlockedIncrement`), então replicável
 /// direto em Rust sem nenhuma RE de endereço nova — só a leitura do bloco (via `make_handle`,
 /// que a própria rotina do motor já sabe achar/reusar o bloco existente de um objeto, em vez de
@@ -3283,7 +2990,7 @@ pub unsafe fn dump_class_funcs(reg: &Registry, class_name: &str) -> String {
     s
 }
 
-/// RED4ext.SDK item #55 (`PENDENCIAS-UNIFICADAS.md`): `GetFunction(CName)` (vtbl+0x30, já usado
+/// Item #55 (`PENDENCIAS-UNIFICADAS.md`): `GetFunction(CName)` (vtbl+0x30, já usado
 /// por `register::get_function`) só acha o que foi registrado via `RegisterFunction` — funções
 /// GLOBAIS puramente ESCRIPTADAS (declaradas num `.reds`, nunca passaram pelo `RegisterFunction`
 /// do lado Rust) não resolvem por ele. Fallback: varre `GetGlobalFunctions` (vtbl+0x48, já
@@ -3328,7 +3035,7 @@ unsafe fn resolve_global_function_pela_varredura(reg: &Registry, name: &str) -> 
             return f as *mut c_void;
         }
     }
-    // 2ª passada — MODULE-SCOPING (RED4ext.SDK `#55`, 2026-08-21). A 1ª passada compara HASH, então
+    // 2ª passada — MODULE-SCOPING (item #55, 2026-08-21). A 1ª passada compara HASH, então
     // uma global declarada dentro de `module X.Y` nunca é achada pelo nome BARE: nem `name`(+0x10)
     // nem `fullName`(+0x08) hasheiam pro bare, os dois carregam a forma qualificada. Isso foi
     // confirmado ao vivo em 2026-08-17 ("nome bare falha, nome qualificado resolve e devolve o valor
@@ -3360,7 +3067,7 @@ unsafe fn resolve_global_function_pela_varredura(reg: &Registry, name: &str) -> 
     std::ptr::null_mut()
 }
 
-/// Núcleo PURO da decisão de nome do `resolve_global_function_robust` (RED4ext.SDK `#55`) —
+/// Núcleo PURO da decisão de nome do `resolve_global_function_robust` (item #55) —
 /// extraído pra ser testável offline, sem RTTI/jogo.
 ///
 /// Casa `requested` contra o nome REAL de uma global. Regras, em ordem:
@@ -3440,7 +3147,7 @@ pub unsafe fn dump_props(reg: &Registry, class_name: &str) -> String {
     // CRITÉRIO DE VALIDADE — GENERALIZADO 2026-09-06.
     //
     // A versão anterior só reportava um array se algum entry casasse um nome de uma lista FIXA
-    // (os campos do NativeSettings, item pra qual a função nasceu). Efeito: `propdump` de
+    // (os campos da página de settings de mod, item pra qual a função nasceu). Efeito: `propdump` de
     // qualquer outra classe imprimia só o ponteiro da classe e NADA MAIS — indistinguível de
     // "essa classe não tem property". Medido em `entIComponent`/`entMeshComponent`/
     // `questWorldStateSystem`: 4 chamadas, 4 silêncios, zero informação.
@@ -3497,7 +3204,7 @@ pub unsafe fn dump_props(reg: &Registry, class_name: &str) -> String {
                     }
                 }
             }
-            // 2) a lista fixa segue, como reforço legível pro caso do NativeSettings.
+            // 2) a lista fixa segue, como reforço legível pro caso da página de settings de mod.
             for k in known {
                 let h = cname(k);
                 for (j, &qv) in q.iter().enumerate() {
@@ -3590,7 +3297,7 @@ pub enum Arg {
     Enum(u64), // valor de enum já resolvido (escreve u64; engine lê a largura real)
     Tdb([u8; 8]),
     #[cfg(feature = "lua")]
-    Bytes(Vec<u8>), // valor no tamanho do tipo do parâmetro (struct por valor dos mods CET), em slot do tamanho dele
+    Bytes(Vec<u8>), // valor no tamanho do tipo do parâmetro (struct por valor dos mods Lua), em slot do tamanho dele
 }
 
 /// Como [`call_func`], com o retorno no tamanho do tipo de retorno da função (struct por valor como `Matrix`, 0x40 B, transbordaria os 0x20
@@ -3660,7 +3367,7 @@ unsafe fn chamar_pelo_executor(rf: &ResolvedFn, ctx: *mut c_void, args: &[Arg], 
     }
 
     let n = args.len();
-    // Slot de 0x20 por argumento; valor maior (struct por valor dos mods CET, `Matrix` de 0x40) ocupa o tamanho dele, alinhado a 0x10.
+    // Slot de 0x20 por argumento; valor maior (struct por valor dos mods Lua, `Matrix` de 0x40) ocupa o tamanho dele, alinhado a 0x10.
     let slots: Vec<usize> = args.iter().map(|a| match a {
         #[cfg(feature = "lua")]
         Arg::Bytes(b) => ((b.len() + 0xf) & !0xf).max(0x20),
@@ -3803,10 +3510,9 @@ unsafe fn read_fromtd() -> Option<(*mut c_void, *mut c_void, *mut c_void)> {
     Some((f, c, r))
 }
 
-// ===== RED4ext.SDK — introspecção fina de flags (`PENDENCIAS-UNIFICADAS.md`, prosa "Restante" da
-// seção RED4ext.SDK: "CClass::Flags 11 bits, CProperty.flags 13 bits, CBaseFunction.flags 13
-// bits — maioria nunca lida/setada"). Os 3 offsets vêm dos headers vendorizados
-// (`RTTITypes.hpp`/`Scripting/CProperty.hpp`/`Scripting/Functions.hpp`) — `CProperty.flags@0x28`
+// ===== Introspecção fina de flags (`PENDENCIAS-UNIFICADAS.md`, prosa "Restante":
+// "CClass::Flags 11 bits, CProperty.flags 13 bits, CBaseFunction.flags 13
+// bits — maioria nunca lida/setada"). `CProperty.flags@0x28`
 // já era lido (só o bit `inValueHolder`, ver `find_prop_exact`); `CBaseFunction.flags@0xA8` já
 // era ESCRITO (`register.rs::build_native_func`, `FLAG_NATIVE`/`FLAG_STATIC`). O gap real é expor
 // a decodificação COMPLETA dos bits nomeados, nunca feita antes pra nenhum dos 3.
@@ -3884,7 +3590,7 @@ pub fn decode_property_flags(f: u64) -> String {
 pub unsafe fn function_flags(func: *mut c_void) -> Option<u32> {
     rd_u32_chk((func as *const u8).add(0xA8))
 }
-/// RED4ext.SDK #186 (lado escrita, 2026-08-11): escreve `CBaseFunction::flags@+0xA8` — mesmo
+/// Item #186 (lado escrita, 2026-08-11): escreve `CBaseFunction::flags@+0xA8` — mesmo
 /// campo/offset já lido/escrito com sucesso (isNative/isStatic, confirmado ao vivo 2026-08-10).
 /// Campo é metadado puro (Reflection/introspecção) — despacho de chamada nunca lê nenhum destes
 /// bits (nossas natives são roteadas via `NATIVE_ROUTES`, hook próprio, nunca a via nativa do
@@ -3948,9 +3654,9 @@ pub unsafe fn probe_property_flags(reg: &Registry, class: &str, prop: &str) {
     }
 }
 
-// ===== `CClass.defaults` (`PENDENCIAS-UNIFICADAS.md`, prosa "Restante" do RED4ext.SDK: "valor-
+// ===== `CClass.defaults` (`PENDENCIAS-UNIFICADAS.md`, prosa "Restante": "valor-
 // default de propriedade (CClass.defaults)") — `Map<CName, Variant*> defaults` @ CClass+0x158
-// (header vendorizado `RTTITypes.hpp`; layout de `Map<K,V>` confirmado por `Map.hpp`:
+// (layout de `Map<K,V>`:
 // `keys:DynArray<K>@+0x00, values:DynArray<T>@+0x10, flags:i32@+0x20`, cada `DynArray` no layout
 // já provado em todo o resto do projeto — `entries@+0x00, cap(u32)@+0x08, size(u32)@+0x0C`).
 // Nenhuma introspecção de valor-default de propriedade existia antes — o campo nunca foi lido.
@@ -4026,7 +3732,7 @@ pub unsafe fn probe_class_default(reg: &Registry, class: &str, prop: &str) {
 // Isso NÃO afeta a vtable de `IRTTISystem`/`CRTTISystem` (cross-validada extensivamente nesta
 // sessão nos offsets EXATOS do header, sem shift) — o shift é específico da hierarquia `IType`.
 
-/// `ERTTIType` do RED4ext.SDK (`RTTITypes/ERTTIType.hpp`): o byte que `IType::GetType()` devolve (vtable+0x28 no macOS).
+/// `ERTTIType`: o byte que `IType::GetType()` devolve (vtable+0x28 no macOS).
 pub mod ertti {
     #[cfg(feature = "devtools")]
     pub const CLASS: u8 = 2;
@@ -4071,9 +3777,9 @@ pub fn decode_ertti_type(k: u8) -> &'static str {
     ertti::NOMES.get(k as usize).copied().unwrap_or("?")
 }
 
-/// Codeware `#197` (`ReflectionType.GetInnerType()`, 2026-08-10) — "o elemento interno de um tipo
+/// `ReflectionType.GetInnerType()` (2026-08-10) — "o elemento interno de um tipo
 /// composto" (array/handle/weak-handle: `T` de `array<T>`/`ref<T>`/`wref<T>`). Achado que evita
-/// vtable por completo: `CRTTIHandleType`/`CRTTIWeakHandleType`/`CRTTIBaseArrayType` (RTTITypes.hpp)
+/// vtable por completo: `CRTTIHandleType`/`CRTTIWeakHandleType`/`CRTTIBaseArrayType`
 /// TODOS guardam `innerType: rtti::IType*` como CAMPO DE DADOS no MESMO offset fixo (`+0x10`, logo
 /// após o ponteiro de vtable) — não precisa chamar `GetInnerType()` (vtable+0xC0, exigiria a
 /// correção de shift Itanium já documentada pra `IType`). Campo de dado NÃO sofre esse shift (só
@@ -4155,7 +3861,7 @@ pub unsafe fn probe_property_type_kind_all(reg: &Registry, class: &str, n: usize
     }
 }
 
-/// Codeware `#199` (`ResourceHelper.IsReferenceLoaded`/`GetReferenceResource`): `proptypekindall`
+/// `ResourceHelper.IsReferenceLoaded`/`GetReferenceResource`: `proptypekindall`
 /// só varre 1 classe por vez — nunca achou um `type_kind()==11` (`ResourceReference`/`Ref<T>`,
 /// distinto do `type_kind()==12`/`RaRef<T>` já testado em `mesh`/`rig`) porque ninguém tentou
 /// achar um em escala. Comando `scan11 <âncora> [max_classes]` — BFS pela hierarquia via
@@ -4224,9 +3930,8 @@ pub unsafe fn scan_type_kind_across_hierarchy(reg: &Registry, anchor: &str, max_
     );
 }
 
-/// Codeware `Reflection.ReflectionFunc` — "introspecção de assinatura" (`PENDENCIAS-UNIFICADAS.md`,
-/// prosa Codeware "Reflection... introspecção de assinatura"). A fonte C++ real
-/// (`ReflectionFunc.hpp`) mostra que `GetReturnType`/`GetParameters`/`IsNative`/`IsStatic` são só
+/// `Reflection.ReflectionFunc` — "introspecção de assinatura" (`PENDENCIAS-UNIFICADAS.md`,
+/// prosa "Reflection... introspecção de assinatura"). `GetReturnType`/`GetParameters`/`IsNative`/`IsStatic` são só
 /// leituras de campos JÁ documentados neste projeto: `returnType->type` (= `ResolvedFn.ret_type`,
 /// já existe), `params: DynArray<CProperty*>@+0x28` (nunca listado, só usado indiretamente),
 /// `flags.isNative/isStatic` (= `function_flags`/`decode_function_flags`, fechado nesta mesma
@@ -4293,9 +3998,9 @@ pub unsafe fn probe_function_flags(reg: &Registry, class: &str, method: &str) {
     }
 }
 
-/// RED4ext.SDK #284/#280 (2026-08-11): `DynArray<T>::Erase`/`RemoveAt`/`Assign` — genérico,
-/// zero endereço nativo (confirmado via `Containers/DynArray.hpp`: `Erase` é lógica C++
-/// auto-contida, `ShiftEntries` = memmove puro, sem chamada nativa nenhuma). Opera no layout
+/// Itens #284/#280 (2026-08-11): `DynArray<T>::Erase`/`RemoveAt`/`Assign` — genérico,
+/// zero endereço nativo (`Erase` é lógica auto-contida, `ShiftEntries` = memmove puro, sem
+/// chamada nativa nenhuma). Opera no layout
 /// `{entries(ptr)@0x00, capacity(u32)@0x08, size(u32)@0x0C}` — o MESMO já batalha-testado por
 /// `mkarr`/`get_records_of_class`/`class_own_functions`/`Entity.GetComponents` neste projeto.
 /// `header_ptr` aponta pro início desse struct de 16 bytes; `stride` = bytes por elemento;
@@ -4322,61 +4027,6 @@ pub unsafe fn dynarray_remove_at(header_ptr: *mut u8, stride: usize, index: usiz
     true
 }
 
-/// RED4ext.SDK #280 — `Assign(aSize, aValue)`: substitui TODO o conteúdo (mesmo layout, sem
-/// shift — só sobrescreve `[0..count)` com o valor dado e ajusta `size`). Exige `count<=capacity`
-/// (mesmo contrato de `Assign`, que faz `Reserve` internamente se precisar crescer — aqui, por
-/// simplicidade/segurança, apenas recusa se não couber, já que crescer BUFFER NOSSO seria só
-/// realocar um `Vec` — não testado nesta rodada, escopo = provar o mecanismo de substituição).
-pub unsafe fn dynarray_assign_fill(header_ptr: *mut u8, stride: usize, count: usize, value: &[u8]) -> bool {
-    if header_ptr.is_null() || value.len() != stride || !crate::memoria::is_readable(header_ptr as *const c_void, 0x10) {
-        return false;
-    }
-    let entries = (header_ptr as *const u64).read_unaligned() as *mut u8;
-    let cap = (header_ptr.add(8) as *const u32).read_unaligned();
-    if count as u32 > cap || entries.is_null() {
-        return false;
-    }
-    for i in 0..count {
-        core::ptr::copy_nonoverlapping(value.as_ptr(), entries.add(i * stride), stride);
-    }
-    core::ptr::write_unaligned(header_ptr.add(12) as *mut u32, count as u32);
-    true
-}
-
-/// Diagnóstico read/write-only (buffer 100% NOSSO, nunca exposto ao motor/engine — zero risco de
-/// crash de teardown, categoria diferente do `GetRecordsArray`/#43 que crashou por precisar de
-/// trailer de allocator pra um array LOCAL REDSCRIPT). Aloca `[Int32; 5]`, remove o índice 2,
-/// confirma shift correto + `size` decrementado; depois testa `Assign` (substitui tudo por `77`,
-/// `count=3`).
-pub unsafe fn dynarray_removeat_selftest() {
-    let mut buf: Vec<i32> = vec![10, 20, 30, 40, 50];
-    let entries_ptr = buf.as_mut_ptr() as *mut u8;
-    let mut header = [0u8; 16];
-    core::ptr::write_unaligned(header.as_mut_ptr() as *mut u64, entries_ptr as u64);
-    core::ptr::write_unaligned(header.as_mut_ptr().add(8) as *mut u32, 5u32); // capacity
-    core::ptr::write_unaligned(header.as_mut_ptr().add(12) as *mut u32, 5u32); // size
-
-    let ok = dynarray_remove_at(header.as_mut_ptr(), 4, 2); // remove índice 2 (valor 30)
-
-    let new_size = (header.as_ptr().add(12) as *const u32).read_unaligned();
-    let vals: Vec<i32> = (0..new_size as usize)
-        .map(|i| (entries_ptr.add(i * 4) as *const i32).read_unaligned())
-        .collect();
-
-    crate::log_dev!(
-        "[dynarrtest] RemoveAt(idx=2) ok={ok} new_size={new_size} vals={vals:?} (esperado: true 4 [10,20,40,50])"
-    );
-
-    let fill_val: i32 = 77;
-    let ok2 = dynarray_assign_fill(header.as_mut_ptr(), 4, 3, &fill_val.to_ne_bytes());
-    let new_size2 = (header.as_ptr().add(12) as *const u32).read_unaligned();
-    let vals2: Vec<i32> = (0..new_size2 as usize)
-        .map(|i| (entries_ptr.add(i * 4) as *const i32).read_unaligned())
-        .collect();
-    crate::log_dev!(
-        "[dynarrtest] Assign(count=3,val=77) ok={ok2} new_size={new_size2} vals={vals2:?} (esperado: true 3 [77,77,77])"
-    );
-}
 
 #[cfg(test)]
 mod dynarray_remove_at_tests {
@@ -4430,7 +4080,7 @@ mod cstring_tests {
         }
     }
 
-    /// Monta um buffer de 0x20 bytes no layout do RED4ext::CString (SSO inline): os primeiros
+    /// Monta um buffer de 0x20 bytes no layout do `CString` (SSO inline): os primeiros
     /// `s.len()` bytes de `text.inline_str`, resto zerado, `length` (sem a flag 0x40000000) em
     /// +0x14, `allocator` (irrelevante pra leitura) em +0x18.
     fn make_inline_cstring(s: &str) -> [u8; 0x20] {
@@ -4497,7 +4147,7 @@ mod cstring_tests {
     }
 }
 
-/// RED4ext.SDK `#55` — núcleo de decisão de nome do `resolve_global_function_robust`, testado
+/// Item #55 — núcleo de decisão de nome do `resolve_global_function_robust`, testado
 /// offline (sem RTTI/jogo). O gap real: uma global dentro de `module X.Y` não é achada pelo nome
 /// BARE, porque a busca por hash compara `name`/`fullName` já qualificados.
 #[cfg(test)]
@@ -4513,7 +4163,7 @@ mod global_fn_name_tests {
     fn nome_bare_acha_global_com_module_scope() {
         // O CASO DO GAP: antes disto, pedir o nome curto não achava nada.
         assert!(global_fn_name_matches("MinhaFunc", "MeuModulo.MinhaFunc"));
-        assert!(global_fn_name_matches("GetText", "Codeware.Localization.GetText"));
+        assert!(global_fn_name_matches("GetText", "MeuModulo.Localization.GetText"));
     }
 
     #[test]

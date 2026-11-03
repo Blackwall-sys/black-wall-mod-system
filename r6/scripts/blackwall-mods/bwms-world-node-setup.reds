@@ -1,4 +1,4 @@
-// bwms-world-node-setup.reds — Codeware `#83` (`WorldNodeSetupWrapper`): leitura e escrita do setup compilado de um nó de um setor carregado
+// bwms-world-node-setup.reds — `WorldNodeSetupWrapper`: leitura e escrita do setup compilado de um nó de um setor carregado
 // (`worldCompiledNodeInstanceSetupInfo`, 0x90 B no `DataBuffer` do setor). O setor vem pelo caminho e o setup pelo índice. Offsets: position 0x00,
 // orientation 0x10, scale 0x20, secondaryRefPointPosition 0x2C, streamingRefPoint 0x38, ponteiro do nó 0x50, globalNodeID 0x58, proxyNodeID 0x60,
 // nodeIndex nos 19 bits de baixo de 0x70, secondaryRefPointDistance 0x78, streamingDistance 0x7C (layout da 2.5; setor da 2.31 o jogo converte no

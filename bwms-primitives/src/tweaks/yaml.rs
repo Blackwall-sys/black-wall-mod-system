@@ -1,12 +1,12 @@
-//! Leitor do subconjunto de YAML que o BWMS lê: os tweaks declarativos do TweakXL (`.yaml`, lidos pelo `tweakxl`) e o `.xl` do
-//! ArchiveXL (`instalacao::xl`). Os dois mods leem com o yaml-cpp, e um leitor só dá aos dois a mesma regra. Diferente das
+//! Leitor do subconjunto de YAML que o BWMS lê: os tweaks declarativos (`.yaml`, lidos pelo `tweaks`) e o `.xl`
+//! (`instalacao::xl`). Um leitor só dá aos dois a mesma regra. Diferente das
 //! libs YAML de alto nível (serde_yaml, yaml-rust), este **preserva as tags** (`!append`, `!exclude`, …) e a **ordem** dos
-//! campos: o TweakXL e o ArchiveXL dependem das duas.
+//! campos: os dois formatos dependem das duas.
 //!
 //! Suporta: mapas e sequências em bloco, inclusive a sequência no recuo da própria chave (`chave:` e, embaixo, `- item` no
-//! mesmo recuo, a forma do `InheritanceMap.yaml` do TweakXL); escalares; flow de uma linha (`[a, b]`, `{x: 1}`, aninhados; a
-//! vírgula final não abre item); tags `!op`; âncora `&nome` e alias `*nome` como valor inteiro (o `.xl` de customização do
-//! ArchiveXL usa, `PlayerCustomizationEyesFix.xl`); comentários `#`; aspas.
+//! mesmo recuo, a forma do mapa de herança); escalares; flow de uma linha (`[a, b]`, `{x: 1}`, aninhados; a
+//! vírgula final não abre item); tags `!op`; âncora `&nome` e alias `*nome` como valor inteiro (o `.xl` de customização
+//! usa); comentários `#`; aspas.
 //!
 //! Fora do subconjunto, a lista única:
 //! - dão erro: merge `<<: *x`; marcador de documento `---`/`...` (multi-documento); escalar de bloco `|`/`>`; tab na
@@ -19,8 +19,8 @@ use std::collections::HashMap;
 /// Um nó YAML, opcionalmente com uma tag (`!append`, `!exclude`, guardada com o `!`).
 #[derive(Debug, Clone)]
 pub struct Node {
-    /// Escalar escrito entre aspas. O TweakXL só deduz `String` de escalar com aspas (o yaml-cpp marca a tag `!` nesse caso) quando cria um
-    /// flat sem tipo declarado (`YamlReader::TryMakeValue`); fora disso as aspas não mudam o valor.
+    /// Escalar escrito entre aspas. Só escalar com aspas deduz `String` quando cria um
+    /// flat sem tipo declarado; fora disso as aspas não mudam o valor.
     pub aspas: bool,
     pub tag: Option<String>,
     pub kind: Kind,
@@ -76,9 +76,9 @@ struct Line {
     content: String,
 }
 
-/// Parseia um documento YAML em um [`Node`] raiz (um mapa no TweakXL e no `.xl`; documento vazio = mapa vazio).
+/// Parseia um documento YAML em um [`Node`] raiz (um mapa no tweak e no `.xl`; documento vazio = mapa vazio).
 pub fn parse(text: &str) -> Result<Node, String> {
-    // BOM UTF-8 no início (o WolvenKit grava os .yaml com ele): fica fora do texto, senão gruda no nome do 1º record.
+    // BOM UTF-8 no início (há editor que grava os .yaml com ele): fica fora do texto, senão gruda no nome do 1º record.
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines = preprocess(text)?;
     let Some(base) = lines.first().map(|l| l.indent) else {
@@ -462,7 +462,7 @@ fn split_flow(inner: &str) -> Vec<&str> {
 }
 
 /// Remove aspas simples/duplas externas, se houver.
-/// Tira as aspas das pontas e resolve os escapes como o YAML (o yaml-cpp do TweakXL e do ArchiveXL): `''` na simples; na dupla `\\`,
+/// Tira as aspas das pontas e resolve os escapes como o YAML: `''` na simples; na dupla `\\`,
 /// `\"`, `\/`, `\n`, `\t`, `\r`, `\0`. Escape desconhecido fica como está, para o caminho Windows entre aspas (`"base\characters\x.ent"`,
 /// erro no yaml-cpp) continuar inteiro.
 fn unquote(s: &str) -> String {
@@ -521,7 +521,7 @@ mod tests {
         assert_eq!(inner[1], ("bar".to_string(), Node::scalar("2")));
     }
 
-    /// O `photomode_npc_template.yaml` do WolvenKit começa com BOM: o nome do 1º record sai sem ele.
+    /// Um `.yaml` gravado com BOM: o nome do 1º record sai sem ele.
     #[test]
     fn bom_fica_fora_do_nome_do_primeiro_record() {
         let n = parse("\u{feff}Character.X_Photomode_Puppet:\n  $type: Character\n").unwrap();
@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(rec.get("range").unwrap().as_str(), Some("30"));
     }
 
-    /// Âncora e alias valem no TweakXL como no `.xl` (decisão do dono, F7-23): no valor de chave e de item, com o bloco embaixo, e
+    /// Âncora e alias valem no tweak como no `.xl` (decisão do dono, F7-23): no valor de chave e de item, com o bloco embaixo, e
     /// com a tag antes ou depois da âncora. O alias copia o nó com a tag.
     #[test]
     fn ancora_e_alias_como_valor_inteiro() {
@@ -656,7 +656,7 @@ mod tests {
         assert_eq!((n.get("a").unwrap().as_str(), n.get("c").unwrap().as_str()), (Some("b"), Some("d")));
     }
 
-    /// A sequência no recuo da própria chave, a forma do `InheritanceMap.yaml` do TweakXL e de `.xl` escritos à mão, também dentro do
+    /// A sequência no recuo da própria chave, a forma do mapa de herança e de `.xl` escritos à mão, também dentro do
     /// mapa de um item. Depois de `-` vazio ela não vale: o item é vazio e o `-` seguinte é o próximo item.
     #[test]
     fn sequencia_no_recuo_da_chave() {

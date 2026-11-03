@@ -12,7 +12,7 @@ pub(crate) const ROUPA_SUFIXOS_VM: u64 = 0x1_0201_dcc8;
 /// sorteio de aparência aleatória com 2 RNG, 9 call-sites.
 pub(crate) const ENTITY_TEMPLATE_FIND_APP_VM: u64 = 0x1_019c_5e2c;
 
-// ===== ArchiveXL `#51` 51c — `OnAppearanceResourceLoad`: definições e `censorshipMapping` do `.app` de patch (2026-09-12) =====
+// ===== `OnAppearanceResourceLoad`: definições e `censorshipMapping` do `.app` de patch (2026-09-12) =====
 // Hook do `PostLoad` do `appearanceAppearanceResource` (`0x1017df10c`, disparando ao vivo em 2026-08-15/17), instalado pela tabela quando algum alvo `.app`
 // tem `appearances` ou `censorshipMapping`, antes da original. Com `appearances`, cada definição do patch (`DynArray<Handle<AppearanceDefinition>>`, `+0x98`)
 // vai por nome (`+0x30`): nome `None` modifica todas as definições do alvo; nome existente modifica a 1ª com ele (menos nome que um patch anterior deste

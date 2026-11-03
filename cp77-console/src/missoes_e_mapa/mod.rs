@@ -22,7 +22,7 @@ use crate::diagnostico::{
     bwms_hook_enabled_global, A34_CHAMADAS, A34_FACTS, A35_RECRIADAS, A35_RESTAURACOES_ADIADAS, A55_FORCADOS_NA_RESTAURACAO, FACT_REMOVER_VM,
     MAPPIN_EMPURRADOS, QUESTPHASE_CARGAS, QUESTPHASE_OBSERVAR, QUESTPHASE_RAIZ_PATH, QUESTSYS_ONGAMERESTORED_CNT, QUESTS_ULTIMA,
 };
-// Só os handlers de prova e o teste do A#34 usam, e o público não cita nenhum dos dois.
+// Só os handlers de prova e o teste do `QuestRootInstance::Start` usam, e o público não cita nenhum dos dois.
 #[cfg(feature = "devtools")]
 use crate::diagnostico::{
     tramp_journal_mappin_census, tramp_mappin_cooked_position, tramp_mappin_cooked_volume, tramp_mappin_test_inject, tramp_mappin_test_position,
@@ -32,18 +32,10 @@ use crate::tipos_do_motor::*;
 #[cfg(feature = "devtools")]
 use bwms_primitives::LOCKEY_PREFIXO;
 
-// ===== Codeware `#142` (`OpenWorldTracker`), mecanismo confirmado pelo item `#232`
-// (`CATALOGO-EXAUSTIVO-CODEWARE.md`) — `MappinSystem.hpp` real:
+// ===== `OpenWorldTracker`: fase de mappin de POI =====
 //
-//   namespace Raw::MappinSystem {
-//   constexpr auto SetPoiMappinPhase = Core::RawVFunc</* addr = */ 0x1D0, void(uint32_t,
-//       gamedataMappinPhase)>();
-//   constexpr auto GetPoiMappinPhase = Core::RawVFunc</* addr = */ 0x3C8,
-//       gamedataMappinPhase(uint32_t)>();
-//   }
-//
-// São slots de VTABLE do `MappinSystem`/`IMappinSystem` (offset Windows já em BYTES, não
-// índice) — NÃO `RawFunc`/`AddressLib` (hash de endereço). Os slots Mac NÃO saem de
+// `SetPoiMappinPhase(uint32_t, gamedataMappinPhase)` e `GetPoiMappinPhase(uint32_t)` são slots
+// de VTABLE do `MappinSystem`/`IMappinSystem` — NÃO endereço de função. Os slots Mac NÃO saem de
 // "Windows + 0x08": foram medidos na vtable real (nota abaixo, `MAPPIN_SET/GET_POI_PHASE_SLOT`).
 //
 // `MappinSystem` já é instanciável/acessível neste projeto (item `#78`/`GetAllMappins`,
@@ -80,7 +72,7 @@ use bwms_primitives::LOCKEY_PREFIXO;
 // relação com fase de POI.
 //
 // **Por que "Windows + 0x08" não serve aqui.** Só vale quando o offset Windows de partida está
-// certo, e os do Codeware (`0x1D0`/`0x3C8`) não batem com esta build — regra do projeto
+// certo, e os de partida conhecidos (`0x1D0`/`0x3C8`) não batem com esta build — regra do projeto
 // ([[cp77-vtable-slot-mac-nao-e-windows-mais-8]]): MEDIR antes.
 //
 // O SETTER é PROIBIDO em chamada automática (muta estado real de mappin de quest); só a native
@@ -215,7 +207,7 @@ pub(crate) unsafe extern "C" fn tramp_mappin_scan_poi_slot(_c: *mut c_void, fram
     let fim = args.get(8).map(|(v, _)| *v as usize).filter(|v| *v < 0x2000).unwrap_or(0x480);
     // Pelo canal de veredito: esta chamada acontece na 2ª firing, além do orçamento do `log()`.
     crate::veredito_dev!(
-        "[poislot] chamado com {} amostra(s) (o `0x3D0` do Codeware seria o slot {})",
+        "[poislot] chamado com {} amostra(s) (o `0x3D0` seria o slot {})",
         amostras.len(), 0x3D0usize / 8
     );
     scan_poi_phase_slot(sys, &amostras, ini, fim.max(ini));
@@ -268,24 +260,11 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_get_poi_phase(_c: *mut c_void
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#117` (`CallbackSystem.hpp`, os 9 eventos de sessão nunca modelados via override de
-// vtable de `Red::IGameSystem` — `RODADA 2026-08-16, agente dedicado, 100% OFFLINE`) — resolve
-// METADE do bloqueador que travava este item desde 2026-08-08/12 ("falta um header C++ ou
-// disassembly de vtable REAL de `IGameSystem` vanilla confirmando o índice de cada slot — nunca
-// achado" — ver nota do item no catálogo). Achado: `RED4ext.SDK/include/RED4ext/Scripting/
-// Natives/gameIGameSystem.hpp` é um header HAND-WRITTEN (não `Generated/` — o comentário do
-// próprio SDK confirma que os arquivos `Generated/` só documentam TAMANHO; este documenta os 20
-// VIRTUAIS de verdade) com o offset Windows BYTE-EXATO de cada slot, escrito em comentário ao
-// lado de cada `virtual` (`OnWorldAttached // 110` ... `OnUninitialize // 1A8`) — mesma
-// categoria de confiança máxima já aceita em dezenas de outros itens deste catálogo (header
-// hand-written do SDK vendorizado, não chute/disassembly).
-//
-// Cruzado contra `enablers/Codeware/src/App/Callback/CallbackSystem.{hpp,cpp}` (fonte real do
-// item `#1`, já FECHADO neste projeto, 7/7 provado ao vivo): confirma EXATAMENTE quais 11 dos 20
-// slots o `CallbackSystem` real override, e pra qual `CName` de evento cada um mapeia
-// (`OnWorldAttached`→`"Session/BeforeStart"`, `OnGamePrepared`→`"Session/Start"`, etc. — nunca
-// documentado com este nível de precisão antes neste projeto). Ver tabela `IGAMESYSTEM_SLOTS`
-// abaixo.
+// Os eventos de sessão via override de vtable de `IGameSystem` (RODADA 2026-08-16, 100% OFFLINE):
+// os 20 VIRTUAIS de `IGameSystem` têm offset Windows conhecido por slot (`OnWorldAttached` `0x110`
+// ... `OnUninitialize` `0x1A8`). 11 dos 20 slots mapeiam pra um `CName` de evento de sessão
+// (`OnWorldAttached`→`"Session/BeforeStart"`, `OnGamePrepared`→`"Session/Start"`, etc.). Ver tabela
+// `IGAMESYSTEM_SLOTS` abaixo.
 //
 // `IGameSystem` estende `IUpdatableSystem` (1 virtual próprio, `OnRegisterUpdates`@Windows
 // `0x108`) que estende `IScriptable` — os 20 virtuais NOVOS de `IGameSystem` começam em `0x110`
@@ -294,16 +273,16 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_get_poi_phase(_c: *mut c_void
 // fechados) estende `IMappinSystem`→`IReplicatedGameSystem`→`IGameSystem` — `IReplicatedGameSystem`
 // NÃO adiciona nenhum virtual novo (só +0x10 de dado cru, confirmado no header GERADO da
 // reflection real do jogo) — então os slots `0x110`-`0x1A8` de `MappinSystem` SÃO literalmente
-// os 20 slots de `IGameSystem`, sem deslocamento. Os offsets Windows `0x1D0`/`0x3C8` do Codeware
+// os 20 slots de `IGameSystem`, sem deslocamento. Os offsets Windows `0x1D0`/`0x3C8` da fase de POI
 // não servem de âncora: não batem com esta build (nota do `MAPPIN_SET_POI_PHASE_SLOT`).
 //
 // **O que isto NÃO resolve, honestamente**: mesmo com os 20 offsets agora conhecidos com certeza
 // (não mais "índice desconhecido"), a metade FALTANTE do bloqueador original é DIFERENTE — não é
 // "onde fica o slot", é "como fazer o MOTOR chamar o NOSSO código nesse slot". Duas vias
-// possíveis, NENHUMA testada ainda: (a) nosso próprio `CallbackSystem` forjado (item `#1`, já
+// possíveis, NENHUMA testada ainda: (a) nosso próprio `CallbackSystem` forjado (já
 // registrado como `IGameSystem`-derivado) receber essas chamadas de verdade — MAS o próprio
 // projeto já optou deliberadamente por NÃO depender disso pro dispatch real de
-// `Session/Start`/`Session/End` (usa polling de presença do player, `cw-controller-session`,
+// `Session/Start`/`Session/End` (usa polling de presença do player, `controller-session`,
 // 2026-07-18) porque nunca foi confirmado se o motor de fato invoca lifecycle callbacks numa
 // instância forjada não descoberta pelo mecanismo de registro real de sistemas; (b)
 // `trocar_slot_da_vtable` (técnica já em produção no projeto) num slot de um sistema VANILLA real (ex.
@@ -314,7 +293,7 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_get_poi_phase(_c: *mut c_void
 // item.
 //
 // **Probe desta rodada — 100% OBSERVE-ONLY, ZERO chamada de função nativa/vtable**: dump
-// read-only dos 11 slots que `CallbackSystem` real override, contra uma instância VIVA e já
+// read-only dos 11 slots de evento de sessão, contra uma instância VIVA e já
 // acessível de `MappinSystem` (mesma cadeia de herança, offsets idênticos) — só lê o ponteiro de
 // função + os 4 primeiros bytes (checagem frouxa de prólogo ARM64, mesmo idioma já usado em
 // `journalvtdump`/`lib.rs`), NUNCA invoca. Objetivo: confirmar (ou refutar) que o shift
@@ -325,7 +304,7 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_get_poi_phase(_c: *mut c_void
 // ---------------------------------------------------------------------------------------------
 #[cfg(feature = "devtools")]
 pub(crate) const IGAMESYSTEM_SLOTS: &[(&str, usize, &str)] = &[
-    // (nome do virtual C++, offset Windows em bytes, evento CName real que CallbackSystem dispara)
+    // (nome do virtual C++, offset Windows em bytes, evento CName de sessão)
     ("OnWorldAttached", 0x110, "Session/BeforeStart"),
     ("OnBeforeWorldDetach", 0x118, "Session/BeforeEnd"),
     ("OnWorldDetached", 0x120, "Session/End"),
@@ -339,9 +318,9 @@ pub(crate) const IGAMESYSTEM_SLOTS: &[(&str, usize, &str)] = &[
     ("OnGameResumed", 0x168, "Session/Resume"),
 ];
 
-/// `BwmsMappinSystemDumpIGameSystemSlots(sys: ref<MappinSystem>) -> Void` — Codeware `#117`, ver
+/// `BwmsMappinSystemDumpIGameSystemSlots(sys: ref<MappinSystem>) -> Void` — ver
 /// nota grande acima. 100% OBSERVE-ONLY: só lê o ponteiro de função em cada slot de
-/// `Red::IGameSystem` (Mac = Windows+0x08) + os 4 primeiros bytes do prólogo, NUNCA chama nada.
+/// `IGameSystem` (Mac = Windows+0x08) + os 4 primeiros bytes do prólogo, NUNCA chama nada.
 /// `sys` é qualquer instância viva de uma classe que estenda `IGameSystem` sem virtuais extras
 /// ANTES do slot `0x110` (confirmado pra `MappinSystem`, ver nota) — zero mutação, seguro pra
 /// smoke test automático.
@@ -395,7 +374,7 @@ pub(crate) unsafe fn register_mappinsystem_igamesystem_vtdump(reg: &Registry, pr
         "BwmsMappinSystemDumpIGameSystemSlots", corpo_de_prova!(tramp_mappinsystem_dump_igamesystem_slots),
     ));
     crate::log_dev!(
-        "[reg] register_all: cw-igamesystem-vtdump (#117) BwmsMappinSystemDumpIGameSystemSlots={ok}"
+        "[reg] register_all: igamesystem-vtdump BwmsMappinSystemDumpIGameSystemSlots={ok}"
     );
 }
 
@@ -417,19 +396,19 @@ pub(crate) type OnGameRestoredFn = unsafe extern "C" fn(*mut c_void) -> bool;
 
 /// Hook OBSERVE-ONLY: só loga que disparou + SEMPRE repassa pro original (nunca suprime, nunca
 /// muda o retorno) — mesmo idioma já provado 7800+ vezes pelo hook do
-/// `AnimationSystem_FrameBeginReset` (RED4ext `#461` Opção A, `selftest.rs`).
+/// `AnimationSystem_FrameBeginReset` (`selftest.rs`).
 #[cfg(feature = "devtools")]
 pub(crate) unsafe extern "C" fn bwms_igamesystem_ongamerestored_hook(this: *mut c_void) -> bool {
     let n = IGS_OGR_FIRE_CNT.fetch_add(1, Ordering::Relaxed);
     crate::log_dev!(
-        "[cw-117-vtablehook] OnGameRestored INTERCEPTADO #{n} this={this:p} — evento real 'Session/Ready'"
+        "[igamesystem-vtablehook] OnGameRestored INTERCEPTADO #{n} this={this:p} — evento real 'Session/Ready'"
     );
     let orig = ORIG_IGS_ONGAMERESTORED.load(Ordering::Relaxed);
     if orig.is_null() {
         // Nunca deveria acontecer (só instalamos depois de capturar o original com sucesso),
         // mas por segurança nunca inventa um retorno — false é o "não-sucesso" mais conservador
         // possível, nunca crasha nem lê memória adicional.
-        crate::log_dev!("[cw-117-vtablehook] ORIGINAL NULO — retorno de segurança (false), NÃO deveria acontecer");
+        crate::log_dev!("[igamesystem-vtablehook] ORIGINAL NULO — retorno de segurança (false), NÃO deveria acontecer");
         return false;
     }
     let f: OnGameRestoredFn = std::mem::transmute(orig);
@@ -441,7 +420,7 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_hook_ongamerestored(_c: *mut 
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let sys = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
     if sys.is_null() || !rtti::sane(sys) || !crate::memoria::is_readable(sys, 8) {
-        crate::log_dev!("[cw-117-vtablehook] BwmsMappinSystemHookOnGameRestored: sys inválido/ilegível — abortado");
+        crate::log_dev!("[igamesystem-vtablehook] BwmsMappinSystemHookOnGameRestored: sys inválido/ilegível — abortado");
         write_bool_ret(out, false);
         return;
     }
@@ -456,7 +435,7 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_hook_ongamerestored(_c: *mut 
     if vtbl.is_null()
         || !crate::memoria::is_readable(vtbl as *const c_void, (IGAMESYSTEM_ONGAMERESTORED_SLOT_IDX + 1) * 8)
     {
-        crate::log_dev!("[cw-117-vtablehook] vtable nula/ilegível — abortado");
+        crate::log_dev!("[igamesystem-vtablehook] vtable nula/ilegível — abortado");
         write_bool_ret(out, false);
         return;
     }
@@ -469,12 +448,12 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_hook_ongamerestored(_c: *mut 
             ORIG_IGS_ONGAMERESTORED.store(orig as *mut c_void, Ordering::Relaxed);
             IGS_OGR_INSTALLED.store(true, Ordering::Relaxed);
             crate::log_dev!(
-                "[cw-117-vtablehook] trocar_slot_da_vtable instalado no slot OnGameRestored (idx={IGAMESYSTEM_ONGAMERESTORED_SLOT_IDX}, mac_off=0x158) vtbl={vtbl:p} original={orig:p}"
+                "[igamesystem-vtablehook] trocar_slot_da_vtable instalado no slot OnGameRestored (idx={IGAMESYSTEM_ONGAMERESTORED_SLOT_IDX}, mac_off=0x158) vtbl={vtbl:p} original={orig:p}"
             );
             write_bool_ret(out, true);
         }
         None => {
-            crate::log_dev!("[cw-117-vtablehook] trocar_slot_da_vtable FALHOU (set_prot recusou)");
+            crate::log_dev!("[igamesystem-vtablehook] trocar_slot_da_vtable FALHOU (set_prot recusou)");
             write_bool_ret(out, false);
         }
     }
@@ -489,7 +468,7 @@ pub(crate) unsafe fn register_mappinsystem_hook_ongamerestored(reg: &Registry, p
         "BwmsMappinSystemHookOnGameRestored", corpo_de_prova!(tramp_mappinsystem_hook_ongamerestored),
     ));
     crate::log_dev!(
-        "[reg] register_all: cw-117-vtablehook-ongamerestored BwmsMappinSystemHookOnGameRestored={ok}"
+        "[reg] register_all: igamesystem-vtablehook-ongamerestored BwmsMappinSystemHookOnGameRestored={ok}"
     );
 }
 
@@ -517,18 +496,18 @@ pub(crate) unsafe extern "C" fn bwms_igamesystem_onworldattached_hook(this: *mut
     let n = IGS_OWA_FIRE_CNT.fetch_add(1, Ordering::Relaxed);
     if n < 8 {
         crate::log_dev!(
-            "[cw-117-vtablehook-owa] OnWorldAttached INTERCEPTADO #{n} this={this:p} scene={scene:p} — evento real 'Session/BeforeStart'"
+            "[igamesystem-vtablehook-owa] OnWorldAttached INTERCEPTADO #{n} this={this:p} scene={scene:p} — evento real 'Session/BeforeStart'"
         );
     }
     let orig = ORIG_IGS_ONWORLDATTACHED.load(Ordering::Relaxed);
     if orig.is_null() {
-        crate::log_dev!("[cw-117-vtablehook-owa] ORIGINAL NULO — não deveria acontecer, abortando repasse com segurança");
+        crate::log_dev!("[igamesystem-vtablehook-owa] ORIGINAL NULO — não deveria acontecer, abortando repasse com segurança");
         return;
     }
     let f: OnWorldAttachedFn = std::mem::transmute(orig);
     f(this, scene);
 
-    // Codeware `#237` — 2026-08-22, 2ª tentativa. A 1ª varria a `RuntimeScene` AQUI DENTRO e
+    // Ponteiro da cena — 2026-08-22, 2ª tentativa. A 1ª varria a `RuntimeScene` AQUI DENTRO e
     // chamava `rtti::class_of` em cada ponteiro plausível. Isso crashou o jogo: `class_of`
     // dereferencia a vtable e despacha — num ponteiro que só "parece" heap, é null-deref na hora.
     // É a mesma categoria que já custou um crash real neste projeto (`custsys probe`, 2026-07-28).
@@ -539,18 +518,17 @@ pub(crate) unsafe extern "C" fn bwms_igamesystem_onworldattached_hook(this: *mut
     // jogo também fora do hook, em gameplay (`proofs/20260930-c39-crash-no-comando-scenedump.ips`).
     IGS_OWA_SCENE_PTR.store(scene as u64, Ordering::Relaxed);
 
-    // FECHADO E PROVADO AO VIVO 2026-08-18 (4º boot, `proofs/2026-08-18-codeware-117-
-    // onworldattached-staticdispatch-PROVADO.log`): `OnWorldAttached` disparou 1 vez num boot de
+    // FECHADO E PROVADO AO VIVO 2026-08-18 (4º boot, prova do despacho estático do
+    // `OnWorldAttached`): `OnWorldAttached` disparou 1 vez num boot de
     // sessão única (não repete como `IComponent::Toggle`; numa 2ª sessão do boot [não medido]), durante o
     // world-swap real do autocontinue — zero crash em 4 boots. Achados de correção ao longo do
     // caminho: (1) listener de INSTÂNCIA (`RegisterCallback`, `ref<PlayerPuppet>` do menu
     // espúrio) já está MORTO nesse instante — `rtti::sane(target)` recusa corretamente, mecanismo
     // SEGURO, não bug — então `RegisterStaticCallback` (função GLOBAL, sem instância, mesmo
-    // padrão já provado pro item `#1`) é a via que sobrevive ao world-swap; (2) `has_listener_for`
+    // padrão já provado pro `CallbackSystem`) é a via que sobrevive ao world-swap; (2) `has_listener_for`
     // só olha `CALLBACKS` (registry de instância), por isso checamos `STATIC_CALLBACKS` também.
-    // Promovido a SEMPRE-ATIVO (sem marcador de opt-in) seguindo o precedente de shippability já
-    // estabelecido pro RED4ext `#461` (rodada 60, 2026-08-17: gate de dev nunca ligava por padrão
-    // deixava a capacidade FECHADA mas inacessível a mod real) — o núcleo é 100% observe-only
+    // Promovido a SEMPRE-ATIVO (sem marcador de opt-in): gate de dev que nunca liga por padrão
+    // deixa a capacidade FECHADA mas inacessível a mod real (rodada 60, 2026-08-17) — o núcleo é 100% observe-only
     // (sempre repassa pro original ANTES desta seção) e o dispatch é bounded a 3 fires totais.
     static IGS_OWA_FIRES_DONE: AtomicU64 = AtomicU64::new(0);
     let has_static = STATIC_CALLBACKS
@@ -565,7 +543,7 @@ pub(crate) unsafe extern "C" fn bwms_igamesystem_onworldattached_hook(this: *mut
         let done = IGS_OWA_FIRES_DONE.fetch_add(1, Ordering::Relaxed);
         let fonte = if done < 3 { crate::inicio::sessao_do_jogo::antes_do_inicio_pela_reserva() } else { None };
         if let Some(fim_pendente) = fonte {
-            // Mundo novo depois de um com jogador e sem `Session/End`: o `End` dele antes do `BeforeStart` deste, como na referência
+            // Mundo novo depois de um com jogador e sem `Session/End`: o `End` dele antes do `BeforeStart` deste
             // (`OnWorldDetached` do mundo velho antes do `OnWorldAttached` do novo), na mesma forma sem argumento do `BeforeStart` daqui.
             if fim_pendente {
                 let fim = fire_event_args("Session/End", &[]);
@@ -582,7 +560,7 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_hook_onworldattached(_c: *mut
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let sys = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
     if sys.is_null() || !rtti::sane(sys) || !crate::memoria::is_readable(sys, 8) {
-        crate::log_dev!("[cw-117-vtablehook-owa] BwmsMappinSystemHookOnWorldAttached: sys inválido/ilegível — abortado");
+        crate::log_dev!("[igamesystem-vtablehook-owa] BwmsMappinSystemHookOnWorldAttached: sys inválido/ilegível — abortado");
         write_bool_ret(out, false);
         return;
     }
@@ -596,7 +574,7 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_hook_onworldattached(_c: *mut
     if vtbl.is_null()
         || !crate::memoria::is_readable(vtbl as *const c_void, (IGAMESYSTEM_ONWORLDATTACHED_SLOT_IDX + 1) * 8)
     {
-        crate::log_dev!("[cw-117-vtablehook-owa] vtable nula/ilegível — abortado");
+        crate::log_dev!("[igamesystem-vtablehook-owa] vtable nula/ilegível — abortado");
         write_bool_ret(out, false);
         return;
     }
@@ -609,12 +587,12 @@ pub(crate) unsafe extern "C" fn tramp_mappinsystem_hook_onworldattached(_c: *mut
             ORIG_IGS_ONWORLDATTACHED.store(orig as *mut c_void, Ordering::Relaxed);
             IGS_OWA_INSTALLED.store(true, Ordering::Relaxed);
             crate::log_dev!(
-                "[cw-117-vtablehook-owa] trocar_slot_da_vtable instalado no slot OnWorldAttached (idx={IGAMESYSTEM_ONWORLDATTACHED_SLOT_IDX}, mac_off=0x118) vtbl={vtbl:p} original={orig:p}"
+                "[igamesystem-vtablehook-owa] trocar_slot_da_vtable instalado no slot OnWorldAttached (idx={IGAMESYSTEM_ONWORLDATTACHED_SLOT_IDX}, mac_off=0x118) vtbl={vtbl:p} original={orig:p}"
             );
             write_bool_ret(out, true);
         }
         None => {
-            crate::log_dev!("[cw-117-vtablehook-owa] trocar_slot_da_vtable FALHOU (set_prot recusou)");
+            crate::log_dev!("[igamesystem-vtablehook-owa] trocar_slot_da_vtable FALHOU (set_prot recusou)");
             write_bool_ret(out, false);
         }
     }
@@ -629,7 +607,7 @@ pub(crate) unsafe fn register_mappinsystem_hook_onworldattached(reg: &Registry, 
         "BwmsMappinSystemHookOnWorldAttached", corpo_de_prova!(tramp_mappinsystem_hook_onworldattached),
     ));
     crate::log_dev!(
-        "[reg] register_all: cw-117-vtablehook-onworldattached BwmsMappinSystemHookOnWorldAttached={ok}"
+        "[reg] register_all: igamesystem-vtablehook-onworldattached BwmsMappinSystemHookOnWorldAttached={ok}"
     );
 }
 
@@ -643,8 +621,7 @@ pub(crate) const MAPPINRES_COOKED_MULTI_DATA_OFF: usize = 0x50; // DynArray<game
 
 pub(crate) const POIRES_COOKED_DATA_OFF: usize = 0x40; // DynArray<game::CookedPointOfInterestMappinData>
 
-/// Lê um campo `Handle<T>` (16 bytes: `instance`@+0x0/`refCount`@+0x8, RED4ext.SDK
-/// `Memory/SharedPtr.hpp`) num offset de INSTÂNCIA C++ real (não `ref<T>` redscript) — devolve só
+/// Lê um campo `Handle<T>` (16 bytes: `instance`@+0x0/`refCount`@+0x8) num offset de INSTÂNCIA C++ real (não `ref<T>` redscript) — devolve só
 /// o ponteiro `instance`. Guarda de leitura antes de qualquer dereferência; `None` cobre tanto
 /// "ilegível" quanto "handle vazio" (`instance==null`, caso NORMAL antes do recurso ser cacheado
 /// — não é erro).
@@ -717,7 +694,7 @@ pub(crate) unsafe fn register_mappinsystem_cooked_count_natives(reg: &Registry, 
             tramp_mappinsystem_cooked_poi_count,
         );
     crate::log_dev!(
-        "[reg] register_all: archivexl-44-mappin-cooked-count BwmsMappinSystemCookedMappinCount={ok_mappin} BwmsMappinSystemCookedMultiMappinCount={ok_multi} BwmsMappinSystemCookedPoiCount={ok_poi}"
+        "[reg] register_all: mappin-cooked-count BwmsMappinSystemCookedMappinCount={ok_mappin} BwmsMappinSystemCookedMultiMappinCount={ok_multi} BwmsMappinSystemCookedPoiCount={ok_poi}"
     );
 }
 
@@ -759,27 +736,24 @@ pub(crate) unsafe fn quest_graph_nodes_of_type(graph: *mut c_void, type_hash: u6
 
 /// Generaliza `quest_graph_nodes_of_type` pra um offset de array ARBITRÁRIO (não mais fixo em
 /// `+0x30`) — mesma disciplina (`DynArray<Handle<T>>`, stride 16 bytes: instância no 1º qword,
-/// bloco de refcount no 2º; header padrão `Core::DynArray` — `entries@+0x00`/`size@+0x0C`, mesmo
+/// bloco de refcount no 2º; header padrão `DynArray` — `entries@+0x00`/`size@+0x0C`, mesmo
 /// idioma já usado em toda leitura de `DynArray` deste projeto).
 ///
-/// 2026-08-18 — Codeware `#160` (`QuestPhaseGraphAccessor`), avanço offline sem endereço nativo
-/// novo: a fonte real (`App/Quest/QuestPhaseGraphAccessor.hpp`) tem 8 métodos que fazem
-/// `Red::Cast<T>` ANINHADO dentro de `node->actions`/`node->condition`/`node->type` (não só
-/// `GetNodesOfType<T>()` direto, já coberto por `quest_graph_nodes_of_type`) — documentados no
-/// item do catálogo como "próximo passo real de sessão futura", nunca implementados. RE offline
-/// (headers GERADOS da reflection real do jogo, confiança máxima, mesma categoria que já fechou
-/// dezenas de itens deste catálogo — não são headers "curados"/hand-written do Codeware):
+/// 2026-08-18 — acesso ao grafo de fase de quest, avanço offline sem endereço nativo
+/// novo: busca com cast ANINHADO dentro de `node->actions`/`node->condition`/`node->type` (não só
+/// os nós de um tipo direto, já coberto por `quest_graph_nodes_of_type`). RE offline
+/// (layout da reflection real do jogo):
 ///
-///   - `RED4ext.SDK/.../Generated/quest/SpawnManagerNodeDefinition.hpp`: `actions:
+///   - `SpawnManagerNodeDefinition`: `actions:
 ///     DynArray<SpawnManagerNodeActionEntry>@+0x48`.
-///   - `RED4ext.SDK/.../Generated/quest/SpawnManagerNodeActionEntry.hpp`: struct de 0x10 bytes
+///   - `SpawnManagerNodeActionEntry`: struct de 0x10 bytes
 ///     que É o `Handle<SpawnManagerNodeType>` inteiro (offset 0 do entry) — MESMO shape de
 ///     `DynArray<Handle<T>>` já provado (stride 16, instância no 1º qword) — zero struct nova
 ///     de leitura necessária, só o offset do array muda.
-///   - `RED4ext.SDK/.../Generated/quest/FactsDBManagerNodeDefinition.hpp`: `type:
+///   - `FactsDBManagerNodeDefinition`: `type:
 ///     Handle<IFactsDBManagerNodeType>@+0x48` (campo ÚNICO, não array — usa
 ///     `quest_node_handle_field`, não este helper).
-///   - `RED4ext.SDK/.../Generated/quest/PauseConditionNodeDefinition.hpp`: `condition:
+///   - `PauseConditionNodeDefinition`: `condition:
 ///     Handle<IBaseCondition>@+0x48` (idem, campo único).
 ///
 /// Isso destrava, em conjunto com `quest_node_handle_field` (abaixo), a composição de
@@ -789,8 +763,8 @@ pub(crate) unsafe fn quest_graph_nodes_of_type(graph: *mut c_void, type_hash: u6
 /// `node.type@+0x48` de `questFactsDBManagerNodeDefinition`, filtrando por
 /// `questSetVar_NodeType`) — sem declarar NENHUM desses ~6 tipos concretos em redscript (mesma
 /// disciplina anti-CMesh-trap já em uso: retorno sempre `ref<IScriptable>`, filtro por
-/// `type_hash: CName` passado pelo mod-author). O 2º nível de filtro que a fonte real ainda
-/// aplica (`nodeType->action == Activate/Reactivate` em `questCommunityTemplate_NodeType`/etc.)
+/// `type_hash: CName` passado pelo mod-author). Um 2º nível de filtro
+/// (`nodeType->action == Activate/Reactivate` em `questCommunityTemplate_NodeType`/etc.)
 /// fica de fora — precisaria de mais 1 offset de campo por tipo concreto, não achado nesta
 /// rodada; o mod-author pode reconstruir esse filtro em redscript se precisar, usando o handle
 /// genérico devolvido aqui. Zero código Rust novo pros métodos que fazem Cast ANINHADO em 2
@@ -940,7 +914,7 @@ pub(crate) unsafe fn register_quest_graph_natives(reg: &Registry, proto: *mut c_
         "BwmsQuestPhaseGetRootGraph",
         tramp_quest_root_graph,
     );
-    crate::log_dev!("[reg] register_all: cw-questgraph BwmsQuestPhaseGetRootGraph={ok1}");
+    crate::log_dev!("[reg] register_all: questgraph BwmsQuestPhaseGetRootGraph={ok1}");
     let ok2 = register_argful_by_types(
         reg,
         proto,
@@ -949,7 +923,7 @@ pub(crate) unsafe fn register_quest_graph_natives(reg: &Registry, proto: *mut c_
         "BwmsQuestGraphNodeCount",
         tramp_quest_graph_node_count,
     );
-    crate::log_dev!("[reg] register_all: cw-questgraph BwmsQuestGraphNodeCount={ok2}");
+    crate::log_dev!("[reg] register_all: questgraph BwmsQuestGraphNodeCount={ok2}");
     let ok3 = register_argful_by_types(
         reg,
         proto,
@@ -958,7 +932,7 @@ pub(crate) unsafe fn register_quest_graph_natives(reg: &Registry, proto: *mut c_
         "BwmsQuestGraphNodeAt",
         tramp_quest_graph_node_at,
     );
-    crate::log_dev!("[reg] register_all: cw-questgraph BwmsQuestGraphNodeAt={ok3}");
+    crate::log_dev!("[reg] register_all: questgraph BwmsQuestGraphNodeAt={ok3}");
     // 2026-08-18: 3 natives genéricas novas (ver nota longa em `quest_array_nodes_of_type`) —
     // destravam `FindCommunities`/`FindSpawnSets`/`FindSpawners`/`FindFactChanges` sem endereço
     // nativo novo, offset passado pelo redscript em vez de hardcoded por-campo.
@@ -970,7 +944,7 @@ pub(crate) unsafe fn register_quest_graph_natives(reg: &Registry, proto: *mut c_
         "BwmsQuestNodeHandleField",
         tramp_quest_node_handle_field,
     );
-    crate::log_dev!("[reg] register_all: cw-questgraph BwmsQuestNodeHandleField={ok4}");
+    crate::log_dev!("[reg] register_all: questgraph BwmsQuestNodeHandleField={ok4}");
     let ok5 = register_argful_by_types(
         reg,
         proto,
@@ -979,7 +953,7 @@ pub(crate) unsafe fn register_quest_graph_natives(reg: &Registry, proto: *mut c_
         "BwmsQuestNodeArrayCount",
         tramp_quest_node_array_count,
     );
-    crate::log_dev!("[reg] register_all: cw-questgraph BwmsQuestNodeArrayCount={ok5}");
+    crate::log_dev!("[reg] register_all: questgraph BwmsQuestNodeArrayCount={ok5}");
     let ok6 = register_argful_by_types(
         reg,
         proto,
@@ -988,7 +962,7 @@ pub(crate) unsafe fn register_quest_graph_natives(reg: &Registry, proto: *mut c_
         "BwmsQuestNodeArrayAt",
         tramp_quest_node_array_at,
     );
-    crate::log_dev!("[reg] register_all: cw-questgraph BwmsQuestNodeArrayAt={ok6}");
+    crate::log_dev!("[reg] register_all: questgraph BwmsQuestNodeArrayAt={ok6}");
 }
 
 /// `id` do filho `indice` do container, lido em `+0x40` (vazio se não houver).
@@ -1057,7 +1031,7 @@ pub(crate) unsafe extern "C" fn tramp_journal_resource_root_child_id_part(_c: *m
     write_cstring_chunk_ret(out, &id, parte);
 }
 
-// ArchiveXL `#44` parte 5b (2026-09-11): árvore VIVA do `JournalManager`, só leitura (RE da 5a, DATABASE): `JournalManager+0x58` = `gameJournalTree*`;
+// Journal de mod, parte 5b (2026-09-11): árvore VIVA do `JournalManager`, só leitura (RE da 5a, DATABASE): `JournalManager+0x58` = `gameJournalTree*`;
 // no tree, `rootEntries` (`DynArray<Handle<gameJournalEntry>>`) em `+0x78` (2.5). Os índices moram no PRÓPRIO `JournalManager` (boot 48: lidos no tree
 // deram 0 e lixo; o handler do `GetEntry` `0x1052547c0` chama `this->vt[0x220]` com `x0 = this`, e o `0x10524495c` usa `+0x68` lock, `+0x78` count):
 // índice por hash (A) com count em `jm+0x78` e por entrada (B) em `jm+0xa8`. Critério: a raiz do `cooked_journal` e A == B > 0.
@@ -1119,7 +1093,7 @@ pub(crate) unsafe extern "C" fn tramp_journal_tree_index_count(_c: *mut c_void, 
     write_uint_ret(out, n as u32 as u64, 4);
 }
 
-// ArchiveXL `#35` parte 35c-2d-3b (2026-09-12, RE `proofs/20260912-archivexl-35-parte-c2d3-fila-do-questresourceloader-offline.log`): o boot 71 mostrou
+// Fase de quest, parte 35c-2d-3b (2026-09-12, RE offline da fila do `QuestResourceLoader`): o boot 71 mostrou
 // que a rota de carga só roda pra fase pedida ao `QuestResourceLoader`. Aqui a fase vai pro loader do QuestsSystem (`+0x198`, vptr `0x107a2e338`) pelo
 // `LoadOne` com functor vazio: carga pelo depot, conclusão em job, rota (onde o hook aplica o patch da tabela) e entrada no mapa do loader com contagem 1 —
 // sem mexer nas raízes, sem ligar `phaseGraph`, sem callback do sistema e sem save. Todo slot chamado tem o endereço conferido contra a RE antes.
@@ -1150,7 +1124,7 @@ pub(crate) const QUESTPHASE_RAIZ_HASH: u64 = 0x8464_2c97_f5c7_1116;
 pub(crate) const QUESTPHASE_EPILOGUE_HASH: u64 = 0x9e3d_6e99_8707_ecaa;
 
 #[cfg(feature = "devtools")]
-pub(crate) const QUESTPHASE_INEXISTENTE: &str = "mod\\bwms\\teste\\archivexl_35_nao_existe.questphase";
+pub(crate) const QUESTPHASE_INEXISTENTE: &str = "mod\\bwms\\teste\\fase_35_nao_existe.questphase";
 
 /// Loader do QuestsSystem conferido pelo vptr (lido em `+desloc`, pro controle).
 #[cfg(feature = "devtools")]
@@ -1474,7 +1448,7 @@ pub(crate) unsafe fn journal_desanexar(jm: *mut c_void, tree: *mut c_void, pasta
     r
 }
 
-// ArchiveXL `#44` parte 5d-2 (2026-09-12): 1 entrada vinda de um `.journal` carregado entra na árvore viva. A 5d-1 mostrou que a cópia carregada do
+// Journal de mod, parte 5d-2 (2026-09-12): 1 entrada vinda de um `.journal` carregado entra na árvore viva. A 5d-1 mostrou que a cópia carregada do
 // `cooked_journal` não divide objeto com a árvore viva, então a entrada de teste sai dela: num grupo de `onscreens` da cópia que também existe na árvore
 // viva, a 1ª folha com id de até 19 bytes ganha o id `bwms_teste_5d` (inline; o original volta no desfazer), a mescla a seco do grupo confirma que só
 // ela falta, e ela passa pelo mesmo `journal_anexar` da 5c-2. Nada notifica e nada vai pro save.
@@ -1881,20 +1855,20 @@ pub(crate) unsafe fn register_mappin_teste_natives(reg: &Registry, proto: *mut c
     let ok8 = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable", "Int32", "Float", "Float", "Float", "Int32"], "BwmsMappinModRegisterAt", "BwmsMappinModRegisterAt", corpo_de_prova!(tramp_mappin_mod_register_at)));
     let ok9 = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable", "Int32", "Int32"], "BwmsMappinCookedVolume", "BwmsMappinCookedVolume", corpo_de_prova!(tramp_mappin_cooked_volume)));
     crate::log_dev!(
-        "[reg] register_all: axl-44 7b MappinTestInject={ok1} MappinTestPosition={ok2} MappinCookedPosition={ok3} 7d-2b JournalMappinCensus={ok4} PinHash={ok5} PinNodeRef={ok6} PinModHash={ok7} MappinModRegisterAt={ok8} 7d-2b-3 MappinCookedVolume={ok9}"
+        "[reg] register_all: journal-44 7b MappinTestInject={ok1} MappinTestPosition={ok2} MappinCookedPosition={ok3} 7d-2b JournalMappinCensus={ok4} PinHash={ok5} PinNodeRef={ok6} PinModHash={ok7} MappinModRegisterAt={ok8} 7d-2b-3 MappinCookedVolume={ok9}"
     );
 }
 
-// ArchiveXL `#44` parte 7d-2b-3a (2026-09-12, RE `proofs/20260912-archivexl-44-parte7d2b3-volume-offline.log`): volume de um mappin cozido, só leitura. O
+// Journal de mod, parte 7d-2b-3a (2026-09-12, RE offline do volume de mappin): volume de um mappin cozido, só leitura. O
 // elemento do `cookedData` (busca original) guarda o volume em Handle `@0x10`; `gamemappinsOutlineMappinVolume` (vptr `0x107a9d098`) tem `height` `@0x30` e
 // `outlinePoints` DynArray<Vector2> `@0x38` (tamanho `@0x44`). Os pontos são locais (relativos à posição do elemento), girados pela orientação do nó.
 #[cfg(feature = "devtools")]
 pub(crate) const MAPPIN_VOLUME_OFF: usize = 0x10;
 
-// Codeware `#160` (`QuestPhaseGraphAccessor`, 2026-09-12): consulta de grafo de fase na forma da referência. Nós por nome exato de classe, só do grafo ou
-// com as fases aninhadas, na ordem de coleta da referência (nós do grafo e depois cada `phaseGraph` não nulo); os 14 `Find*`; `GetAllGraphNodePaths`.
+// Acesso ao grafo de fase (`QuestPhaseGraphAccessor`, 2026-09-12): consulta de grafo de fase. Nós por nome exato de classe, só do grafo ou
+// com as fases aninhadas, na ordem de coleta (nós do grafo e depois cada `phaseGraph` não nulo); os 14 `Find*`; `GetAllGraphNodePaths`.
 // Campos lidos pelo nome no RTTI (subindo pelos pais), `Cast` pela cadeia de pais da classe e valores de enum pelo nome; nada é escrito. Critério do
-// teste: `proofs/20260912-codeware-160-censo-dos-grafos-offline.log`.
+// teste: prova de 2026-09-12 (censo offline dos grafos).
 pub(crate) const ACESSOR_BUSCAS: [&str; 14] = [
     "InputNode",
     "PointOfInterestMappin",
@@ -1944,7 +1918,7 @@ pub(crate) unsafe fn acessor_inteiro(obj: *const u8, nome: &str) -> Option<u64> 
     })
 }
 
-/// Nós na ordem de coleta da referência.
+/// Nós na ordem de coleta (nós do grafo e depois cada `phaseGraph` não nulo).
 pub(crate) unsafe fn acessor_coleta(g: *const u8, recursivo: bool, v: &mut Vec<*const u8>, prof: usize) {
     if prof > 16 || v.len() > 100_000 {
         return;
@@ -2208,17 +2182,17 @@ pub(crate) unsafe extern "C" fn tramp_quest_accessor_path_id(_c: *mut c_void, fr
     write_i32_ret(out, id.map_or(-1, |x| x as i32));
 }
 
-// Codeware `#157` (pré-requisito do `#48`) — o `QuestContext` do Mac, 2026-09-16.
+// O `QuestContext` do Mac (pré-requisito do `ExecuteNode` abaixo), 2026-09-16.
 //
-// A receita da referência pro `ExecuteNode` pede 4 peças; 3 já tinham endereço (`ExecutePath 0x102808484`, `ExecuteGraph 0x10280b7d0`,
+// O `ExecuteNode` pede 4 peças; 3 já tinham endereço (`ExecutePath 0x102808484`, `ExecuteGraph 0x10280b7d0`,
 // `ExecuteNode 0x10280df0c`) e a 4ª, `CreateContext`, está INLINADA no Mac. O que sobra dela é o construtor `0x102803660` — o thunk `0x10280379c` relê e
 // regrava os mesmos slots de pilha e salta pra ele, então é chamada direta — e o destrutor `0x102a12b7c`.
 //
 // ABI conferida no desmonte: `ctor(ctx, w1, w2, w3, w4, x5, x6, x7, p1, p2, p3, p4)` grava `w1` em `+0x00` e `+0x01`, `w2` em `+0x02`, `w3`/`w4` em
 // `+0x04`/`+0x08`, `x5`/`x6` em `+0x10`/`+0x18`, `x7`/`p1` em `+0x20`/`+0x28` e `p2`/`p3`/`p4` em `+0x60`/`+0x68`/`+0x70`; inicializa as `DynArray` de
 // `+0xe0` e `+0xf8` (`phaseStack`, tamanho em `+0x104`), monta o `phaseContext` em `+0x110` (vtable `0x1079e2f98`) e guarda o próprio endereço em `+0x330`.
-// Os valores do sistema saem de `[sys+0xe8]`, `sys+0xa8`, `sys+0xb8` e, na pilha, `sys+0x78`, `sys+0x1d0`, `[sys+0x2c8]`, `[sys+0x40]`. A referência chama
-// com `(1, 0, -1, -1)`; o tick do Mac usa `(2, 0, -1, índice)`.
+// Os valores do sistema saem de `[sys+0xe8]`, `sys+0xa8`, `sys+0xb8` e, na pilha, `sys+0x78`, `sys+0x1d0`, `[sys+0x2c8]`, `[sys+0x40]`. A chamada pelo
+// script usa `(1, 0, -1, -1)`; o tick do Mac usa `(2, 0, -1, índice)`.
 //
 // Esta parte NÃO executa nó nenhum: monta o contexto num buffer nosso, confere pelos campos que o construtor grava e destrói. Zero mutação de quest, zero
 // fact no save — executar um nó de verdade avança progresso e é decisão do usuário.
@@ -2226,9 +2200,9 @@ pub(crate) const QUESTCTX_CTOR_VM: u64 = 0x1_0280_3660;
 
 pub(crate) const QUESTCTX_DTOR_VM: u64 = 0x1_02a1_2b7c;
 
-// Codeware `#48` — `QuestsSystem.ExecuteNode(node, opt inputSocket)` exposto ao script, 2026-09-18.
+// `QuestsSystem.ExecuteNode(node, opt inputSocket)` exposto ao script, 2026-09-18.
 //
-// A referência trava o `Mutex` do sistema (`OffsetPtr<0x60, SharedSpinLock>`), monta o contexto com `(1, 0, -1, -1)`, empilha a fase raiz no `phaseStack` e
+// A chamada trava o `Mutex` do sistema (`SharedSpinLock` em `+0x60`), monta o contexto com `(1, 0, -1, -1)`, empilha a fase raiz no `phaseStack` e
 // chama o `ExecuteNode` com o socket `{inputSocket, 0}`. No Mac a trava foi medida num método do próprio sistema (`0x102a0c704`): ele monta o contexto,
 // empilha a raiz (`0x1028037a0`), chama `0x1000015f0(sys+0x60)` — espera o byte zerar e troca 0 por `0x80` com `casalb` —, executa, solta com
 // `ldclralb #0x80` e só então desempilha (`0x10280384c`) e destrói. O byte `0x80` é a escrita; leitores somam 1 nos bits de baixo (`0x10000162c`).
@@ -2372,8 +2346,8 @@ pub(crate) unsafe extern "C" fn tramp_quest_accessor_synthetic_test(_c: *mut c_v
     write_i32_ret(out, r);
 }
 
-// ArchiveXL `#44` parte 5d-1 (2026-09-12): mescla a seco de um `.journal` carregado na árvore viva. Percorre o container do recurso contra o container
-// vivo casando filhos por `id` (o passo que o merge da referência faz antes de inserir) e soma casados, faltando, casados que são o MESMO objeto (se a
+// Journal de mod, parte 5d-1 (2026-09-12): mescla a seco de um `.journal` carregado na árvore viva. Percorre o container do recurso contra o container
+// vivo casando filhos por `id` (o passo da mescla antes de inserir) e soma casados, faltando, casados que são o MESMO objeto (se a
 // cópia carregada dividir objetos com a árvore viva, a 5d-2 não pode mexer na cópia) e containers visitados. Só leitura, na game thread.
 #[cfg(feature = "devtools")]
 pub(crate) static JOURNAL_MESCLA_SECO: std::sync::Mutex<[i32; 4]> = std::sync::Mutex::new([0; 4]);
@@ -2450,7 +2424,7 @@ pub(crate) unsafe extern "C" fn tramp_journal_merge_stat(_c: *mut c_void, frame:
     write_uint_ret(out, v as u32 as u64, 4);
 }
 
-// ArchiveXL `#44` parte 6b (2026-09-12): `ConvertLocKeys`. Em cada campo `LocalizationString` da entrada (com os herdados; a String fica em `+0x08` do
+// Journal de mod, parte 6b (2026-09-12): conversão de LocKeys. Em cada campo `LocalizationString` da entrada (com os herdados; a String fica em `+0x08` do
 // valor) cujo texto não começa com `LocKey#`, o texto vira `LocKey#<FNV-1a64 decimal do texto>`. O texto novo passa de 19 bytes: a `CString` sai do
 // construtor do motor `0x10002ccac(out, const char*)` — o mesmo que a via B do `RegisterArchive` usa ao vivo —, com o allocator dele, e é movida pro
 // campo depois de o valor antigo ser destruído pelo tipo `String` (`vt+0x48`, tipo tirado do campo `id` da entrada).
@@ -2683,13 +2657,13 @@ pub(crate) unsafe fn register_journal_arvore_natives(reg: &Registry, proto: *mut
     };
     let ok14 = registro_de_prova!(register_global(reg, proto, "BwmsJournalMoverGotOk", "BwmsJournalMoverGotOk", corpo_de_prova!(tramp_journal_mover_got_ok)));
     crate::log_dev!(
-        "[reg] register_all: axl-44 5c-1 PathHash={ok10} FolderChildCount={ok11} FolderChildIdPart={ok12} ClassName={ok13} MoverGotOk={ok14}"
+        "[reg] register_all: journal-44 5c-1 PathHash={ok10} FolderChildCount={ok11} FolderChildIdPart={ok12} ClassName={ok13} MoverGotOk={ok14}"
     );
     let ok15 = {
         let p = compose_params_from_types(reg, &["handle:IScriptable", "Int32"]);
         params_compostos(p) && registro_de_prova!(register_global_composed(reg, proto, p, "BwmsJournalTestEntry", "BwmsJournalTestEntry", corpo_de_prova!(tramp_journal_test_entry)))
     };
-    crate::log_dev!("[reg] register_all: axl-44 5c-2 TestEntry={ok15}");
+    crate::log_dev!("[reg] register_all: journal-44 5c-2 TestEntry={ok15}");
     let ok16 = {
         let p = compose_params_from_types(reg, &["handle:IScriptable", "handle:IScriptable", "Int32", "Int32"]);
         params_compostos(p) && registro_de_prova!(register_global_composed(reg, proto, p, "BwmsJournalMergeDryRun", "BwmsJournalMergeDryRun", corpo_de_prova!(tramp_journal_merge_dry_run)))
@@ -2698,7 +2672,7 @@ pub(crate) unsafe fn register_journal_arvore_natives(reg: &Registry, proto: *mut
         let p = compose_params_from_types(reg, &["Int32"]);
         params_compostos(p) && registro_de_prova!(register_global_composed(reg, proto, p, "BwmsJournalMergeStat", "BwmsJournalMergeStat", corpo_de_prova!(tramp_journal_merge_stat)))
     };
-    crate::log_dev!("[reg] register_all: axl-44 5d-1 MergeDryRun={ok16} MergeStat={ok17}");
+    crate::log_dev!("[reg] register_all: journal-44 5d-1 MergeDryRun={ok16} MergeStat={ok17}");
     let ok18 = {
         let p = compose_params_from_types(reg, &["handle:IScriptable", "handle:IScriptable", "Int32"]);
         params_compostos(p) && registro_de_prova!(register_global_composed(reg, proto, p, "BwmsJournalMergeTestEntry", "BwmsJournalMergeTestEntry", corpo_de_prova!(tramp_journal_merge_test_entry)))
@@ -2709,14 +2683,14 @@ pub(crate) unsafe fn register_journal_arvore_natives(reg: &Registry, proto: *mut
             && registro_de_prova!(register_global_composed(reg, proto, p, "BwmsJournalMergeTestPathPart", "BwmsJournalMergeTestPathPart", corpo_de_prova!(tramp_journal_merge_test_path_part)))
     };
     let ok20 = registro_de_prova!(register_global(reg, proto, "BwmsJournalMergeTestClass", "BwmsJournalMergeTestClass", corpo_de_prova!(tramp_journal_merge_test_class)));
-    crate::log_dev!("[reg] register_all: axl-44 5d-2 MergeTestEntry={ok18} PathPart={ok19} Class={ok20}");
+    crate::log_dev!("[reg] register_all: journal-44 5d-2 MergeTestEntry={ok18} PathPart={ok19} Class={ok20}");
     let ok21 = {
         let p = compose_params_from_types(reg, &["handle:IScriptable"]);
         params_compostos(p) && registro_de_prova!(register_global_composed(reg, proto, p, "BwmsJournalLocKeyTest", "BwmsJournalLocKeyTest", corpo_de_prova!(tramp_journal_lockey_test)))
     };
-    crate::log_dev!("[reg] register_all: axl-44 6b LocKeyTest={ok21}");
+    crate::log_dev!("[reg] register_all: journal-44 6b LocKeyTest={ok21}");
     crate::log_dev!(
-        "[reg] register_all: axl-44 journal-arvore ChildCount={ok1} ChildId={ok2} | carga RootIsFolder={ok3} RootChildCount={ok4} RootChildIdPart={ok5} | vivo RootCount={ok6} RootChildCount={ok7} RootChildIdPart={ok8} IndexCount={ok9}"
+        "[reg] register_all: journal-44 journal-arvore ChildCount={ok1} ChildId={ok2} | carga RootIsFolder={ok3} RootChildCount={ok4} RootChildIdPart={ok5} | vivo RootCount={ok6} RootChildCount={ok7} RootChildIdPart={ok8} IndexCount={ok9}"
     );
 }
 
@@ -2785,7 +2759,7 @@ pub(crate) unsafe fn read_dynarray_len(ptr: *mut c_void, array_offset: usize) ->
     Some((size, capacity))
 }
 
-// ===== ArchiveXL `#44` parte 3 — árvore do journal (2026-09-11) =====
+// ===== Journal de mod, parte 3 — árvore do journal (2026-09-11) =====
 // Layout pelo registro RTTI (DATABASE, "Layout da árvore do journal"): `gameJournalContainerEntry.entries` em `0x78`
 // (`DynArray<Handle<JournalEntry>>`, 16 B por entrada) e `gameJournalEntry.id` (String) em `0x40`. Só leitura; a prova compara
 // contagem e ids com o `JournalManager.GetChildren` vanilla.
@@ -2840,7 +2814,7 @@ pub(crate) unsafe fn handles_insere(base: *const u8, off: usize, i: usize, h: [u
     true
 }
 
-// ArchiveXL `#35` parte 35c-2c-2 (2026-09-12): 1 nó novo (`questInputNodeDefinition`) com 1 socket (`questSocketDefinition`, `Output`) num grafo de fase
+// Fase de quest, parte 35c-2c-2 (2026-09-12): 1 nó novo (`questInputNodeDefinition`) com 1 socket (`questSocketDefinition`, `Output`) num grafo de fase
 // carregada que não executa (epilogue), desfeito na mesma execução. Os dois objetos saem do `CreateInstance` (AL-2c); o id do nó é o maior do grafo + 1;
 // id, nome e tipo vão pelo RTTI; o dono do socket, pelo set-owner vanilla `0x10494e068(socket, nó)`. O socket entra no `sockets` do nó e o nó no `nodes`
 // do grafo pelo reserve do motor, com os movers de `THandle<GraphSocketDefinition>` (GOT `0x1077a73f8`) e `THandle<GraphNodeDefinition>` (GOT
@@ -3083,7 +3057,7 @@ pub(crate) const QUESTCTX_TAM: usize = 0x340;
 #[repr(align(16))]
 pub(crate) struct BufQuestCtx(pub(crate) [u8; QUESTCTX_TAM]);
 
-// Codeware `#157`/`#48` — o `ExecuteNode` num nó SINTÉTICO, 2026-09-18.
+// O `ExecuteNode` num nó SINTÉTICO, 2026-09-18.
 //
 // Com o `QuestContext` provado ao vivo (boots 223/224), falta a 2ª metade da receita: o `ExecuteNode(fase, nó, ctx, &socket, saída)` do motor
 // (`0x10280df0c`). Ele pega o tipo do nó pelo slot `+0x8`, e — fora da família testada no `IsA` — chama o thunk `0x10286b874`, que despacha o
@@ -3149,9 +3123,9 @@ pub(crate) unsafe fn mappin_de_mod_registrar(b: &BuscaCozida, sys: *mut c_void, 
 }
 
 
-// ===== ArchiveXL `#34`: `QuestRootInstance::Start` (2026-09-18) =====
+// ===== `QuestRootInstance::Start` (2026-09-18) =====
 // `0x102811df0` (slot `+0xe8` do `questRootInstance`, `(root, QuestContext*, &Handle<questQuestResource>)`), chamado só pelo processador da fila de
-// início (`0x102a0fb54`, Tick do QuestsSystem) com as travas `sys+0x128`/`+0x60` seguras. Como o HookBefore da referência, o hook marca os facts dos
+// início (`0x102a0fb54`, Tick do QuestsSystem) com as travas `sys+0x128`/`+0x60` seguras. Antes da original, o hook marca os facts dos
 // nós forçados (`register::questphase_forcados_no_inicio`, com o QuestsSystem do contexto em `ctx+0x128`) e segue pra original. Com o recurso do teste
 // e sem a fase filha dele (o `Start` criaria uma 2ª instância da quest), não segue.
 pub(crate) const A34_START: (u64, u32) = (0x1_0281_1df0, 0xd102_03ff);
@@ -3167,11 +3141,11 @@ pub(crate) unsafe extern "C" fn a34_start(root: u64, ctx: u64, recurso: u64) -> 
         A34_FACTS.fetch_add(crate::mundo::questphase_forcados_no_inicio(sys as *const c_void) as u64, Ordering::Relaxed);
     }
     let res = if recurso != 0 && crate::memoria::is_readable(recurso as *const c_void, 8) { ler_u64(recurso) } else { 0 };
-    // Quest nova: os patches da tabela no `.quest` antes do grafo rodar (o `OnPhasePreload` da referência; o `.quest` não passa pela rota de fase).
+    // Quest nova: os patches da tabela no `.quest` antes do grafo rodar (o `.quest` não passa pela rota de fase).
     if res != 0 && crate::memoria::is_readable((res + 0x30) as *const c_void, 8) {
         crate::mundo::questphase_patches_na_carga(ler_u64(res + 0x30), recurso as *mut c_void);
     }
-    // O recurso de teste do A#34 só é gravado pelo selftest.
+    // O recurso de teste do `Start` só é gravado pelo selftest.
     #[cfg(feature = "devtools")]
     {
         let teste = A34_RECURSO_TESTE.load(Ordering::Relaxed);
@@ -3188,7 +3162,7 @@ pub(crate) unsafe extern "C" fn a34_start(root: u64, ctx: u64, recurso: u64) -> 
 }
 
 /// Recriação das quests na carga de save (`0x102812f24`, gêmea do `Start` sem executar grafo, em thread de job, um `.quest` por vez na ordem da
-/// QuestList): os patches da tabela no `.quest` antes da instância ser recriada, como o `OnPhasePreload` da referência. Nó de mod num `.quest` entra no
+/// QuestList): os patches da tabela no `.quest` antes da instância ser recriada. Nó de mod num `.quest` entra no
 /// registro de forçados (`register::questphase_patches_na_carga`) e o `OnGameRestored` o força.
 pub(crate) const A35_RECRIAR: (u64, u32) = (0x1_0281_2f24, 0xd102_03ff);
 
@@ -3222,10 +3196,10 @@ pub(crate) unsafe fn install_a34() {
     crate::veredito_dev!("[a34] hook do QuestRootInstance::Start {h:?}");
 }
 
-// axl-questphase-apply: QuestsSystem::OnGameRestored candidato — achado 2026-07-28 AO VIVO via
+// questphase-apply: QuestsSystem::OnGameRestored candidato — achado 2026-07-28 AO VIVO via
 // `getquestsys` (GameInstance.GetQuestsSystem(game) com a ABI corrigida do getcustsys) + leitura
-// direta da vtable no slot 0x158 (offset Windows 0x150 do header hand-written
-// RED4ext.SDK/gameIGameSystem.hpp, +0x08 pela correção Itanium de dtor extra já documentada no
+// direta da vtable no slot 0x158 (offset Windows 0x150 de `IGameSystem`,
+// +0x08 pela correção Itanium de dtor extra já documentada no
 // projeto). `peekq` confirma prólogo REAL (STP X20,X19 + STP X29,X30), não thunk. Ainda não
 // confirmado que É OnGameRestored (offset estimado, não literal) — hook observe-only decide:
 // deve disparar exatamente 1x por save-load real (autocontinue já dispara 1 nesta sessão).
@@ -3233,13 +3207,13 @@ pub(crate) const QUESTSYS_ONGAMERESTORED_VM: u64 = 0x1_02a0_b26c;
 
 pub(crate) static ORIG_QUESTSYS_ONGAMERESTORED: AtomicU64 = AtomicU64::new(0);
 
-// ===== axl-questphase-apply: QuestsSystem::OnGameRestored candidato C++ hook =====
+// ===== questphase-apply: QuestsSystem::OnGameRestored candidato C++ hook =====
 // ABI C++ ARM64 (virtual, IGameSystem::OnGameRestored): x0=this, retorno bool (w0).
 // HookWrap (não HookBefore): propaga o retorno real do original — é um virtual bool,
 // alguém pode ramificar no resultado; não arriscar mudar comportamento, só observar.
 pub(crate) unsafe extern "C" fn questsys_ongamerestored_handler(this: *mut c_void) -> bool {
     let n = QUESTSYS_ONGAMERESTORED_CNT.fetch_add(1, Ordering::Relaxed);
-    // ArchiveXL `#55`/`#35`: o início forçado dos nós de mod da referência, antes da original (HookBefore). O teste do #35 adia pra depois da trava de
+    // O início forçado dos nós de mod, antes da original. O teste de fase de quest adia pra depois da trava de
     // save (o `OnGameRestored` roda antes dela) e chama a mesma função.
     if marcador_individual("a35-teste") {
         A35_RESTAURACOES_ADIADAS.fetch_add(1, Ordering::Relaxed);
@@ -3249,7 +3223,7 @@ pub(crate) unsafe extern "C" fn questsys_ongamerestored_handler(this: *mut c_voi
     let f: unsafe extern "C" fn(*mut c_void) -> bool = std::mem::transmute(original_publicado(&ORIG_QUESTSYS_ONGAMERESTORED));
     let ret = f(this);
     if n < 8 {
-        crate::log_dev!("[axl-questphase] QuestsSystem::OnGameRestored-cand#{n} this={this:p} ret={ret}");
+        crate::log_dev!("[questphase] QuestsSystem::OnGameRestored-cand#{n} this={this:p} ret={ret}");
     }
     ret
 }
@@ -3259,12 +3233,12 @@ pub(crate) unsafe extern "C" fn questsys_ongamerestored_handler(this: *mut c_voi
 pub(crate) unsafe fn install_questsys_ongamerestored() {
     install_hook_probe!(
         QUESTSYS_ONGAMERESTORED_VM, questsys_ongamerestored_handler, ORIG_QUESTSYS_ONGAMERESTORED,
-        &format!("[axl-questphase] QuestsSystem::OnGameRestored hook @ {QUESTSYS_ONGAMERESTORED_VM:#012x}"),
-        "[axl-questphase] FALHA OnGameRestored hook"
+        &format!("[questphase] QuestsSystem::OnGameRestored hook @ {QUESTSYS_ONGAMERESTORED_VM:#012x}"),
+        "[questphase] FALHA OnGameRestored hook"
     );
 }
 
-// ===== ArchiveXL `#44` partes 7a/7b — busca de mappin cozido (2026-09-12) =====
+// ===== Journal de mod, partes 7a/7b — busca de mappin cozido (2026-09-12) =====
 // A busca `0x1030f2ff0(MappinResource, hash)` percorre `cookedData` (entradas `@0x40`, tamanho `@0x4c`, elemento de 0x20 B com `journalPathHash` u32
 // `@0`) e devolve o elemento ou 0. `GetMappinData` (`0x1030f7920`) é um wrapper de 16 B que salta pra ela, e o slot `0x260` do `MappinSystem`
 // (`0x103106d24`) chama a busca direto e copia a posição de `+0x04..+0x10`. O hook fica na busca (72 B; o `cbz` do prólogo o relocador conserta).
@@ -3348,7 +3322,7 @@ pub(crate) unsafe extern "C" fn poi_busca_replacement(res: *mut c_void, hash: u3
     busca_cozida(&BUSCA_POI, res, hash)
 }
 
-// Parte 7d-1 (2026-09-12): folga nos `cookedData` na carga do mundo, como a referência. Hook no slot 48 do `MappinSystem` (`OnStreamingWorldLoaded`,
+// Parte 7d-1 (2026-09-12): folga nos `cookedData` na carga do mundo. Hook no slot 48 do `MappinSystem` (`OnStreamingWorldLoaded`,
 // `0x1030fb9f0`, `(this, worldRuntimeScene*)`): depois da original, os `cookedData` de mappin (`+0x58`) e de POI (`+0x68`) sem folga ganham
 // `max(2 × mappins de mod, tamanho / 2)` pelo reserve do motor, com os movers conferidos no GOT. Assim o PushBack da 7d não realoca ponteiro já entregue
 // pela busca. Marcador `~/.bwms-hook-mappin-reserva`.
@@ -3364,7 +3338,7 @@ pub(crate) const COOKEDPOI_MOVER_VM: u64 = 0x1_0310_adf0;
 
 pub(crate) static ORIG_MAPPIN_MUNDO: AtomicU64 = AtomicU64::new(0);
 
-/// Mappins de mod coletados (a folga da reserva conta 2 por mappin, como a referência).
+/// Mappins de mod coletados (a folga da reserva conta 2 por mappin).
 pub(crate) static MAPPIN_MODS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) type MundoCarregadoFn = unsafe extern "C" fn(*mut c_void, *mut c_void);
@@ -3404,7 +3378,7 @@ pub(crate) unsafe fn cookeddata_folga(res: *mut c_void, got_vm: u64, mover_vm: u
     Some((tam, cap0, cap1, igual, achou))
 }
 
-/// `MappinSystem` do último `OnStreamingWorldLoaded` (ArchiveXL `#44` 7e-3: o tick registra nele os pins do journal de mod).
+/// `MappinSystem` do último `OnStreamingWorldLoaded` (journal de mod, 7e-3: o tick registra nele os pins do journal de mod).
 pub(crate) static MAPPIN_SISTEMA: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 pub(crate) unsafe extern "C" fn mappin_mundo_carregado_replacement(sys: *mut c_void, cena: *mut c_void) {
@@ -3425,7 +3399,7 @@ pub(crate) unsafe extern "C" fn mappin_mundo_carregado_replacement(sys: *mut c_v
     crate::veredito_dev!("[mappin-reserva] VEREDITO mappin: {}; POI: {}; reserva-ok={}", texto(m), texto(p), certo(m) && certo(p));
 }
 
-/// ArchiveXL `#44` 7e-5: com tabela de journal de mod, os hooks da busca de mappin, da busca de POI e da reserva entram sem marcador — os pins das entradas
+/// Journal de mod, 7e-5: com tabela de journal de mod, os hooks da busca de mappin, da busca de POI e da reserva entram sem marcador — os pins das entradas
 /// novas só chegam ao consumidor vanilla pela busca hookada, e o `MappinSystem` pro tick sai do hook da reserva. Cada hook só instala se o original ainda não
 /// foi guardado (o marcador pode ter instalado no `on_load`; hook empilhado duas vezes vira laço).
 pub(crate) unsafe fn instalar_hooks_de_pins_de_mod() {
@@ -3452,7 +3426,7 @@ pub(crate) unsafe fn instalar_hooks_de_pins_de_mod() {
     }
 }
 
-// Parte 7d-2a (2026-09-12): mappins de mod, como a referência no `OnGetMappinData`/`OnGetPoiData`. Quando a busca não acha um hash registrado, o elemento
+// Parte 7d-2a (2026-09-12): mappins de mod. Quando a busca não acha um hash registrado, o elemento
 // cozido é montado e entra no fim do `cookedData` do recurso — só dentro da folga reservada na carga do mundo (7d-1), pra não realocar ponteiro já
 // entregue — e a busca devolve o elemento dentro do array; dali em diante a própria busca do motor acha o hash. Elemento de mappin: hash `@0`, posição
 // `@0x04`, volume (Handle) `@0x10`; de POI: hash `@0`, `entityID` `@0x08` nulo, posição `@0x10`.
@@ -3512,9 +3486,9 @@ pub(crate) unsafe fn mappin_de_mod_empurrar(b: &BuscaCozida, res: *mut c_void, h
     e
 }
 
-// ===== ArchiveXL `#35` parte c (2026-09-11): carga de fase de quest, só observando =====
-// RE offline (prova 20260911-archivexl-35-parte-b2): `0x1029e8c48(loader, ResourcePath, &Handle<questQuestPhaseResource>)` é a rota
-// específica de fase (mesma forma do `ProcessPhaseResource` da referência). Os 4 chamadores chegam nela depois de GetType/IsA, em thread
+// ===== Fase de quest, parte c (2026-09-11): carga de fase de quest, só observando =====
+// RE offline (prova de 2026-09-11, fase de quest parte b2): `0x1029e8c48(loader, ResourcePath, &Handle<questQuestPhaseResource>)` é a rota
+// específica de fase. Os 4 chamadores chegam nela depois de GetType/IsA, em thread
 // de job, antes do spinlock `loader+0x18` e do registro no mapa por path. O original não atribui x0 e o chamador reaproveita esse x0: o
 // hook devolve o x0 do original. Corpo: leituras diretas (tipo pelo vptr, sem RTTI) e nenhum lock do motor. Critério ao vivo: path
 // 0x84642c97f5c71116 com vptr certo e 29 nós; controle negativo: outra fase com contagem diferente.
@@ -3558,12 +3532,12 @@ pub(crate) unsafe fn install_questphase_carga_probe(aplicar: bool) {
     );
 }
 
-// ===== Codeware `#142` (`OpenWorldTracker`): `PointOfInterestMappin::SetPhase` =====
+// ===== `OpenWorldTracker`: `PointOfInterestMappin::SetPhase` =====
 // Endereço pela RE offline (DATABASE, seção `PointOfInterestMappin`): `vt+0x1d0` da vtable `0x107a9e860`, prólogo sem instrução relativa ao PC.
 // ABI: x0 = mappin, w1 = `gamedataMappinPhase`, w0 = bool. O hook chama a original primeiro e só observa; na fase `CompletedPhase` (0) guarda o hash
 // de journal do PoI (`GetJournalQuestPathHash`, `+0x8c`) e o tick chama `BwmsOpenWorldTrackerAplicar` (`bwms-openworldtracker.reds`), que leva a
-// entrada a Inativa e de volta a Ativa sem notificação, como a referência. Prova: boot 230
-// (`proofs/20260913-boot230-codeware-142-tracker-tracker-ok-PROVADA.log`).
+// entrada a Inativa e de volta a Ativa sem notificação. Prova: boot 230
+// (prova de 2026-09-13 do ciclo do tracker).
 // Liga com `openworldtracker = true` no `red4ext/bwms.toml`; desligado por padrão porque o estado da entrada de journal vai pro save. No dev,
 // `~/.bwms-hook-openworldtracker` instala o hook só observando e `~/.bwms-hook-openworldtracker-aplicar` deixa o tick mudar o journal.
 pub(crate) const POI_SETPHASE_VM: u64 = 0x1_0314_0998;

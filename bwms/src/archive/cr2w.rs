@@ -2,10 +2,10 @@
 //!
 //! O `archive-tool` já extrai os bytes de cada resource (RDAR + Kraken); ESTE módulo lê a ESTRUTURA
 //! CR2W desses bytes — o ENVELOPE (magic + FileHeader + as 10 tabelas: strings/names/imports/props/
-//! chunks/buffers/embeds). É a fase 1 do porte WolvenKit (a "espinha"): destrava ler factory-index,
+//! chunks/buffers/embeds). É a fase 1 (a "espinha"): destrava ler factory-index,
 //! localization onscreens, appearance/garment nativamente em Rust, sem .NET.
 //!
-//! Layout (WolvenKit `CR2WHeaderStructs.cs` + `CR2WReader.File.cs`), little-endian:
+//! Layout, little-endian:
 //!   [0..4)   magic "CR2W"
 //!   [4..40)  CR2WFileHeader (36B): version(u32) flags(u32) timeStamp(u64) buildVersion(u32)
 //!            objectsEnd(u32) buffersEnd(u32) crc32(u32) numChunks(u32)
@@ -56,10 +56,10 @@ fn rd_u64(b: &[u8], off: usize) -> u64 {
     ])
 }
 
-/// CRC-32 IEEE (= `Crc32Algorithm`/Force.Crc32 do WolvenKit) — delega à fonte única `bwms-primitives`.
+/// CRC-32 IEEE — delega à fonte única `bwms-primitives`.
 pub use bwms_primitives::crc32;
 
-/// Recomputa o crc32 do HEADER exatamente como o WolvenKit (`CalculateHeaderCRC32`): CRC sobre
+/// Recomputa o crc32 do HEADER: CRC sobre
 /// MAGIC+version+flags+timeStamp+buildVersion+objectsEnd+buffersEnd+`0xDEADBEEF`(no lugar do campo
 /// crc32)+numChunks + as 10 tabelas (offset+itemCount+crc32). Devolve o valor recomputado.
 pub fn header_crc32(h: &Cr2wHeader, tables: &[Cr2wTable; 10]) -> u32 {
@@ -83,7 +83,7 @@ pub fn header_crc32(h: &Cr2wHeader, tables: &[Cr2wTable; 10]) -> u32 {
 
 /// Stride em bytes de cada item por índice de tabela (0 = a tabela mede `item_count` em BYTES, não itens):
 /// t0=strings(blob), t1=names(4+4=8), t2=imports(4+2+2=8), t3=props(2+2+2+2+8=16), t4=exports(2+2+4·5=24),
-/// t5=buffers(6·4=24), t6=embeds(4+4+8=16). t7-9 não usados. Fonte: WolvenKit.RED4 Sections/CR2W*.cs.
+/// t5=buffers(6·4=24), t6=embeds(4+4+8=16). t7-9 não usados.
 pub const TABLE_STRIDE: [usize; 10] = [0, 8, 8, 16, 24, 24, 16, 0, 0, 0];
 
 /// Fatia crua de bytes da tabela `i` dentro do resource completo (para recomputar o crc32).
@@ -152,7 +152,7 @@ impl Cr2wIndex {
 
 /// Lê o STRING DICT (tabela 0) — um blob de strings ASCII null-terminadas em
 /// `[offset .. offset+item_count)`. Devolve `(offset_relativo -> string)`: names/imports/embeds
-/// referenciam as strings por esse offset relativo ao início do blob (WolvenKit `ReadStringDict`).
+/// referenciam as strings por esse offset relativo ao início do blob.
 /// O offset 0 costuma ser a string vazia (o blob começa com um `\0`).
 pub fn read_string_dict(
     data: &[u8],
@@ -295,7 +295,7 @@ pub struct Cr2wField {
     pub value: Vec<u8>,
 }
 
-/// Deserializa os CAMPOS do payload de um chunk (WolvenKit `CR2WReader.ReadClass`/`ReadVariable`):
+/// Deserializa os CAMPOS do payload de um chunk:
 /// byte líder `0`, depois um loop de `[varName:u16 (idx em names)][redType:u16][size:u32 (inclui 4)]
 /// [valor: size-4 bytes]`, terminado por `varName == 0`. Não interpreta o valor por tipo (fase
 /// seguinte) — devolve os bytes crus. VERIFICADO: o chunk `JsonResource` do onscreens dá exatamente
@@ -346,13 +346,13 @@ pub fn read_chunk_fields(
         });
         pos += val_len;
     }
-    // APPENDIX: bytes após o terminador até o fim do chunk (o `IRedAppendix` do WolvenKit — algumas
+    // APPENDIX: bytes após o terminador até o fim do chunk (algumas
     // classes, ex. gameDeviceResourceData/streamingsector, põem dado extra aqui). Preserva byte-a-byte.
     let appendix = data[pos.min(end)..end].to_vec();
     Ok((fields, appendix))
 }
 
-/// VLQ signed int do CDPR (LEB128 modificado; WolvenKit `ReadVLQInt32`): 1º octeto bit7=sinal,
+/// VLQ signed int do CDPR (LEB128 modificado): 1º octeto bit7=sinal,
 /// bit6=continuação, bits0-5=valor baixo; octetos seguintes bit7=continuação + 7 bits. Avança `pos`.
 pub fn read_vlq_i32(data: &[u8], pos: &mut usize) -> Result<i32, String> {
     let rd = |p: &mut usize| -> Result<u8, String> {
@@ -377,7 +377,7 @@ pub fn read_vlq_i32(data: &[u8], pos: &mut usize) -> Result<i32, String> {
     Ok(if negative { -value } else { value })
 }
 
-/// Lê uma String RED (WolvenKit `ReadLengthPrefixedString`): prefixo VLQ SIGNED = comprimento em
+/// Lê uma String RED: prefixo VLQ SIGNED = comprimento em
 /// CHARS; sinal decide a largura — **prefixo > 0 = UTF-16LE** (len*2 bytes), **< 0 = UTF-8** (len
 /// bytes), 0 = vazia. Avança `pos`. É como todo texto (localization, nomes) é guardado no CR2W.
 pub fn read_red_string(data: &[u8], pos: &mut usize) -> Result<String, String> {
@@ -399,8 +399,8 @@ pub fn read_red_string(data: &[u8], pos: &mut usize) -> Result<String, String> {
     }
 }
 
-/// Lê os campos de um ELEMENTO de array-de-classe. Cada elemento é lido como CLASSE (WolvenKit
-/// `ReadClass`), então tem o MESMO byte líder `0` do chunk-raiz, seguido do loop
+/// Lê os campos de um ELEMENTO de array-de-classe. Cada elemento é lido como CLASSE,
+/// então tem o MESMO byte líder `0` do chunk-raiz, seguido do loop
 /// `[varName:u16][redType:u16][size:u32 incl.4][valor]` até varName=0. Avança `pos` pro próximo
 /// elemento (consome o líder + os campos + o terminador u16=0).
 pub fn read_element_fields(
@@ -742,7 +742,7 @@ pub fn repack_c2d_add(data: &[u8], new_rows: &[Vec<String>]) -> Result<Vec<u8>, 
 /// Lê um `C2dArray` (o formato das `.csv` do jogo — factories, stats, etc.): `headers`
 /// (`array:String` = `[count:i32][RED String]*`) + `data` (`array:array:String` = `[rows:i32]
 /// [ [cells:i32][RED String]* ]*`). Elementos de `array:String` são RED Strings DIRETAS (sem leading-0
-/// de classe). Devolve (colunas, linhas). Base p/ ler/editar factory (ArchiveXL adicionar item) em Rust.
+/// de classe). Devolve (colunas, linhas). Base p/ ler/editar factory (adicionar item) em Rust.
 pub fn read_c2d_array(headers_value: &[u8], data_value: &[u8]) -> Result<(Vec<String>, Vec<Vec<String>>), String> {
     let read_str_array = |v: &[u8], pos: &mut usize| -> Result<Vec<String>, String> {
         if *pos + 4 > v.len() {
@@ -1374,8 +1374,8 @@ mod tests {
 
     #[test]
     fn crc32_vetor_padrao_ieee() {
-        // KAT do CRC-32 IEEE: a string "123456789" tem check value 0xCBF43926 (o mesmo que o
-        // Crc32Algorithm/Force.Crc32 do WolvenKit produz). Trava o algoritmo p/ sempre.
+        // KAT do CRC-32 IEEE: a string "123456789" tem check value 0xCBF43926.
+        // Trava o algoritmo p/ sempre.
         assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
         assert_eq!(crc32(b""), 0x0000_0000);
         assert_eq!(crc32(&[0u8; 4]), crc32(&[0u8; 4])); // determinístico
@@ -1392,7 +1392,7 @@ mod tests {
 
     #[test]
     fn strides_das_tabelas_corretos() {
-        // Tamanhos das structs CR2W* da RED4 (WolvenKit Sections/): names=8, imports=8, props=16,
+        // Tamanhos das structs CR2W* da RED4: names=8, imports=8, props=16,
         // exports=24, buffers=24, embeds=16. Um erro aqui quebra o crc32 por-tabela.
         assert_eq!(TABLE_STRIDE, [0, 8, 8, 16, 24, 24, 16, 0, 0, 0]);
     }

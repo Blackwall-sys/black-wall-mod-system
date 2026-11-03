@@ -1,11 +1,10 @@
-// bwms-text-measurer.reds — largura de texto medida pelo próprio motor (Codeware `#115`, parte 115c), 2026-09-13.
+// bwms-text-measurer.reds — largura de texto medida pelo próprio motor, 2026-09-13.
 //
-// PARA QUE SERVE: um campo de texto precisa saber onde desenhar o caret e a seleção, e o script não tem tipografia. A largura sai do layout de um
-// `inkText` sombra, escondido mas contando no layout, com a mesma família e tamanho de fonte do texto visível.
+// PARA QUE SERVE: um campo de texto precisa saber onde desenhar o caret e a seleção, e o script não tem tipografia. A largura sai do layout do
+// próprio motor, com a mesma família e tamanho de fonte do texto visível.
 //
-// DUAS CONDIÇÕES MEDIDAS AO VIVO (boot 151): sem família de fonte o `GetDesiredSize` fica (0,0), e a primeira medida chega só alguns segundos depois
-// de montar (a fonte carrega em segundo plano). Por isso a medida é assíncrona: caracteres entram numa fila, cada frame lê a sombra e avança quando a
-// largura aparece, e o ouvinte é avisado quando a fila esvazia.
+// A medida é assíncrona: caracteres entram numa fila, um vai para a sombra por vez, e a largura desejada dela é lida na volta seguinte do
+// gatilho; o ouvinte é avisado quando a fila esvazia.
 //
 // O espaço sozinho não mede (o texto é aparado); sai de `"M M"` menos duas vezes `"M"`. Kerning é ignorado: a largura de um trecho é a soma dos
 // caracteres. Os caracteres entram por `BwmsUTF8Split`, um por codepoint: acento pré-composto conta como 1; decomposto (letra + U+0301), como 2.
@@ -47,8 +46,9 @@ public class BwmsTextMeasurer extends BwmsUIController {
         return m;
     }
 
+    // A raiz é o próprio texto de medida. Opacidade 0 em vez de `SetVisible(false)`: o widget escondido sai do layout e o motor deixa de
+    // calcular o tamanho desejado dele, que é a medida.
     protected func OnCreate() -> ref<inkWidget> {
-        // Padrões aqui, e não só no `Create`, pra subclasse que faz `new` + `Construct()` também ter fonte e cache.
         if Equals(this.m_font, "") {
             this.m_font = BwmsTextMeasurer.DefaultFont();
             this.m_fontSize = 38;
@@ -57,34 +57,37 @@ public class BwmsTextMeasurer extends BwmsUIController {
             this.m_widths = new inkStringMap();
         }
         let shadow: ref<inkText> = new inkText();
-        shadow.SetName(n"bwms_text_measurer");
+        shadow.SetName(n"bwmsTextMeasurerShadow");
+        // Sem família de fonte o `inkText` mede (0,0).
         shadow.SetFontFamily(this.m_font);
         shadow.SetFontSize(this.m_fontSize);
-        shadow.SetVisible(false);
-        shadow.SetAffectsLayoutWhenHidden(true);
-        shadow.SetHorizontalAlignment(textHorizontalAlignment.Left);
-        shadow.SetVerticalAlignment(textVerticalAlignment.Center);
+        shadow.SetOpacity(0.0);
         this.m_shadow = shadow;
         return shadow;
     }
 
-    // O tick nasce na primeira medida, e não no `OnInitialize`: na `BwmsUIController` o `OnInitialize` roda no `Construct`, antes de a sombra estar
-    // pendurada numa árvore que o motor anima.
+    // Duração de uma volta do gatilho, em segundos: uma volta por quadro a 60 Hz.
+    public static func TickPeriod() -> Float = 0.0166
+
+    // O gatilho é uma animação em laço infinito na própria sombra (opacidade 0 → 0, nada visível muda); cada fim de volta chama `OnMeasureTick`.
+    // Nasce aqui, e não no `OnInitialize`: este roda dentro do `Construct`, antes de a sombra estar numa árvore que o motor anima.
     private func EnsureTick() -> Void {
-        if IsDefined(this.m_tick) {
+        if IsDefined(this.m_tick) || !IsDefined(this.m_shadow) {
             return;
         }
-        let step: ref<inkAnimTransparency> = new inkAnimTransparency();
-        step.SetStartTransparency(1.0);
-        step.SetEndTransparency(1.0);
-        step.SetDuration(1.0 / 60.0);
+        let fade: ref<inkAnimTransparency> = new inkAnimTransparency();
+        fade.SetStartTransparency(0.0);
+        fade.SetEndTransparency(0.0);
+        fade.SetDuration(BwmsTextMeasurer.TickPeriod());
         let def: ref<inkAnimDef> = new inkAnimDef();
-        def.AddInterpolator(step);
-        let opts: inkAnimOptions;
-        opts.loopInfinite = true;
-        opts.loopType = inkanimLoopType.Cycle;
-        this.m_tick = this.m_shadow.PlayAnimationWithOptions(def, opts);
-        this.m_tick.RegisterToCallback(inkanimEventType.OnStartLoop, this, n"OnMeasureTick");
+        def.AddInterpolator(fade);
+        let options: inkAnimOptions;
+        options.loopType = inkanimLoopType.Cycle;
+        options.loopInfinite = true;
+        this.m_tick = this.m_shadow.PlayAnimationWithOptions(def, options);
+        if IsDefined(this.m_tick) {
+            this.m_tick.RegisterToCallback(inkanimEventType.OnEndLoop, this, n"OnMeasureTick");
+        }
     }
 
     // Troca a fonte da sombra. As larguras guardadas eram de outra fonte e são descartadas.
@@ -242,33 +245,28 @@ public class BwmsTextMeasurer extends BwmsUIController {
         this.m_tick.Resume();
     }
 
+    // Roda a cada volta do gatilho; enquanto a fonte carrega a largura fica 0 e o mesmo caractere é lido de novo na volta seguinte.
     protected cb func OnMeasureTick(anim: ref<inkAnimProxy>) -> Bool {
         this.m_ticks += 1;
         if Equals(this.m_current, "") {
-            this.m_tick.Pause();
+            if IsDefined(this.m_tick) {
+                this.m_tick.Pause();
+            }
             return true;
         }
-        let size: Vector2 = this.m_shadow.GetDesiredSize();
-        // TODO(F1-13): sem limite de espera, um codepoint que o motor desenhe com largura 0 quando medido sozinho (U+0301, U+200D, U+FE0F) prende a
-        // fila: `Offset` devolve -1 dali em diante e o `Layout` do BwmsTextInput sai cedo, com o caret parado. Não medido. Como medir: colar "e" +
-        // U+0301 no BwmsTextInput e logar `TickCount()` e `IsBusy()` por alguns segundos. Se prender, o limite de ticks por caractere tem de ficar
-        // acima da espera da fonte (boot 158: 4 caracteres em 5 ticks, aviso a 6111 ms da montagem), senão grava 0 no lugar da largura real.
-        if size.X < 0.01 {
+        let width: Float = this.m_shadow.GetDesiredSize().X;
+        if width < 0.01 {
             return true;
         }
-        let width: Float = size.X;
         if Equals(this.m_current, " ") {
-            let m: Float = this.Width("M");
-            width = size.X - 2.0 * m;
+            width -= 2.0 * this.Width("M");
         }
         if width < 0.0 {
             width = 0.0;
         }
-        // Milésimos de unidade num `Uint64`. O `Set` do `inkStringMap` só troca chave que já existe (boot 157: as 4 medidas sumiram); chave nova entra
-        // pelo `Insert`.
         let stored: Uint64 = Cast<Uint64>(width * 1000.0);
-        let known: Bool = this.m_widths.KeyExist(this.m_current);
-        if known {
+        // `inkStringMap.Set` só troca chave que já existe; chave nova entra por `Insert`.
+        if this.m_widths.KeyExist(this.m_current) {
             this.m_widths.Set(this.m_current, stored);
         } else {
             this.m_widths.Insert(this.m_current, stored);

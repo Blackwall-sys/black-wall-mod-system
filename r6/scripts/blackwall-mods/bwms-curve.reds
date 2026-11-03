@@ -1,4 +1,4 @@
-// bwms-curve.reds — curvas de dados do jogo por propriedade de objeto (Codeware `#21`), 2026-09-13.
+// bwms-curve.reds — curvas de dados do jogo por propriedade de objeto, 2026-09-13.
 //
 // PARA QUE SERVE: ler e editar em runtime as curvas `curveData` que o jogo guarda nos objetos — exposição, luz do sol, névoa, curvas de avaliador — sem
 // arquivo novo. Um ponto é um tempo e um valor; a curva tem o tipo de interpolação e o de ligação entre segmentos.
@@ -11,8 +11,7 @@
 //
 // USO: `let curva = BwmsCurve.Of(config, n"sunColor"); curva.SetSize(2); curva.SetPointHDRColor(1, 0.5, new HDRColor(1.0, 0.8, 0.6, 1.0));`
 //
-// De Codeware: `CurveDataFloat`/`CurveDataVector2`/`CurveDataVector3`/`CurveDataVector4`/`CurveDataHDRColor` → `BwmsCurve`, uma classe só com métodos por
-// tipo de valor.
+// `BwmsCurve` é uma classe só, com métodos por tipo de valor.
 
 public class BwmsCurve {
     private let m_owner: wref<IScriptable>;

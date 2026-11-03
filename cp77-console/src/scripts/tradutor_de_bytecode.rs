@@ -530,7 +530,7 @@ const BLOB_DO_TESTE: &str = "/tmp/bwms-troca.redscripts";
 #[cfg(feature = "devtools")]
 fn teste_fonte(k: i32) -> String {
     format!(
-        "// Teste da troca de corpo sem reiniciar (RED4ext #97): o BWMS recompila, traduz o bytecode do\n\
+        "// Teste da troca de corpo sem reiniciar: o BWMS recompila, traduz o bytecode do\n\
          // arquivo pro formato do motor e troca só o corpo desta função com o jogo aberto. O corpo usa\n\
          // literal de texto, chamada de função e variável local — as três formas de referência que a\n\
          // tradução tem que resolver pelo nome.\n\

@@ -90,8 +90,8 @@ pub(crate) unsafe fn gravar_param_de_thread_do_job(grupo: *const c_void, fim: bo
 }
 
 /// Fila de jobs do motor na pilha: ctor `(q, 2, 0)` (como `0x101b0bf78`) -> `corpo(q)` -> `SyncWait` -> destrutor. Serve pra
-/// esperar o job de um token (`resloadfila`/`resloadref`) e pra passar a fila a quem a recebe (`MeshComponent::LoadResource`,
-/// Codeware `#168`). 0x80 bytes: o construtor escreve até +0x31 que se veja; folga pro que não se viu.
+/// esperar o job de um token (`resloadfila`/`resloadref`) e pra passar a fila a quem a recebe (`MeshComponent::LoadResource`).
+/// 0x80 bytes: o construtor escreve até +0x31 que se veja; folga pro que não se viu.
 pub(crate) unsafe fn com_fila_de_jobs(corpo: &mut dyn FnMut(*mut c_void)) {
     let mut fila = [0u64; 16];
     let ctor: extern "C" fn(*mut u64, u32, u64) -> *mut u64 = std::mem::transmute(crate::rebase(crate::jogo::fila::FILA_CRIAR_VM));

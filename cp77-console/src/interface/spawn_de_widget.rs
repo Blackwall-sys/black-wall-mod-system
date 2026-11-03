@@ -1,12 +1,6 @@
-//! Spawn de widget de biblioteca (`InkWidgetLibrary::SpawnFromLocal`/`SpawnFromExternal`): o controller pedido no nome do item (`Item:Controller`, do
-//! `InkSpawner` do ArchiveXL e do `WidgetSpawningService` do Codeware, que o Virtual Atelier e o Equipment-EX chamam) e o evento `InkWidget/Spawn` do
-//! Codeware (`#123`, com o filtro do `inkWidgetTarget` do `#135`). Os hooks ficam no ar desde o `on_load`: quem spawna com `Item:Controller` não
-//! registra nada antes. O `SpawnFromExternal` põe antes a biblioteca externa na lista de dependências de quem chama (`InjectDependency`).
-//!
-//! O spawn assíncrono (`AsyncSpawnFromLocal`/`AsyncSpawnFromExternal`) é o dos itens das grades e listas virtuais (`inkVirtualListController`,
-//! `inkVirtualGridController`): o nome `Item:Controller` vai inteiro no pedido e o motor não acha item com ele. O hook do `AsyncSpawnFrom*` refaz o
-//! pedido pelo `Item` e guarda o nome inteiro; o hook da entrega (o `FinishAsyncSpawn` da referência) troca o controller da instância antes de o motor
-//! anexá-la e inicializá-la.
+//! Spawn de widget de biblioteca (`inkWidgetLibraryResource` pelo `SpawnFromLocal`/`SpawnFromExternal` do motor, síncrono e assíncrono): o controller
+//! pedido no nome do item (`Item:Controller`, que telas de mod pedem), a biblioteca externa de um mod no spawn externo e o evento `InkWidget/Spawn`
+//! (com o filtro do `inkWidgetTarget`).
 
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -48,13 +42,6 @@ const EXTERNA_PASSO: usize = 0x18;
 /// esperado, injeção desligada.
 pub(crate) static EXTERNAS_OFF: AtomicU64 = AtomicU64::new(0);
 pub(crate) const EXTERNAS_RECUSADO: u64 = u64::MAX;
-
-/// O `s_mutex` da referência: leitura pra conferir a lista, escrita pra crescer, anexar e esperar a carga. Dois spawns na mesma biblioteca não
-/// realocam o array um embaixo do outro.
-static TRAVA_DAS_EXTERNAS: RwLock<()> = RwLock::new(());
-
-/// Teto da espera pela carga da biblioteca injetada: o `WaitForResource(token, 1000 ms)` da referência.
-const ESPERA_DA_DEPENDENCIA: Duration = Duration::from_millis(1000);
 
 /// Chamadas do `SpawnFromLocal`, do `SpawnFromExternal` e controllers trocados, pro log do dev.
 #[cfg(feature = "devtools")]
@@ -110,30 +97,38 @@ thread_local! {
     static DENTRO_DO_EXTERNO: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Hooks do `SpawnFromLocal`, do `SpawnFromExternal`, dos dois `AsyncSpawnFrom*` e da entrega do spawn assíncrono, com o prólogo conferido: no `on_load`
-/// e de novo no `RegisterCallback` de `InkWidget/Spawn` (linha da tabela de grupos de evento). Sem remoção: o `Item:Controller` não tem ouvinte que avise
-/// antes do spawn.
+/// No `on_load` e de novo no `RegisterCallback` de `InkWidget/Spawn` (linha da tabela de grupos de evento).
 pub(crate) unsafe fn instalar() {
-    let local = instalar_conferindo_prologo(SPAWN_FROM_LOCAL_VM, SPAWN_FROM_LOCAL_PROLOGO, spawn_local_tramp as *mut c_void, &ORIG_SPAWN_FROM_LOCAL);
-    let externo = instalar_conferindo_prologo(SPAWN_FROM_EXTERNAL_VM, SPAWN_FROM_EXTERNAL_PROLOGO, spawn_externo_tramp as *mut c_void, &ORIG_SPAWN_FROM_EXTERNAL);
-    let async_local =
-        instalar_conferindo_prologo(ASYNC_SPAWN_FROM_LOCAL_VM, ASYNC_SPAWN_FROM_LOCAL_PROLOGO, async_spawn_local as *mut c_void, &ORIG_ASYNC_SPAWN_FROM_LOCAL);
-    let async_externo = instalar_conferindo_prologo(
-        ASYNC_SPAWN_FROM_EXTERNAL_VM,
-        ASYNC_SPAWN_FROM_EXTERNAL_PROLOGO,
-        async_spawn_externo as *mut c_void,
-        &ORIG_ASYNC_SPAWN_FROM_EXTERNAL,
-    );
-    let entrega = instalar_conferindo_prologo(
-        ENTREGA_DO_SPAWN_ASSINCRONO_VM,
-        ENTREGA_DO_SPAWN_ASSINCRONO_PROLOGO,
-        antes_da_entrega as *mut c_void,
-        &ORIG_ENTREGA_DO_SPAWN_ASSINCRONO,
-    );
-    if [local, externo, async_local, async_externo, entrega].iter().any(Option::is_some) {
+    let resultados = [
+        instalar_conferindo_prologo(SPAWN_FROM_LOCAL_VM, SPAWN_FROM_LOCAL_PROLOGO, spawn_local_tramp as *mut c_void, &ORIG_SPAWN_FROM_LOCAL),
+        instalar_conferindo_prologo(SPAWN_FROM_EXTERNAL_VM, SPAWN_FROM_EXTERNAL_PROLOGO, spawn_externo_tramp as *mut c_void, &ORIG_SPAWN_FROM_EXTERNAL),
+        instalar_conferindo_prologo(
+            ASYNC_SPAWN_FROM_LOCAL_VM,
+            ASYNC_SPAWN_FROM_LOCAL_PROLOGO,
+            async_spawn_local as *mut c_void,
+            &ORIG_ASYNC_SPAWN_FROM_LOCAL,
+        ),
+        instalar_conferindo_prologo(
+            ASYNC_SPAWN_FROM_EXTERNAL_VM,
+            ASYNC_SPAWN_FROM_EXTERNAL_PROLOGO,
+            async_spawn_externo as *mut c_void,
+            &ORIG_ASYNC_SPAWN_FROM_EXTERNAL,
+        ),
+        instalar_conferindo_prologo(
+            ENTREGA_DO_SPAWN_ASSINCRONO_VM,
+            ENTREGA_DO_SPAWN_ASSINCRONO_PROLOGO,
+            antes_da_entrega as *mut c_void,
+            &ORIG_ENTREGA_DO_SPAWN_ASSINCRONO,
+        ),
+    ];
+    if resultados.iter().any(Option::is_some) {
         crate::veredito_dev!(
-            "[spawn] hooks do SpawnFromLocal {local:?}, do SpawnFromExternal {externo:?}, do AsyncSpawnFromLocal {async_local:?}, do AsyncSpawnFromExternal \
-             {async_externo:?} e da entrega do spawn assíncrono {entrega:?}"
+            "[spawn] hooks SpawnFromLocal {:?}, SpawnFromExternal {:?}, AsyncSpawnFromLocal {:?}, AsyncSpawnFromExternal {:?}, entrega {:?}",
+            resultados[0],
+            resultados[1],
+            resultados[2],
+            resultados[3],
+            resultados[4]
         );
     }
 }
@@ -145,8 +140,8 @@ pub(crate) fn assincrono_no_ar() -> bool {
 
 // ===== Spawn assíncrono =====
 
-/// Nomes `Item:Controller` que um `AsyncSpawnFrom*` refez pelo `Item`: o hash do nome inteiro, que fica no pedido, e o do controller. A entrega lê o
-/// nome do pedido e acha o controller aqui, sem voltar o nome pra texto na thread do job. Só cresce: um par por nome com controller que os mods spawnam.
+/// Nomes `Item:Controller` (hash do nome inteiro) e o controller de cada um, que o spawn assíncrono guarda e a entrega consulta. Até `N` nomes; só cresce.
+/// `nova` é `const` porque a tabela vive num `static`.
 pub(crate) struct NomesDaEntrega<const N: usize> {
     pares: [[AtomicU64; 2]; N],
     usados: AtomicUsize,
@@ -158,34 +153,37 @@ impl<const N: usize> NomesDaEntrega<N> {
         NomesDaEntrega { pares: [const { [AtomicU64::new(0), AtomicU64::new(0)] }; N], usados: AtomicUsize::new(0), escrita: Mutex::new(()) }
     }
 
-    /// Nenhum nome: a entrega de todo spawn do jogo custa esta leitura.
+    /// Nenhum nome guardado.
     fn vazia(&self) -> bool {
         self.usados.load(Ordering::Acquire) == 0
     }
 
-    /// O controller do nome inteiro `nome`. Sem trava: o par é gravado antes de o `usados` (`Release`) publicá-lo.
+    /// O controller guardado para o nome inteiro `nome`.
     fn controller(&self, nome: u64) -> Option<u64> {
-        let n = self.usados.load(Ordering::Acquire);
+        // Sem trava: as entregas leem de threads de job; `usados` só publica o par depois de escrito.
+        let n = self.usados.load(Ordering::Acquire).min(N);
         self.pares[..n].iter().find(|p| p[0].load(Ordering::Relaxed) == nome).map(|p| p[1].load(Ordering::Relaxed))
     }
 
-    /// `nome` → `controller`, uma vez por nome (o nome inteiro determina o controller). `false` com a tabela cheia.
+    /// Guarda `nome` → `controller`; `false` com a tabela cheia.
     fn registrar(&self, nome: u64, controller: u64) -> bool {
         let _escrita = self.escrita.lock().unwrap_or_else(PoisonError::into_inner);
         if self.controller(nome).is_some() {
             return true;
         }
         let n = self.usados.load(Ordering::Relaxed);
-        let Some(par) = self.pares.get(n) else { return false };
-        par[1].store(controller, Ordering::Relaxed);
+        let Some(par) = self.pares.get(n) else {
+            return false;
+        };
         par[0].store(nome, Ordering::Relaxed);
+        par[1].store(controller, Ordering::Relaxed);
         self.usados.store(n + 1, Ordering::Release);
         true
     }
 }
 
-/// Teto da tabela, folgado sobre os nomes `Item:Controller` de modelo de grade e lista que o boot de 2026-10-18 mostrou no Virtual Atelier e no
-/// Equipment-EX (7, `proofs/20261018-telas-de-mod-eex-va-vereditos.log`).
+/// Teto da tabela, folgado sobre os nomes `Item:Controller` de modelo de grade e lista que o boot de 2026-10-18 mostrou nas telas de mod
+/// (7, `proofs/20261018-telas-de-mod-eex-va-vereditos.log`).
 const TETO_DE_NOMES_DA_ENTREGA: usize = 256;
 static NOMES_DA_ENTREGA: NomesDaEntrega<TETO_DE_NOMES_DA_ENTREGA> = NomesDaEntrega::nova();
 
@@ -193,105 +191,104 @@ type AsyncLocal = unsafe extern "C" fn(*mut c_void, *mut c_void, u64, u64) -> u3
 type AsyncExterno = unsafe extern "C" fn(*mut c_void, *mut c_void, u64, u64, u64) -> u32;
 type Entrega = unsafe extern "C" fn(*mut c_void, *mut [u64; 2]);
 
-/// `AsyncSpawnFromLocal(biblioteca, info, item, flag)` (`OnAsyncSpawnLocal` da referência): o pedido pelo nome inteiro primeiro, como o motor pediu;
-/// sem item com esse nome e com a forma `Item:Controller`, o nome entra em [`NOMES_DA_ENTREGA`] e o pedido vai de novo pelo `Item`. O nome entra antes
-/// da 2ª chamada porque, com o pacote do item já carregado, a entrega roda dentro dela. A original sem o item devolve 0 sem efeito.
+/// Gancho do `AsyncSpawnFromLocal(biblioteca, info, item, flag)` do motor.
 unsafe extern "C" fn async_spawn_local(lib: *mut c_void, info: *mut c_void, item: u64, flag: u64) -> u32 {
     let original: AsyncLocal = std::mem::transmute(original_publicado(&ORIG_ASYNC_SPAWN_FROM_LOCAL));
-    let achou = original(lib, info, item, flag);
-    if achou & 1 != 0 {
-        return achou;
+    let r = original(lib, info, item, flag);
+    if r & 1 != 0 {
+        return r;
     }
-    match item_da_entrega(item, &NOMES_DA_ENTREGA, ORIG_ENTREGA_DO_SPAWN_ASSINCRONO.load(Ordering::Relaxed) != 0) {
+    let no_ar = ORIG_ENTREGA_DO_SPAWN_ASSINCRONO.load(Ordering::Relaxed) != 0;
+    match item_da_entrega(item, &NOMES_DA_ENTREGA, no_ar) {
         Some(base) => original(lib, info, base, flag),
-        None => achou,
+        None => r,
     }
 }
 
-/// `AsyncSpawnFromExternal(biblioteca, info, caminho da externa, item, flag)`: a biblioteca externa entra antes nas dependências de quem chama
-/// ([`injetar_dependencia`], no job que a procura logo depois, na original) e o nome segue como no [`async_spawn_local`].
+/// Gancho do `AsyncSpawnFromExternal(biblioteca, info, caminho da externa, item, flag)` do motor.
 unsafe extern "C" fn async_spawn_externo(lib: *mut c_void, info: *mut c_void, caminho: u64, item: u64, flag: u64) -> u32 {
-    let original: AsyncExterno = std::mem::transmute(original_publicado(&ORIG_ASYNC_SPAWN_FROM_EXTERNAL));
     injetar_dependencia(lib, caminho);
-    let achou = original(lib, info, caminho, item, flag);
-    if achou & 1 != 0 {
-        return achou;
+    let original: AsyncExterno = std::mem::transmute(original_publicado(&ORIG_ASYNC_SPAWN_FROM_EXTERNAL));
+    let r = original(lib, info, caminho, item, flag);
+    if r & 1 != 0 {
+        return r;
     }
-    match item_da_entrega(item, &NOMES_DA_ENTREGA, ORIG_ENTREGA_DO_SPAWN_ASSINCRONO.load(Ordering::Relaxed) != 0) {
+    let no_ar = ORIG_ENTREGA_DO_SPAWN_ASSINCRONO.load(Ordering::Relaxed) != 0;
+    match item_da_entrega(item, &NOMES_DA_ENTREGA, no_ar) {
         Some(base) => original(lib, info, caminho, base, flag),
-        None => achou,
+        None => r,
     }
 }
 
-/// O `Item` de um nome `Item:Controller`, com o nome inteiro posto em `tabela` quando o controller não é vazio. `None` sem a forma, e também com
-/// controller e sem a troca garantida (o hook da entrega fora do ar, ou a tabela cheia): o item refeito nasceria com o controller do pacote, que o
-/// script do mod não espera; sem o refazer, o pedido fica vazio como no motor sem o BWMS.
+/// Recusas da tabela da entrega, pro veredito da 1ª de cada: sem o gancho da entrega no ar e tabela cheia.
+#[cfg(feature = "devtools")]
+static RECUSAS_DA_ENTREGA: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
+
+/// O item a pedir de novo no spawn assíncrono para o nome `item`, guardando o nome em `tabela`.
 fn item_da_entrega<const N: usize>(item: u64, tabela: &NomesDaEntrega<N>, entrega_no_ar: bool) -> Option<u64> {
     let nome = crate::cname::name_of(item)?;
     let (base, controller) = item_e_controller(&nome)?;
     if controller.is_empty() {
         return Some(base);
     }
+    // Refeito sem a entrega no ar, o item nasceria com o controller do pacote, não com o pedido.
     if !entrega_no_ar {
         #[cfg(feature = "devtools")]
-        if crate::primeiras(&AVISOS_DO_ASSINCRONO[0], 1) {
-            crate::veredito_dev!("[spawn] '{nome}': hook da entrega do spawn assíncrono fora do ar; o pedido fica vazio");
+        if crate::primeiras(&RECUSAS_DA_ENTREGA[0], 1) {
+            crate::veredito_dev!("[spawn] assíncrono '{nome}' sem o gancho da entrega no ar: o pedido fica com o retorno da original");
         }
         return None;
     }
+    // O nome entra antes do 2º pedido: com o pacote carregado, a entrega roda dentro dele.
     if !tabela.registrar(item, cname(controller)) {
         #[cfg(feature = "devtools")]
-        if crate::primeiras(&AVISOS_DO_ASSINCRONO[1], 1) {
-            crate::veredito_dev!("[spawn] '{nome}': tabela da entrega cheia ({N} nomes); o pedido fica vazio");
+        if crate::primeiras(&RECUSAS_DA_ENTREGA[1], 1) {
+            crate::veredito_dev!("[spawn] assíncrono '{nome}': tabela da entrega cheia ({N} nomes), o pedido fica com o retorno da original");
         }
         return None;
     }
     Some(base)
 }
 
-/// Pedidos `Item:Controller` do assíncrono deixados vazios, sem o hook da entrega e com a tabela cheia, pro veredito do 1º de cada.
-#[cfg(feature = "devtools")]
-static AVISOS_DO_ASSINCRONO: [AtomicU64; 2] = [AtomicU64::new(0), AtomicU64::new(0)];
-
 /// Callable da entrega: o `SharedPtr` do pedido em `+0x10`/`+0x18` (o destrutor `0x10436929c` solta os dois). Pedido: o nome inteiro do item em
 /// `+0x48`, que o processador grava (`0x1043643fc`) e passa ao `AsyncSpawnFrom*`.
 const ENTREGA_PEDIDO: usize = 0x10;
 const PEDIDO_NOME: usize = 0x48;
 
-/// Entrega do spawn assíncrono (o `HookBefore` do `FinishAsyncSpawn` da referência): o controller do `Item:Controller` entra na instância antes de a
-/// original copiar a raiz e o `gameController` pro pedido; o motor anexa a instância e inicializa os controllers depois, pelo caminho de sempre. Roda no
-/// job que acabou de instanciar o item, onde o `Instantiate` cria os objetos do pacote pelo mesmo `CreateInstance` que o [`trocar_controller`] chama.
-/// Sem nome na tabela, uma leitura atômica.
+/// Gancho da entrega do spawn assíncrono (`ENTREGA_DO_SPAWN_ASSINCRONO_VM`).
 unsafe extern "C" fn antes_da_entrega(entrega: *mut c_void, instancia: *mut [u64; 2]) {
     if !NOMES_DA_ENTREGA.vazia() {
-        if let Some((inst, nome, controller)) = troca_da_entrega(entrega as *const u8, instancia, &NOMES_DA_ENTREGA) {
+        if let Some((inst, _nome, controller)) = troca_da_entrega(entrega as *const u8, instancia, &NOMES_DA_ENTREGA) {
             #[cfg(feature = "devtools")]
             let inicio = Instant::now();
-            let trocou = trocar_controller(inst, controller);
+            let _trocou = trocar_controller(inst, controller);
             #[cfg(feature = "devtools")]
-            anotar_troca_da_entrega(nome, inst, trocou, inicio.elapsed());
-            #[cfg(not(feature = "devtools"))]
-            let _ = (nome, trocou);
+            anotar_troca_da_entrega(_nome, inst, _trocou, inicio.elapsed());
         }
     }
     let original: Entrega = std::mem::transmute(original_publicado(&ORIG_ENTREGA_DO_SPAWN_ASSINCRONO));
     original(entrega, instancia);
 }
 
-/// `(instância, nome inteiro, controller)` da entrega: o nome do pedido em `tabela`. `None` com callable, pedido ou instância nulos, ou com o nome fora
-/// da tabela.
+/// `(instância, nome inteiro, controller)` da entrega pelo nome do pedido em `tabela`.
 unsafe fn troca_da_entrega<const N: usize>(entrega: *const u8, instancia: *const [u64; 2], tabela: &NomesDaEntrega<N>) -> Option<(*mut u8, u64, u64)> {
     if entrega.is_null() || instancia.is_null() {
         return None;
     }
-    let pedido = (entrega.add(ENTREGA_PEDIDO) as *const u64).read_unaligned() as *const u8;
-    if pedido.is_null() {
+    // Callable e instância são os argumentos da original, que os lê do mesmo jeito; só o pedido, achado pelo layout, passa pelo kernel.
+    let pedido = (entrega.add(ENTREGA_PEDIDO) as *const u64).read_unaligned();
+    if pedido == 0 {
         return None;
     }
-    let nome = (pedido.add(PEDIDO_NOME) as *const u64).read_unaligned();
+    let nome = ler_u64((pedido as *const u8).wrapping_add(PEDIDO_NOME))?;
     let controller = tabela.controller(nome)?;
-    let inst = (*instancia)[0] as *mut u8;
-    (!inst.is_null()).then_some((inst, nome, controller))
+    let inst = (*instancia)[0];
+    (inst != 0).then_some((inst as *mut u8, nome, controller))
+}
+
+/// `u64` em `p`, `None` ilegível.
+unsafe fn ler_u64(p: *const u8) -> Option<u64> {
+    crate::memoria::is_readable(p as *const c_void, 8).then(|| (p as *const u64).read_unaligned())
 }
 
 /// Trocas na entrega, pro veredito da 1ª do processo.
@@ -338,8 +335,8 @@ unsafe fn anotar_troca_da_entrega(nome: u64, instancia: *mut u8, trocou: Option<
     super::teste_telas_de_mod::anotar_troca(&texto, trocou.unwrap_or(std::ptr::null_mut()), raiz, true);
 }
 
-/// O despacho de `InkWidget/Spawn` está ligado: há ouvinte registrado (`WIDGET_SPAWN_ARMADO`, o `OnActivateEvent` do `InkSpawningController` da
-/// referência) e a chave do `BwmsToggleWidgetSpawnEvent` (`WIDGET_SPAWN_EVENT_ENABLED`) está ligada.
+/// O despacho de `InkWidget/Spawn` está ligado: há ouvinte registrado (`WIDGET_SPAWN_ARMADO`) e a chave do `BwmsToggleWidgetSpawnEvent`
+/// (`WIDGET_SPAWN_EVENT_ENABLED`) está ligada.
 fn evento_ligado() -> bool {
     super::WIDGET_SPAWN_ARMADO.load(Ordering::Relaxed) && super::WIDGET_SPAWN_EVENT_ENABLED.load(Ordering::Relaxed)
 }
@@ -350,26 +347,33 @@ unsafe extern "C" fn spawn_local_tramp() {
     core::arch::naked_asm!("mov x2, x8", "b {hook}", hook = sym depois_do_spawn_local)
 }
 
+/// Gancho do `SpawnFromLocal(biblioteca, item)` do motor, saída de 16 B no 3º argumento.
 unsafe extern "C" fn depois_do_spawn_local(lib: *mut c_void, item: u64, saida: *mut [u64; 2]) {
     let original = original_publicado(&ORIG_SPAWN_FROM_LOCAL) as *mut c_void;
+    let spawnar = |nome: u64| sret_chamar(original, [lib as u64, nome, 0, 0], saida as *mut c_void);
+    spawnar(item);
     if !na_game_thread() {
-        sret_chamar(original, [lib as u64, item, 0, 0], saida as *mut c_void);
         #[cfg(feature = "devtools")]
         anotar_repasse(0, item, saida);
         return;
     }
-    sret_chamar(original, [lib as u64, item, 0, 0], saida as *mut c_void);
-    let item = refazer_com_controller(item, saida, |base| sret_chamar(original, [lib as u64, base, 0, 0], saida as *mut c_void));
-    let instancia = (*saida)[0] as usize;
-    #[cfg(feature = "devtools")]
-    {
-        let n = CONTAGEM[0].fetch_add(1, Ordering::Relaxed);
-        if n < 8 || n.is_power_of_two() {
-            crate::log_dev!("[spawn] SpawnFromLocal #{n} lib={lib:p} item={item:#018x} instância={instancia:#x}");
-        }
+    let item_do_evento = refazer_com_controller(item, saida, spawnar);
+    let instancia = (*saida)[0];
+    let dentro_do_externo = DENTRO_DO_EXTERNO.try_with(|d| d.get()).unwrap_or(false);
+    if instancia != 0 && evento_ligado() && !dentro_do_externo {
+        disparar_spawn(caminho_da_biblioteca(lib), item_do_evento, instancia as usize);
     }
-    if instancia != 0 && evento_ligado() && !DENTRO_DO_EXTERNO.with(|d| d.get()) {
-        disparar_spawn(caminho_da_biblioteca(lib), item, instancia);
+    #[cfg(feature = "devtools")]
+    anotar_spawn(0, item, instancia);
+}
+
+/// Contagem do dev e log nas 8 primeiras chamadas e nas potências de 2.
+#[cfg(feature = "devtools")]
+fn anotar_spawn(hook: usize, item: u64, instancia: u64) {
+    let n = CONTAGEM[hook].fetch_add(1, Ordering::Relaxed) + 1;
+    if n <= 8 || n.is_power_of_two() {
+        // Hash cru: o spawn achado não resolve o nome em lugar nenhum e o log não paga a ida ao pool do motor.
+        crate::log_dev!("[spawn] {} #{n}: item {item:#018x} → instância {instancia:#x}", ["SpawnFromLocal", "SpawnFromExternal"][hook]);
     }
 }
 
@@ -378,75 +382,75 @@ unsafe extern "C" fn spawn_externo_tramp() {
     core::arch::naked_asm!("mov x3, x8", "b {hook}", hook = sym depois_do_spawn_externo)
 }
 
+/// Gancho do `SpawnFromExternal(biblioteca, caminho da externa, item)` do motor, saída de 16 B no 4º argumento.
 unsafe extern "C" fn depois_do_spawn_externo(lib: *mut c_void, caminho: u64, item: u64, saida: *mut [u64; 2]) {
     let original = original_publicado(&ORIG_SPAWN_FROM_EXTERNAL) as *mut c_void;
+    let spawnar = |nome: u64| sret_chamar(original, [lib as u64, caminho, nome, 0], saida as *mut c_void);
     if !na_game_thread() {
-        sret_chamar(original, [lib as u64, caminho, item, 0], saida as *mut c_void);
+        spawnar(item);
         #[cfg(feature = "devtools")]
         anotar_repasse(1, item, saida);
         return;
     }
     injetar_dependencia(lib, caminho);
-    let antes = DENTRO_DO_EXTERNO.with(|d| d.replace(true));
-    sret_chamar(original, [lib as u64, caminho, item, 0], saida as *mut c_void);
-    let item = refazer_com_controller(item, saida, |base| sret_chamar(original, [lib as u64, caminho, base, 0], saida as *mut c_void));
-    DENTRO_DO_EXTERNO.with(|d| d.set(antes));
-    let instancia = (*saida)[0] as usize;
+    let marca_anterior = DENTRO_DO_EXTERNO.try_with(|d| d.replace(true)).unwrap_or(false);
+    spawnar(item);
+    let devolvido = refazer_com_controller(item, saida, spawnar);
+    let _ = DENTRO_DO_EXTERNO.try_with(|d| d.set(marca_anterior));
+    let instancia = (*saida)[0];
+    if instancia != 0 && evento_ligado() && !marca_anterior {
+        disparar_spawn(caminho, item_do_evento(devolvido), instancia as usize);
+    }
     #[cfg(feature = "devtools")]
     {
-        let n = CONTAGEM[1].fetch_add(1, Ordering::Relaxed);
-        if n < 8 || n.is_power_of_two() {
-            crate::log_dev!("[spawn] SpawnFromExternal #{n} lib={lib:p} externa={caminho:#018x} item={item:#018x} instância={instancia:#x}");
-        }
-        crate::selftest::c135_ver_spawn_externo(lib, caminho, item, instancia);
-    }
-    if instancia != 0 && evento_ligado() && !antes {
-        disparar_spawn(caminho, item_do_evento(item), instancia);
+        anotar_spawn(1, item, instancia);
+        crate::selftest::c135_ver_spawn_externo(lib, caminho, devolvido, instancia as usize);
     }
 }
 
-/// O item que o evento leva, como no `OnSpawnLocal` da referência: o `Item` de um nome `Item:Controller`, senão o próprio. No externo o nome inteiro
-/// fica quando foi um `SpawnFromLocal` aninhado que refez o spawn.
+/// O item que o evento `InkWidget/Spawn` leva para o nome `item`.
 fn item_do_evento(item: u64) -> u64 {
     crate::cname::name_of(item).and_then(|nome| item_e_controller(&nome).map(|(base, _)| base)).unwrap_or(item)
 }
 
-/// `Item:Controller` (`OnSpawnLocal` da referência): com o spawn pelo nome inteiro vazio, `spawnar` refaz com o `Item` e o controller do item vira o
-/// pedido. Devolve o item que o evento leva: o `Item` quando o nome tem a forma, senão o de entrada.
+/// Com a saída vazia, pede o spawn de novo pelo `Item` de um nome `Item:Controller` e troca o controller; devolve o item que o evento leva.
 unsafe fn refazer_com_controller(item: u64, saida: *mut [u64; 2], spawnar: impl Fn(u64)) -> u64 {
     if (*saida)[0] != 0 {
         return item;
     }
-    let Some(nome) = crate::cname::name_of(item) else { return item };
-    let Some((base, controller)) = item_e_controller(&nome) else { return item };
+    let Some(nome) = crate::cname::name_of(item) else {
+        return item;
+    };
+    let Some((base, controller)) = item_e_controller(&nome) else {
+        return item;
+    };
     spawnar(base);
     let instancia = (*saida)[0] as *mut u8;
     if !instancia.is_null() && !controller.is_empty() {
-        let trocou = trocar_controller(instancia, cname(controller));
+        let _trocou = trocar_controller(instancia, cname(controller));
         #[cfg(feature = "devtools")]
-        {
-            CONTAGEM[2].fetch_add(1, Ordering::Relaxed);
-            crate::veredito_dev!("[spawn] '{nome}': controller {controller} trocado={}", trocou.is_some());
-            // O teste das telas de mod (`telasmod`) confere depois que o controller trocado aqui é o que o motor inicializou.
-            let raiz = [(instancia.add(ITEM_RAIZ) as *const u64).read_unaligned(), (instancia.add(ITEM_RAIZ + 8) as *const u64).read_unaligned()];
-            super::teste_telas_de_mod::anotar_troca(&nome, trocou.unwrap_or(std::ptr::null_mut()), raiz, false);
-        }
-        #[cfg(not(feature = "devtools"))]
-        let _ = trocou;
+        anotar_troca_sincrona(&nome, instancia, _trocou);
     }
     base
 }
 
-/// `Item:Controller` partido no 1º `:` (o `strchr` da referência): o hash do `Item` e o nome do controller, que pode vir vazio. `None` sem `:` ou com o
-/// `Item` vazio, que não nomeia item da biblioteca.
+/// Contagem, veredito da 1ª troca síncrona e a troca pro teste das telas de mod (`telasmod`).
+#[cfg(feature = "devtools")]
+unsafe fn anotar_troca_sincrona(nome: &str, instancia: *mut u8, trocou: Option<*mut c_void>) {
+    if CONTAGEM[2].fetch_add(1, Ordering::Relaxed) == 0 {
+        crate::veredito_dev!("[spawn] '{nome}' refeito pelo item: controller trocado={}", trocou.is_some());
+    }
+    let raiz = [(instancia.add(ITEM_RAIZ) as *const u64).read_unaligned(), (instancia.add(ITEM_RAIZ + 8) as *const u64).read_unaligned()];
+    super::teste_telas_de_mod::anotar_troca(nome, trocou.unwrap_or(std::ptr::null_mut()), raiz, false);
+}
+
+/// `Item:Controller` → (hash do `Item`, nome do controller).
 pub(crate) fn item_e_controller(nome: &str) -> Option<(u64, &str)> {
     let (item, controller) = nome.split_once(':')?;
     (!item.is_empty()).then(|| (cname(item), controller))
 }
 
-/// `InjectController` da referência: um controller novo da classe de nome `controller` (hash do `CName`; nativa ou de script) entra no lugar do
-/// `gameController` do item (classe de `inkIWidgetController`) ou do `logicController` da raiz (classe de `inkWidgetLogicController`) e herda do antigo
-/// os campos de mesmo nome e tipo. O antigo é solto. Devolve o controller novo; `None` com classe desconhecida, de outra família, ou sem raiz.
+/// Põe na instância spawnada um controller novo da classe `controller` (hash do nome).
 unsafe fn trocar_controller(instancia: *mut u8, controller: u64) -> Option<*mut c_void> {
     let reg = rtti::Registry::obtain()?;
     let cls = reg.script_class(controller);
@@ -458,11 +462,11 @@ unsafe fn trocar_controller(instancia: *mut u8, controller: u64) -> Option<*mut 
     if novo.is_null() {
         return None;
     }
-    let mut dono = [0u64; 2];
-    rtti::make_handle(dono.as_mut_ptr() as *mut c_void, novo);
+    let mut handle = [0u64; 2];
+    rtti::make_handle(handle.as_mut_ptr() as *mut c_void, novo);
     let mut antigo = [campo.read_unaligned(), campo.add(1).read_unaligned()];
-    campo.write_unaligned(dono[0]);
-    campo.add(1).write_unaligned(dono[1]);
+    campo.write_unaligned(handle[0]);
+    campo.add(1).write_unaligned(handle[1]);
     if antigo[0] != 0 {
         let velho = antigo[0] as *mut c_void;
         herdar_campos(novo, cls, velho, rtti::class_of(velho));
@@ -471,9 +475,7 @@ unsafe fn trocar_controller(instancia: *mut u8, controller: u64) -> Option<*mut 
     Some(novo)
 }
 
-/// O campo que o controller `cls` ocupa na instância spawnada: o `gameController` do item (`+0x48`) pra filha de `cls_game` (`inkIWidgetController`), o
-/// `logicController` da raiz (`rootWidget +0x38` → `+0x128`) pra filha de `cls_logica` (`inkWidgetLogicController`). `None` com classe de outra família ou
-/// raiz nula/ilegível.
+/// O campo de 16 B que o controller da classe `cls` ocupa na instância.
 unsafe fn campo_do_controller(cls: *mut c_void, cls_game: *mut c_void, cls_logica: *mut c_void, instancia: *mut u8) -> Option<*mut u64> {
     if class_is_kind_of(cls, cls_game) {
         return Some(instancia.add(ITEM_CONTROLLER) as *mut u64);
@@ -481,147 +483,167 @@ unsafe fn campo_do_controller(cls: *mut c_void, cls_game: *mut c_void, cls_logic
     if !class_is_kind_of(cls, cls_logica) {
         return None;
     }
-    let raiz = (instancia.add(ITEM_RAIZ) as *const u64).read_unaligned() as *mut u8;
-    let campo = raiz.wrapping_add(super::C175_WIDGET_CONTROLLER);
-    (!raiz.is_null() && crate::memoria::is_readable(campo as *const c_void, 16)).then_some(campo as *mut u64)
+    let raiz = ler_u64(instancia.add(ITEM_RAIZ))?;
+    if raiz == 0 {
+        return None;
+    }
+    let campo = (raiz as *mut u8).add(super::C175_WIDGET_CONTROLLER);
+    crate::memoria::is_readable(campo as *const c_void, 16).then_some(campo as *mut u64)
 }
 
-/// `InjectDependency` da referência: o `SpawnFromExternal` do motor só acha a biblioteca externa que está no `externalLibraries` da biblioteca de quem
-/// chama, e a de um mod (Virtual Atelier, Equipment-EX) não está no `.inkwidget` vanilla do controller. Sem o caminho na lista, a referência entra no fim
-/// com o token da carga do motor, e a espera vai até 1 s, tudo sob a trava de escrita. Devolve se entrou.
+/// Põe a biblioteca externa `caminho` nas dependências de `lib`; devolve se entrou.
 unsafe fn injetar_dependencia(lib: *mut c_void, caminho: u64) -> bool {
     if caminho == 0 || !rtti::sane(lib) {
         return false;
     }
-    let Some(off) = offset_das_externas() else { return false };
-    let arr = (lib as *mut u8).add(off);
-    // Sem `is_readable`: a original lê a mesma lista logo depois, e o ponteiro é do motor.
-    let presente = || {
-        let (entradas, n, _) = dynarray_no_campo(arr, 0);
-        dependencia_presente(entradas, n, caminho)
+    let Some(off) = offset_das_externas() else {
+        return false;
     };
+    // `lib` é o `this` que a original recebe e o offset veio do RTTI da classe: leitura direta, sem a ida ao kernel por spawn.
+    let arr = (lib as *mut u8).add(off);
+    // Todo spawn externo vanilla já tem a dependência: a leitura resolve sem a trava de escrita.
     {
         let _leitura = TRAVA_DAS_EXTERNAS.read().unwrap_or_else(PoisonError::into_inner);
-        if presente() {
+        let (entradas, n, _) = dynarray_no_campo(arr, 0);
+        if dependencia_presente(entradas, n, caminho) {
             return false;
         }
     }
     let _escrita = TRAVA_DAS_EXTERNAS.write().unwrap_or_else(PoisonError::into_inner);
-    if presente() {
+    let (entradas, n, _) = dynarray_no_campo(arr, 0);
+    if dependencia_presente(entradas, n, caminho) {
         return false;
     }
-    let Some(vaga) = vaga_nas_externas(arr) else { return false };
-    let Some(token) = crate::jogo::recursos::token_do_path(caminho).filter(|t| t[0] != 0) else { return false };
-    let inicio = Instant::now();
+    let Some(vaga) = vaga_nas_externas(arr) else {
+        return false;
+    };
+    let Some(token) = crate::jogo::recursos::token_do_path(caminho) else {
+        return false;
+    };
+    if token[0] == 0 {
+        return false;
+    }
     anexar_externa(arr, vaga, caminho, token);
     esperar_dependencia(token[0]);
     crate::veredito_dev!(
-        "[spawn] dependência {caminho:#018x} injetada no externalLibraries (+{off:#x}) da biblioteca {:#018x}: {} referência(s), token {} em {} ms",
-        caminho_da_biblioteca(lib),
-        dynarray_no_campo(arr, 0).1,
-        ["carregando", "carregado", "falhou"].get(crate::register::status_do_token(token[0]) as usize).copied().unwrap_or("?"),
-        inicio.elapsed().as_millis()
+        "[spawn] biblioteca externa {caminho:#018x} injetada nas dependências de {lib:p}: token {:#x}, estado {}",
+        token[0],
+        crate::register::status_do_token(token[0])
     );
     true
 }
 
-/// O offset guardado do `externalLibraries`, resolvido pelo RTTI na 1ª chamada. Sem registro de RTTI a próxima tenta de novo; layout recusado fica
-/// recusado.
+/// Leitores (busca da dependência) e escritor (anexo) do `externalLibraries` de todas as bibliotecas: o anexo pode realocar a lista.
+static TRAVA_DAS_EXTERNAS: RwLock<()> = RwLock::new(());
+
+/// Teto da espera pela carga da biblioteca injetada.
+const ESPERA_DA_DEPENDENCIA: Duration = Duration::from_millis(1000);
+
+/// Offset do `externalLibraries` pelo RTTI, guardado em [`EXTERNAS_OFF`].
 unsafe fn offset_das_externas() -> Option<usize> {
     match EXTERNAS_OFF.load(Ordering::Relaxed) {
-        EXTERNAS_RECUSADO => None,
-        0 => {
-            let reg = rtti::Registry::obtain()?;
-            let cls = reg.class_by_name("inkWidgetLibraryResource");
-            let prop = if cls.is_null() { None } else { rtti::resolve_prop_in_class(cls, "externalLibraries") };
-            let off = prop.and_then(|(off, tipo, no_holder)| {
-                let elemento = rtti::get_inner_type(tipo).unwrap_or(std::ptr::null_mut());
-                layout_das_externas(off, no_holder, rtti::type_kind(tipo), rtti::type_kind(elemento), rtti::type_size(elemento))
-            });
-            EXTERNAS_OFF.store(off.map_or(EXTERNAS_RECUSADO, |o| o as u64), Ordering::Relaxed);
-            crate::veredito_dev!(
-                "[spawn] externalLibraries do inkWidgetLibraryResource pelo RTTI: {prop:?} (SDK do Windows +0x58) -> injeção de dependência {}",
-                off.map_or("desligada".to_string(), |o| format!("em +{o:#x}"))
-            );
-            off
-        }
-        off => Some(off as usize),
+        EXTERNAS_RECUSADO => return None,
+        0 => {}
+        off => return Some(off as usize),
     }
+    let reg = rtti::Registry::obtain()?;
+    let cls = reg.class_by_name("inkWidgetLibraryResource");
+    let prop = if cls.is_null() { std::ptr::null_mut() } else { rtti::find_property_in_class(cls, "externalLibraries") };
+    let aceito = if prop.is_null() {
+        None
+    } else {
+        let p = prop as *const u8;
+        let tipo = (p as *const *mut c_void).read_unaligned();
+        let off = p.add(0x20).cast::<u32>().read_unaligned();
+        let interno = rtti::get_inner_type(tipo);
+        layout_das_externas(
+            off,
+            rtti::prop_in_holder(prop),
+            rtti::type_kind(tipo),
+            interno.and_then(|i| rtti::type_kind(i)),
+            interno.map_or(0, |i| rtti::type_size(i)),
+        )
+    };
+    EXTERNAS_OFF.store(aceito.map_or(EXTERNAS_RECUSADO, |o| o as u64), Ordering::Relaxed);
+    crate::veredito_dev!("[spawn] externalLibraries pelo RTTI: classe {cls:p}, prop {prop:p}, offset aceito {aceito:x?}");
+    aceito
 }
 
-/// O offset do `externalLibraries` quando o RTTI descreve o layout que a injeção grava: `array` fora do value holder, de `ResourceReference` de 0x18 B,
-/// depois do `CResource::path`. Outro layout desliga a injeção em vez de gravar no lugar errado.
+/// O offset aceito para o `externalLibraries` pelo que o RTTI descreve.
 fn layout_das_externas(off: u32, no_holder: bool, tipo: Option<u8>, elemento: Option<u8>, tamanho_do_elemento: u32) -> Option<usize> {
-    let ok = !no_holder
+    // `[0x38, 0x100)`: depois do `CResource::path` (`+0x30`) e dentro do objeto que a injeção lê.
+    let aceito = !no_holder
         && tipo == Some(rtti::ertti::ARRAY)
         && elemento == Some(rtti::ertti::RESOURCE_REFERENCE)
         && tamanho_do_elemento as usize == EXTERNA_PASSO
-        && (BIBLIOTECA_CAMINHO as u32 + 8..0x100).contains(&off);
-    ok.then_some(off as usize)
+        && (0x38..0x100).contains(&off);
+    aceito.then_some(off as usize)
 }
 
-/// O caminho já está entre as `n` referências de `entradas`, como o laço da referência.
+/// `caminho` entre as `n` referências de `entradas`.
 unsafe fn dependencia_presente(entradas: *const u8, n: usize, caminho: u64) -> bool {
     !entradas.is_null() && (0..n).any(|i| (entradas.add(i * EXTERNA_PASSO) as *const u64).read_unaligned() == caminho)
 }
 
-/// Vaga no fim do `externalLibraries` (cabeçalho em `arr`), crescendo pelo reserve do motor com mover nulo: o elemento é caminho + `SharedPtr`, que a
-/// realocação move pelos bytes. `None` se o motor não deu capacidade.
+/// Vaga no fim do `externalLibraries` (cabeçalho em `arr`).
 unsafe fn vaga_nas_externas(arr: *mut u8) -> Option<*mut u8> {
     let (_, n, cap) = dynarray_no_campo(arr, 0);
     if n >= cap {
-        crate::jogo::listas::reservar(arr as *mut c_void, (n + 1) as u32, EXTERNA_PASSO as u32, 8, std::ptr::null());
+        // O elemento não tem dono fora dos bytes (caminho e `SharedPtr`): mover nulo, a cópia byte a byte do motor.
+        crate::jogo::listas::reservar(arr as *mut c_void, n as u32 + 1, EXTERNA_PASSO as u32, 8, std::ptr::null());
     }
     let (entradas, n, cap) = dynarray_no_campo(arr, 0);
     (!entradas.is_null() && n < cap).then(|| entradas.add(n * EXTERNA_PASSO))
 }
 
-/// Grava a referência (caminho e o `SharedPtr` do token, que passa a ser do array) na vaga e publica o tamanho novo.
+/// Grava a referência na vaga e publica o tamanho novo.
 unsafe fn anexar_externa(arr: *mut u8, vaga: *mut u8, caminho: u64, token: [u64; 2]) {
-    (vaga as *mut u64).write_unaligned(caminho);
-    (vaga.add(0x08) as *mut u64).write_unaligned(token[0]);
-    (vaga.add(0x10) as *mut u64).write_unaligned(token[1]);
-    let n = (arr.add(0x0c) as *const u32).read_unaligned();
-    (arr.add(0x0c) as *mut u32).write_unaligned(n + 1);
+    let v = vaga as *mut u64;
+    v.write_unaligned(caminho);
+    v.add(1).write_unaligned(token[0]);
+    v.add(2).write_unaligned(token[1]);
+    let tamanho = arr.add(0x0c) as *mut u32;
+    tamanho.write_unaligned(tamanho.read_unaligned() + 1);
 }
 
-/// Espera a carga da biblioteca injetada terminar (carregada ou falha) até [`ESPERA_DA_DEPENDENCIA`]. A fila com `Wait` no job não bloqueia neste binário,
-/// então a espera confere o `finished` do token a cada 1 ms, como `arquivos_do_jogo::esperar_terminar`.
+/// Espera a carga da biblioteca injetada.
 unsafe fn esperar_dependencia(token: u64) {
+    // Estado do token: 0 carregando, 1 carregado, 2 falhou.
     crate::arquivos_do_jogo::esperar_token(token);
-    let inicio = Instant::now();
-    while crate::register::status_do_token(token) == 0 && inicio.elapsed() < ESPERA_DA_DEPENDENCIA {
+    let fim = Instant::now() + ESPERA_DA_DEPENDENCIA;
+    while crate::register::status_do_token(token) == 0 && Instant::now() < fim {
         std::thread::sleep(Duration::from_millis(1));
     }
 }
 
-/// `InheritProperties` da referência: cada campo de `origem` (classe `cls_origem` e pais) vai pelo `Assign` do tipo pro campo de mesmo nome e tipo de
-/// `destino`. Devolve quantos copiou.
+/// Copia de `origem` para `destino` os campos de mesmo nome e tipo; devolve quantos.
 pub(crate) unsafe fn herdar_campos(destino: *mut c_void, cls_destino: *mut c_void, origem: *mut c_void, cls_origem: *mut c_void) -> usize {
-    let de = rtti::props_crus(cls_origem);
-    let para = rtti::props_crus(cls_destino);
+    let props_origem = rtti::props_crus(cls_origem);
+    let props_destino = rtti::props_crus(cls_destino);
     let chaves = |props: &[*const u8]| -> Vec<(u64, usize)> {
-        props.iter().map(|p| ((p.add(0x08) as *const u64).read_unaligned(), (*p as *const u64).read_unaligned() as usize)).collect()
+        props.iter().map(|p| ((p.add(0x08) as *const u64).read_unaligned(), (*p as *const usize).read_unaligned())).collect()
     };
-    let mut copiados = 0;
-    for (i, j) in campos_herdados(&chaves(&de), &chaves(&para)) {
-        if let (Some((valor, tipo)), Some((campo, _))) = (rtti::campo_e_tipo(origem, de[i] as *const c_void), rtti::campo_e_tipo(destino, para[j] as *const c_void)) {
-            copiados += rtti::type_assign(tipo, campo, valor) as usize;
-        }
-    }
-    copiados
+    let pares = campos_herdados(&chaves(&props_origem), &chaves(&props_destino));
+    pares
+        .into_iter()
+        .filter(|&(i, j)| {
+            let (Some((valor, tipo)), Some((campo, _))) =
+                (rtti::campo_e_tipo(origem, props_origem[i] as *const c_void), rtti::campo_e_tipo(destino, props_destino[j] as *const c_void))
+            else {
+                return false;
+            };
+            rtti::type_assign(tipo, campo, valor)
+        })
+        .count()
 }
 
-/// Pares `(índice na origem, índice no destino)` da herança de campos, por `(nome, tipo)`: o 1º campo do destino com o nome (a classe antes dos pais,
-/// como o `GetProperty`), e só quando o tipo é o mesmo.
+/// Pares `(índice na origem, índice no destino)` de `(nome, tipo)`.
 pub(crate) fn campos_herdados(origem: &[(u64, usize)], destino: &[(u64, usize)]) -> Vec<(usize, usize)> {
+    // Só a 1ª prop do nome no destino conta (a classe antes dos pais), como o `GetProperty` do jogo.
     origem
         .iter()
         .enumerate()
-        .filter_map(|(i, (nome, tipo))| {
-            let j = destino.iter().position(|(n, _)| n == nome)?;
-            (destino[j].1 == *tipo).then_some((i, j))
-        })
+        .filter_map(|(i, (nome, tipo))| destino.iter().position(|(n, _)| n == nome).filter(|&j| destino[j].1 == *tipo).map(|j| (i, j)))
         .collect()
 }
 
@@ -634,23 +656,24 @@ unsafe fn caminho_da_biblioteca(lib: *mut c_void) -> u64 {
     (campo as *const u64).read_unaligned()
 }
 
-/// `InkWidget/Spawn` com a biblioteca, o item e a instância (`inkWidgetSpawnEvent`), como o `DispatchNativeEvent` da referência. Depois dos ouvintes o
-/// evento sai da tabela e é solto.
+/// `InkWidget/Spawn` com a biblioteca, o item e a instância; devolve quantos ouvintes receberam.
 unsafe fn disparar_spawn(biblioteca: u64, item: u64, instancia: usize) -> usize {
     #[cfg(feature = "devtools")]
     crate::selftest::c135_anotar(biblioteca, item, instancia);
-    let Some(arg) = super::make_inkwidgetspawnevent_arg(biblioteca, item, instancia) else { return 0 };
-    let (evento, bloco) = match &arg {
-        rtti::Arg::Handle(i, r) => (*i as u64, *r as u64),
-        _ => (0, 0),
+    let Some(arg) = super::make_inkwidgetspawnevent_arg(biblioteca, item, instancia) else {
+        return 0;
     };
-    let enviados = crate::tipos_do_motor::fire_event_args("InkWidget/Spawn", &[arg]);
+    let rtti::Arg::Handle(obj, bloco) = arg else {
+        return 0;
+    };
+    let recebidos = crate::tipos_do_motor::fire_event_args("InkWidget/Spawn", &[arg]);
+    // Getters chamados depois do despacho, num evento que o script guardou, respondem vazio.
     if let Ok(mut estados) = super::INKWIDGETSPAWN_STATES.lock() {
-        estados.retain(|e| e.0 as u64 != evento);
+        estados.retain(|e| e.0 != obj as usize);
     }
-    let mut h = [evento, bloco];
-    soltar_handle(&mut h);
-    enviados
+    let mut handle = [obj as u64, bloco as u64];
+    soltar_handle(&mut handle);
+    recebidos
 }
 
 #[cfg(test)]
@@ -706,8 +729,8 @@ mod testes {
 
     #[test]
     fn item_e_controller_parte_no_primeiro_dois_pontos() {
-        assert_eq!(item_e_controller("Root:EquipmentEx.WardrobeScreenController"), Some((cname("Root"), "EquipmentEx.WardrobeScreenController")));
-        assert_eq!(item_e_controller("AtelierStores:VirtualAtelier.UI.AtelierStoresListController"), Some((cname("AtelierStores"), "VirtualAtelier.UI.AtelierStoresListController")));
+        assert_eq!(item_e_controller("Root:ModDeTeste.TelaController"), Some((cname("Root"), "ModDeTeste.TelaController")));
+        assert_eq!(item_e_controller("Lojas:ModDeTeste.UI.ListaDeLojasController"), Some((cname("Lojas"), "ModDeTeste.UI.ListaDeLojasController")));
         assert_eq!(item_e_controller("a:b:c"), Some((cname("a"), "b:c")), "o controller fica com o resto, como o strchr");
         assert_eq!(item_e_controller("Root:"), Some((cname("Root"), "")), "controller vazio: spawna o item sem trocar");
         assert_eq!(item_e_controller("Root"), None);

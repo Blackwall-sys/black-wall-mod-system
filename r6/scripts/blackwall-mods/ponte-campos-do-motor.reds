@@ -1,5 +1,5 @@
 // ponte-campos-do-motor.reds — campos e tipos que o motor tem no RTTI e o script do jogo não declara, com os nomes que mods do Windows
-// usam direto (Equipment-EX, Virtual Atelier). Nome, tipo e existência medidos pelo `propdump` no boot de 2026-09-28: `native let` de campo
+// usam direto. Nome, tipo e existência medidos pelo `propdump` no boot de 2026-09-28: `native let` de campo
 // que o motor não tem derruba o bind (`tipos_do_motor::CAMPOS_NATIVOS`).
 
 // `inkScrollController`: `direction` +0xf4, `position` +0xfc, `scrollDelta` +0x108, `viewportSize` +0x10c, `contentSize` +0x114.
@@ -35,7 +35,7 @@ public native struct gameuiPuppetPreviewCameraController {
 public native let cameraController: gameuiPuppetPreviewCameraController;
 
 // `inkImage` (no motor `inkImageWidget`): os campos `useNineSliceScale`, `nineSliceScale`, `tileHAlign` e `tileVAlign` são declarados pelo
-// jogo; aqui entram os acessores do Codeware.
+// jogo; aqui entram os acessores.
 @addMethod(inkImage)
 public func SetNineSliceScale(enable: Bool) -> Void {
     this.useNineSliceScale = enable;

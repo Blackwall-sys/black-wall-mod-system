@@ -1,5 +1,4 @@
-// bwms-ui-screenhelper.reds — reimplementação PRÓPRIA do helper de tela (catálogo Codeware #112), escrita a partir do COMPORTAMENTO,
-// nunca da fonte alheia. Só a API pública é reconhecível, porque o nome que um mod chama é a forma do plugue e não é de ninguém.
+// bwms-ui-screenhelper.reds — o helper de tela. Só a API pública é reconhecível, porque o nome que um mod chama é a forma do plugue e não é de ninguém.
 //
 // DEPENDÊNCIAS, todas confirmadas por grep em `cp77-symbols/redscript-all.reds` ANTES de escrever:
 //   - `GameInstance.GetSettingsSystem(self) -> ref<UserSettings>`      (`:14212`, native vanilla)
@@ -8,7 +7,7 @@
 //   - `StrSplit`/`StringToInt`                                          (`:535769`/`:241042`)
 // Zero native próprio, zero endereço, zero forge de classe.
 //
-// DECISÕES DE DESIGN QUE SÃO NOSSAS (e divergem de propósito de qualquer porte):
+// DECISÕES DE DESIGN:
 //   1. A resolução vira um DADO TIPADO (`BwmsScreenSize`), não uma string que cada mod parseia de
 //      novo do seu jeito. Parsear string de configuração em N lugares é onde bug de UI nasce.
 //   2. O parse é DEFENSIVO: qualquer formato inesperado devolve o fallback 1920x1080 em vez de

@@ -5,8 +5,8 @@
 pub(crate) mod ink_mundo;
 pub(crate) mod spawn_de_widget;
 pub(crate) mod tecla_no_widget;
-/// Teste ao vivo das telas do Equipment-EX e do Virtual Atelier (comando `telasmod`): só no dev; a lógica pura roda nos testes de unidade.
-#[cfg(any(test, feature = "devtools"))]
+/// Teste ao vivo das telas de guarda-roupa e de loja de mods (comando `telasmod`): só no dev (fora do build público e do export do GitHub).
+#[cfg(feature = "devtools")]
 pub(crate) mod teste_telas_de_mod;
 
 use crate::jogo::listas::MOVER_HANDLES_VM;
@@ -46,7 +46,7 @@ use crate::aparencia::*;
 
 
 
-/// Codeware `#135` (`inkWidgetTarget::Matches`): um alvo `(libraryPath, itemName, controllerType)` casa quando cada campo setado bate — biblioteca e item
+/// `inkWidgetTarget::Matches`: um alvo `(libraryPath, itemName, controllerType)` casa quando cada campo setado bate — biblioteca e item
 /// iguais (`None` = curinga, pela regra única do `bwms-primitives::targets`) e, com `controllerType`, `controller_casa(tipo)`. O handler despacha quando algum
 /// dos alvos casa. O alvo chega de `inkwidgettarget_alvos`, que converte o 0 da referência em `None`.
 pub(crate) fn ink_widget_alvo_casa(alvo: (Option<u64>, Option<u64>, Option<u64>), ev_lib: u64, ev_item: u64, controller_casa: impl Fn(u64) -> bool) -> bool {
@@ -55,7 +55,7 @@ pub(crate) fn ink_widget_alvo_casa(alvo: (Option<u64>, Option<u64>, Option<u64>)
 }
 
 /// `IsInstanceOf(instância.gameController, tipo)`: o Handle `gameController` do `inkWidgetLibraryItemInstance` (`+0x48`) não é nulo e a classe dele herda
-/// de `tipo`, pelo nome nativo ou de script. Resolve o nome a cada evento, como o `IsInstanceOf` da referência (`InkWidgetTarget.hpp:22-23`).
+/// de `tipo`, pelo nome nativo ou de script. Resolve o nome a cada evento.
 pub(crate) unsafe fn widget_controller_herda(instancia: usize, tipo: u64) -> bool {
     if instancia == 0 || !crate::memoria::is_readable((instancia + 0x48) as *const c_void, 8) {
         return false;
@@ -65,8 +65,8 @@ pub(crate) unsafe fn widget_controller_herda(instancia: usize, tipo: u64) -> boo
 }
 
 /// Forja `inkWidgetTarget extends CallbackSystemTarget` + registra `Controller`/`Library`. Nome da
-/// classe MINÚSCULO (`inkWidgetTarget`, não `InkWidgetTarget`) — confirmado lendo o `.reds`
-/// vendorizado (`InkWidgetTarget.reds` declara `public native class inkWidgetTarget`).
+/// classe MINÚSCULO (`inkWidgetTarget`, não `InkWidgetTarget`) — é a classe que os
+/// mods declaram (`public native class inkWidgetTarget`).
 pub unsafe fn register_inkwidgettarget(reg: &Registry) -> String {
     let cst = reg.class_by_name("CallbackSystemTarget");
     if !rtti::sane(cst) {
@@ -108,7 +108,7 @@ pub unsafe fn register_inkwidgetspawnevent(reg: &Registry) -> String {
 }
 
 
-/// Codeware `#123`: o `inkWidgetSpawnEvent` de um spawn, pro `fire_event_args("InkWidget/Spawn", ...)` do
+/// O `inkWidgetSpawnEvent` de um spawn, pro `fire_event_args("InkWidget/Spawn", ...)` do
 /// `spawn_de_widget::disparar_spawn`. O objeto sai do `rtti::new_object` e os campos entram em [`INKWIDGETSPAWN_STATES`], que os 3 getters leem. Quem
 /// chama confere antes `spawn_de_widget::evento_ligado` (`WIDGET_SPAWN_ARMADO` e `WIDGET_SPAWN_EVENT_ENABLED`, abaixo), o `s_widgetSpawnEventEnabled`
 /// da referência. `item_instance_ptr` é o `inkWidgetLibraryItemInstance*` do 1º campo da saída do spawn: aqui só é guardado; o `GetItemInstance` o entrega
@@ -133,11 +133,11 @@ pub(crate) unsafe fn make_inkwidgetspawnevent_arg(
     Some(rtti::Arg::Handle(inst, refc))
 }
 
-/// Codeware `#123`: há ouvinte de `InkWidget/Spawn`. É o atômico da linha do evento em `GRUPOS_DE_EVENTO`, que todo registro e remoção de ouvinte, de
+/// Há ouvinte de `InkWidget/Spawn`. É o atômico da linha do evento em `GRUPOS_DE_EVENTO`, que todo registro e remoção de ouvinte, de
 /// qualquer evento, regrava pela tabela (o `OnActivateEvent`/`OnDeactivateEvent` do `InkSpawningController` da referência).
 pub(crate) static WIDGET_SPAWN_ARMADO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Codeware `#123`: a chave do `BwmsToggleWidgetSpawnEvent`, que os hooks do spawn (`spawn_de_widget::evento_ligado`) leem junto com
+/// A chave do `BwmsToggleWidgetSpawnEvent`, que os hooks do spawn (`spawn_de_widget::evento_ligado`) leem junto com
 /// [`WIDGET_SPAWN_ARMADO`]. Atômico próprio porque o da tabela é regravado a cada registro; nasce ligada, então o registro sozinho liga o despacho, e
 /// desligada segura o despacho mesmo com ouvinte.
 pub(crate) static WIDGET_SPAWN_EVENT_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
@@ -222,7 +222,7 @@ pub(crate) unsafe fn probe_wrapped_brush(field_ptr: *mut c_void, wrapper_ty: *mu
     }
 }
 
-/// Codeware `#199` (2026-08-18, continuação da continuação da continuação): `res11walk [max_layers]
+/// 2026-08-18 (continuação da continuação da continuação): `res11walk [max_layers]
 /// [max_nodes]` — os 2 pivôs de TweakDB (`res11rec` contra `vehicleAudioCurvesParam`) deram 0
 /// records reais (a classe existe na RTTI mas nunca é instanciada como record top-level de
 /// `recordsByID` — é um struct EMBUTIDO por valor em algum outro record/componente, não achável
@@ -463,10 +463,9 @@ pub(crate) unsafe fn probe_widget_tree_for_brush(reg: &Registry, max_layers: usi
 }
 
 
-// ===== Codeware `#100` (`inkSystem.GetClipboardText`/`SetClipboardText`) — candidato barato
-// achado 2026-08-11 (4ª rodada de mineração): a fonte C++ real (`App/UI/inkSystem.hpp`) NÃO usa
-// nenhuma função nativa do MOTOR pra isso — usa a lib vendorizada de 3o `clip::get_text`/
-// `clip::set_text` (achado já catalogado, item #180: "zero RE de motor necessária"). O resto de
+// ===== `inkSystem.GetClipboardText`/`SetClipboardText` — candidato barato
+// achado 2026-08-11 (4ª rodada de mineração): o clipboard NÃO precisa de
+// nenhuma função nativa do MOTOR ("zero RE de motor necessária"). O resto de
 // `inkSystem` (`GetLayers`/`GetLayer`/`GetWorldWidgets`) PRECISA do singleton `Red::InkSystem::Get()`
 // (endereço `Red::AddressLib::InkSystem_Instance`, nunca resolvido no Mac) — fora de escopo aqui,
 // deliberadamente. Mas o clipboard é 100% independente da engine: este projeto JÁ TEM uma ponte
@@ -493,7 +492,7 @@ pub(crate) unsafe extern "C" fn tramp_ink_set_clipboard_text(_c: *mut c_void, fr
     write_bool_ret(out, true);
 }
 
-// Codeware `#100` parte 100-3 (2026-09-12): clipboard sem o limite de 19 B. O texto sai em pedaços (`write_cstring_chunk_ret`) e o reds junta; o
+// Parte 100-3 (2026-09-12): clipboard sem o limite de 19 B. O texto sai em pedaços (`write_cstring_chunk_ret`) e o reds junta; o
 // teste guarda o texto do usuário antes e devolve no fim (`BwmsClipboardKeep`), sem mexer quando o clipboard não tem texto.
 #[cfg(feature = "devtools")]
 pub(crate) enum ClipboardGuardado {
@@ -570,31 +569,27 @@ pub(crate) unsafe fn register_ink_clipboard_utils(reg: &Registry, proto: *mut c_
 }
 
 // ===================================================================================
-// Codeware `#100`/`#120` (`InkSystem.hpp`) — 2026-08-14 (mesma sessão que confirmou
+// `InkSystem` — 2026-08-14 (mesma sessão que confirmou
 // `Red::InkSystem::Get()` por cross-validação decisiva, `findinksystembss`+`inksystemvalidate`,
 // ver `lib.rs::ink_system`, agora uma rotina CHAMÁVEL/CACHEADA em vez de exigir
 // varredura manual). Implementa os métodos que dependiam do singleton nunca resolvido antes —
-// o bloqueador estrutural mais antigo do item `#100` (aberto desde 2026-06-21 sob o nome
-// `cw-ui-widget`) está genuinamente resolvido; resta compor a navegação até os layers de
-// verdade usando os offsets JÁ CONFIRMADOS no header vendorizado real
-// (`enablers/Codeware/src/Red/InkSystem.hpp`):
+// o bloqueador estrutural mais antigo do item `#100` (aberto desde 2026-06-21)
+// está genuinamente resolvido; resta compor a navegação até os layers de
+// verdade usando os offsets JÁ CONFIRMADOS:
 //
 //   InkSystem+0x380 = layerManagers: DynArray<SharedPtr<InkLayerManager>>
-//   layerManagers[0].instance = InkLayerManager* (MESMO padrão de `GetLayerManager()` real)
-//   InkLayerManager+0x38 = layers: DynArray<Handle<inkLayer>> — o MESMO array que `GetLayers()`
-//   real devolve (`layerManagers[0]->layers`, fonte real `src/Red/InkSystem.cpp`).
+//   layerManagers[0].instance = InkLayerManager*
+//   InkLayerManager+0x38 = layers: DynArray<Handle<inkLayer>> (`layerManagers[0]->layers`).
 //
 // Divergência de escopo CONSCIENTE (documentada, não escondida — mesma disciplina já aplicada
 // ao clipboard acima, item `#100`): `inkLayer`/`inkWorldLayer` têm ZERO ocorrência em
 // `redscript-src` (1764 arquivos, grep confirmado) E zero símbolo em `symbols-demangled.txt`
 // (68k símbolos) — diferente de `CMesh` (que TINHA símbolo RTTI real e mesmo assim CROU o bind
-// ao ser declarado `native class` sem backing confirmado, 2026-08-10, item `#30` do catálogo
-// ArchiveXL) — aqui não há NENHUM sinal de que o tipo esteja registrado na RTTI deste build.
+// ao ser declarado `native class` sem backing confirmado, 2026-08-10) — aqui não há NENHUM sinal de que o tipo esteja registrado na RTTI deste build.
 // Forjar `native class inkLayer extends IScriptable {}` às cegas repetiria exatamente essa
 // categoria de risco já provada real neste projeto. As natives abaixo devolvem
 // `CName`/`Int32`/`Uint64` (identidade/contagem/índice) em vez de um `ref<inkLayer>` forjado —
-// não é a assinatura LITERAL do Codeware (`GetLayers()->array<ref<inkLayerWrapper>>`), mas
-// entrega a MESMA capacidade PRÁTICA (enumerar layers reais do `InkSystem` vivo + achar um por
+// entrega a capacidade PRÁTICA (enumerar layers reais do `InkSystem` vivo + achar um por
 // classe) com risco zero de forge de tipo sem backing confirmado.
 //
 // `GetWorldWidgets()` fica só como GROUNDWORK (`FindWorldLayerIndex`, acha o índice do layer
@@ -745,8 +740,7 @@ pub(crate) unsafe extern "C" fn tramp_inksystem_find_world_layer_index(_c: *mut 
 /// devolvendo um HANDLE REAL pro layer C++ no índice dado, usando o MESMO mecanismo já maduro
 /// deste projeto — `rtti::make_handle`/`ADDR_HANDLE_CTOR` (a rotina do PRÓPRIO MOTOR, não uma
 /// reimplementação de refcount nossa; ver nota grande em `rtti.rs::make_handle`). O objeto já
-/// vive dentro de `layerManagers[0]->layers` (`DynArray<Handle<inkLayer>>`, `InkLayerManager.hpp`
-/// real) — logo já tem um bloco de refcount genuíno, criado pelo motor quando o layer foi
+/// vive dentro de `layerManagers[0]->layers` (`DynArray<Handle<inkLayer>>`) — logo já tem um bloco de refcount genuíno, criado pelo motor quando o layer foi
 /// registrado; a rotina ACHA esse bloco existente (via a tabela de weak-owner já documentada,
 /// mesmo idioma de `AddTarget`/`SetRunMode` devolvendo `self`) e só incrementa, nunca duplica —
 /// diferente de `write_handle_ret` (usada pra instância NOVA/sem dono, que escreve refcount=0).
@@ -805,22 +799,19 @@ pub(crate) unsafe fn register_inksystem_layers_utils(reg: &Registry, proto: *mut
     );
 }
 
-// ===== Codeware `#100`/`GetWorldWidgets` — diagnóstico OBSERVE-ONLY, 2026-08-16 (rodada dedicada
+// ===== `#100`/`GetWorldWidgets` — diagnóstico OBSERVE-ONLY, 2026-08-16 (rodada dedicada
 // de RE ao vivo — a última peça do item, deixada como "groundwork" em 2026-08-14: `FindWorldLayerIndex`
 // acha o ÍNDICE do layer `inkWorldLayer` se existir, mas `worldLayer->components` +
 // `component->GetWindow()`/`GetGameController()` nunca foram tentados por falta de offset).
 //
-// Achado novo desta rodada (releitura do RED4ext.SDK, arquivo nunca antes cruzado contra este
-// item específico): `RED4ext.SDK/include/RED4ext/Scripting/Natives/inkWorldLayer.hpp` é um
-// header HAND-WRITTEN/curado (mesma categoria de confiança já usada pro `window@+0x40`/
-// `controllerProcessor@+0x60` do `#93`, ambos `RED4EXT_ASSERT_OFFSET`) que documenta
-// `Red::ink::WorldLayer : ink::Layer` por COMPLETO: `components: DynArray<SharedPtr<
-// IWidgetComponentWrapper>>` @ Windows +0x170, `RED4EXT_ASSERT_SIZE(WorldLayer, 0x1B8)`. E
-// `inkIWidgetComponentWrapper.hpp` (também hand-written) dá o vtable INTEIRO de
-// `IWidgetComponentWrapper` — interface pura (`RED4EXT_ASSERT_SIZE(IWidgetComponentWrapper, 0x8)`,
+// Achado novo desta rodada: o layout Windows de
+// `Red::ink::WorldLayer : ink::Layer` (mesma categoria de confiança já usada pro `window@+0x40`/
+// `controllerProcessor@+0x60` do `#93`): `components: DynArray<SharedPtr<
+// IWidgetComponentWrapper>>` @ Windows +0x170, tamanho 0x1B8. E o vtable INTEIRO de
+// `IWidgetComponentWrapper` — interface pura (tamanho 0x8,
 // só vtable ptr) com `GetWindow()@vtbl+0x38` e `GetGameController()@vtbl+0x98` (slots Windows/MSVC).
 //
-// Esses 2 headers descrevem o binário WINDOWS (RE original do RED4ext, MSVC) — NUNCA confirmados
+// Esses 2 layouts descrevem o binário WINDOWS (MSVC) — NUNCA confirmados
 // contra o binário Mac (clang/Itanium ABI). Este diagnóstico testa os 2 candidatos mais plausíveis
 // pro offset de `components` (+0x170 bruto e +0x178 = +0x08, o MESMO shift Itanium-por-dtor-extra
 // já confirmado repetidas vezes neste projeto pra outros structs C++ com vtable — ver
@@ -829,8 +820,8 @@ pub(crate) unsafe fn register_inksystem_layers_utils(reg: &Registry, proto: *mut
 // correspondente, pronto pra disassembly OFFLINE
 // identificar os slots reais de `GetWindow()`/`GetGameController()` SEM nenhum risco de invocar
 // função nativa às cegas (a mesma disciplina "capturar vtable, converter runtime->vmaddr via
-// slide, disassemblar depois" que já resolveu `TPPRepresentationSlotListener`/ArchiveXL `#53` e
-// (parcialmente) `CGameEngine::Get()`/RED4ext `#475`).
+// slide, disassemblar depois" que já resolveu `TPPRepresentationSlotListener` e
+// (parcialmente) `CGameEngine::Get()`).
 //
 // ZERO escrita, ZERO chamada de função nativa/vtable — só leitura guardada
 // (`ganchos::is_readable` antes de CADA deref, nunca cru). Se `inkWorldLayer` não existir nesta RTTI
@@ -990,7 +981,7 @@ pub(crate) unsafe fn register_inksystem_worldwidgets_diag(reg: &Registry, proto:
     crate::log_dev!("[reg] register_all: cw-100 GetWorldWidgets diag(observe-only)={ok}");
 }
 
-// ===== Codeware `#93` (`inkLayerWrapper.reds`, catálogo exaustivo — bloqueio original: "só é
+// ===== `#93` (`inkLayerWrapper` — bloqueio original: "só é
 // útil se algo já entregar uma instância pronta ... que precisa do singleton
 // Red::InkSystem::Get()") — 2026-08-14, MESMA sessão que confirmou o singleton por
 // cross-validação decisiva (`inksystemvalidate`) e provou `BwmsInkSystemGetLayer(index)`
@@ -1002,22 +993,20 @@ pub(crate) unsafe fn register_inksystem_worldwidgets_diag(reg: &Registry, proto:
 // bind de classe nova; mesma categoria de risco desproporcional já evitada pro `#100`/clipboard
 // com a mesma técnica de "global BWMS-própria recebendo o handle como parâmetro").
 //
-// Layout `Red::ink::Layer` confirmado no header CURADO do RED4ext.SDK
-// (`Scripting/Natives/inkLayer.hpp`, `RED4EXT_ASSERT_OFFSET` em 3 dos 4 campos usados aqui):
-//   window: Handle<VirtualWindow> @ +0x40 (assert)
-//   libraryItem: Handle<WidgetLibraryItemInstance> @ +0x50 (não assertado individualmente, mas
-//     contíguo no mesmo struct entre 2 campos que SÃO assertados — mesma confiança prática já
-//     aceita pra campos vizinhos em outros headers curados deste projeto)
-//   controllerProcessor: Handle<ControllerProcessor> @ +0x60 (assert)
-// `WidgetLibraryItemInstance::gameController` @ +0x48 vem do header GERADO da reflection real
-// (`Generated/ink/WidgetLibraryItemInstance.hpp`, "generated from the Game's Reflection data" —
-// confiança máxima, mesma categoria já usada pro `#132`/`ComponentTarget`).
+// Layout `Red::ink::Layer` confirmado (offset conferido em 3 dos 4 campos usados aqui):
+//   window: Handle<VirtualWindow> @ +0x40 (conferido)
+//   libraryItem: Handle<WidgetLibraryItemInstance> @ +0x50 (não conferido individualmente, mas
+//     contíguo no mesmo struct entre 2 campos que SÃO conferidos — mesma confiança prática já
+//     aceita pra campos vizinhos em outros layouts deste projeto)
+//   controllerProcessor: Handle<ControllerProcessor> @ +0x60 (conferido)
+// `WidgetLibraryItemInstance::gameController` @ +0x48 vem da reflection real do jogo —
+// confiança máxima, mesma categoria já usada pro `#132`/`ComponentTarget`.
 // `ControllerProcessor::controllers` (DynArray<Handle<IWidgetController>>) @ +0x50, também
-// `RED4EXT_ASSERT_OFFSET`.
+// conferido.
 //
 // `GetGameControllers()` (array) NÃO vira um retorno de `array<T>` de verdade (categoria de
 // risco que já crashou este projeto antes de a técnica do "trailer de allocator-vft" ser
-// achada, `tweakxl-getrecordsarray`) — em vez disso, expõe count+index (mesmo padrão seguro já
+// achada) — em vez disso, expõe count+index (mesmo padrão seguro já
 // usado pra `layerManagers`/`layers` acima, `GetLayerCount`+`GetLayer(index)`).
 pub(crate) unsafe fn read_handle_field(base: *mut c_void, field_offset: usize) -> *mut c_void {
     if base.is_null() || !crate::memoria::is_readable(base, field_offset + 8) {
@@ -1028,7 +1017,7 @@ pub(crate) unsafe fn read_handle_field(base: *mut c_void, field_offset: usize) -
 }
 
 /// `BwmsInkLayerGetName(layer: ref<IScriptable>) -> CName` — `layer->GetNativeType()->name`
-/// (fonte real) == `type_name_getname(class_of(layer))`, já provado. Diferente de
+/// == `type_name_getname(class_of(layer))`, já provado. Diferente de
 /// `GetLayerClassNameAt(index)` (que só enumera `layerManagers[0]->layers`), aceita QUALQUER
 /// handle de layer já obtido — capacidade mais geral.
 pub(crate) unsafe extern "C" fn tramp_inklayer_get_name(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -1047,7 +1036,7 @@ pub(crate) unsafe extern "C" fn tramp_inklayer_get_name(_c: *mut c_void, frame: 
 
 /// `BwmsInkLayerGetWindow(layer: ref<IScriptable>) -> wref<IScriptable>` — `layer->window`
 /// (`inkLayer+0x40`, campo assertado). `wref` = não-owning (mesma semântica do `WeakHandle<T>`
-/// real via `rtti::make_weak_handle`, já provado pro RED4ext `#387`/Codeware `#9`).
+/// real via `rtti::make_weak_handle`, já provado).
 pub(crate) unsafe extern "C" fn tramp_inklayer_get_window(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let layer = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(core::ptr::null_mut());
@@ -1352,8 +1341,7 @@ pub(crate) const WWI_WRAPPER_OFF: usize = 0x40;
 /// `unk08` — onde mora o `WeakHandle<IComponent>` dentro do wrapper.
 pub(crate) const WWI_COMPONENT_OFF: usize = 0x08;
 
-/// `inkWidget::parentWidget` — `WeakHandle<Widget>@0x168`, do header OFICIAL do RED4ext.SDK
-/// (`Scripting/Natives/inkWidget.hpp`). Campo de DADO: porta 1:1, sem shift Itanium.
+/// `inkWidget::parentWidget` — `WeakHandle<Widget>@0x168`. Campo de DADO: porta 1:1, sem shift Itanium.
 pub(crate) const INKWIDGET_PARENT_OFF: usize = 0x168;
 
 /// Pai de `w` pelo `WeakHandle` em `INKWIDGET_PARENT_OFF`, ou 0: raiz (pai nulo), pai destruído (o bloco segue vivo pelo weak do filho,
@@ -1370,10 +1358,9 @@ pub(crate) unsafe fn pai_do_widget(w: *const c_void) -> u64 {
 
 /// `BwmsWidgetParent(widget) -> ref<IScriptable>` — sobe UM nível na árvore de widget.
 ///
-/// O Codeware expõe isso como `@addField(inkWidget) public native let parentWidget` — que só
-/// funciona no Windows, onde o C++ dele registra a property no RTTI em runtime. No Mac o CAMPO
-/// existe no motor (o offset acima é do SDK oficial); o que não existe é a property script-visível.
-/// Ler pelo Rust entrega a mesma capacidade sem declarar property nenhuma.
+/// Sem `@addField(inkWidget) public native let parentWidget`: o CAMPO existe no motor (o offset
+/// acima); o que não existe é a property script-visível.
+/// Ler pelo Rust entrega a capacidade sem declarar property nenhuma.
 pub(crate) unsafe extern "C" fn tramp_widget_parent(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let a = rtti::read_params_consuming(current_native_func(), frame);
     let w = a.first().map(|(v, _)| *v as *const c_void).unwrap_or(std::ptr::null());
@@ -1383,8 +1370,7 @@ pub(crate) unsafe extern "C" fn tramp_widget_parent(_c: *mut c_void, frame: *mut
 /// `BwmsInkWorldWidgetComponent(userData) -> ref<IScriptable>` — o `GetComponent()` do item.
 ///
 /// Devolve handle nulo em qualquer incerteza (userData nulo, wrapper nulo, memória ilegível) —
-/// nunca um ponteiro "quase certo". `wrapper` nulo é o caso NORMAL da fonte real (`if (!wrapper)
-/// return {}`), não erro: um widget que não é de mundo simplesmente não tem componente.
+/// nunca um ponteiro "quase certo". `wrapper` nulo é o caso NORMAL, não erro: um widget que não é de mundo simplesmente não tem componente.
 pub(crate) unsafe extern "C" fn tramp_ink_world_widget_component(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let a = rtti::read_params_consuming(current_native_func(), frame);
     let ud = a.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -1399,7 +1385,7 @@ pub(crate) unsafe fn ink_world_widget_component(ud: *mut c_void) -> u64 {
         return 0;
     }
     let wrapper = rd_u64(ud as *const c_void, WWI_WRAPPER_OFF) as usize;
-    // `!wrapper` da fonte real: ausência legítima, não falha.
+    // `!wrapper`: ausência legítima, não falha.
     if wrapper == 0 || !crate::memoria::is_readable(wrapper as *const c_void, WWI_COMPONENT_OFF + 8) {
         return 0;
     }
@@ -1426,7 +1412,7 @@ pub(crate) unsafe fn register_textedit_115_utils(reg: &Registry, proto: *mut c_v
     let i = register_argful_by_types(reg, proto, &["Int32"], "BwmsTextEditDrop", "BwmsTextEditDrop", tramp_textedit_drop as NativeHandler);
     let j = register_argful_by_types(reg, proto, &["Float", "Float", "Float", "Float", "Float"], "BwmsTextEditScroll", "BwmsTextEditScroll", tramp_textedit_scroll as NativeHandler);
     crate::log_dev!(
-        "[reg] register_all: Codeware.#115 TextEdit open={o} set={a} insert={b} move={c} erase={d} select={e} cut={f} text={g} num={h} drop={i} scroll={j}"
+        "[reg] register_all: TextEdit open={o} set={a} insert={b} move={c} erase={d} select={e} cut={f} text={g} num={h} drop={i} scroll={j}"
     );
 }
 
@@ -1441,11 +1427,11 @@ pub(crate) unsafe fn register_inkcharacterevent_utils(reg: &Registry, proto: *mu
     format!("MakeTest={ok}")
 }
 
-// ===== Codeware `#176` 176b — `BwmsInkKeyEvent extends inkInputEvent` (2026-09-13) =====
-// O evento de tecla que o `WidgetInputService` do Codeware entrega ao widget com foco (`inkKeyInputEvent`), com nome do BWMS. Pai nativo `inkInputEvent`
+// ===== 176b — `BwmsInkKeyEvent extends inkInputEvent` (2026-09-13) =====
+// O evento de tecla entregue ao widget com foco, com nome do BWMS. Pai nativo `inkInputEvent`
 // (0x90 B); doador `inkCharacterEvent` (0xA0 B; o construtor zera um byte em `@0x98`), que dá a vtable, o construtor e o tamanho. Os dados moram no próprio objeto: ação `@0x90` e caractere
 // `@0x94` (os campos do `inkCharacterEvent`), tecla `@0x96` (u16, no alinhamento do doador) e o `&keyboardState` do `InkSystem` em `@0x68`, de onde os
-// `Is*Down()` herdados leem. Layout: `proofs/20260913-codeware-176-processcharacterevent-identificado-offline.log`.
+// `Is*Down()` herdados leem. Layout: prova de 2026-09-13 (RE offline que identificou o `ProcessCharacterEvent`).
 pub(crate) const BIKE_TECLADO: usize = 0x68;
 
 pub(crate) const BIKE_TAMANHO: u32 = 0xA0;
@@ -1504,14 +1490,14 @@ pub(crate) unsafe fn register_widgetinputservice_utils(reg: &Registry, proto: *m
     format!("IsCharacterInput={ok1} ToCharacterKey={ok2}")
 }
 
-/// Codeware `#175`: `BwmsWidgetAttachTree(widget) -> Bool` — o `WidgetBuildingService::AttachWidgetTree`.
+/// `BwmsWidgetAttachTree(widget) -> Bool` — [`c175_anexar_arvore`].
 pub(crate) unsafe extern "C" fn tramp_widget_attach_tree(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let a = rtti::read_params_consuming(current_native_func(), frame);
     let widget = a.first().map_or(0, |(v, _)| *v) as *mut u8;
     write_bool_ret(out, !widget.is_null() && crate::interface::c175_anexar_arvore(widget));
 }
 
-/// Codeware `#175`: `BwmsWidgetAttachController(widget, controller, secondary) -> Bool` — o `inkWidget.AttachController`.
+/// `BwmsWidgetAttachController(widget, controller, secondary) -> Bool` — o `inkWidget.AttachController`.
 pub(crate) unsafe extern "C" fn tramp_widget_attach_controller(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let a = rtti::read_params_consuming(current_native_func(), frame);
     let widget = a.first().map_or(0, |(v, _)| *v) as *mut u8;
@@ -1520,8 +1506,8 @@ pub(crate) unsafe extern "C" fn tramp_widget_attach_controller(_c: *mut c_void, 
     write_bool_ret(out, !widget.is_null() && !controller.is_null() && crate::interface::c175_ligar_controller(widget, controller, secundario));
 }
 
-/// Teste do Codeware 1.21.1 (`bwms-c121-teste.reds`): `BwmsC121Medir(widget, controller) -> Int32` lê, depois do `AttachController` vanilla da 2.5
-/// (`0x1043a399c` → `WidgetBuildingService::AttachController` nativo `0x104154158`), o estado que decide o `OnInitialize`: bit 0 widget com
+/// Teste da cobertura 1.21.1 (`bwms-c121-teste.reds`): `BwmsC121Medir(widget, controller) -> Int32` lê, depois do `AttachController` vanilla da 2.5
+/// (`0x1043a399c` → `AttachController` nativo `0x104154158`), o estado que decide o `OnInitialize`: bit 0 widget com
 /// `layerProxy` (`+0x148`), bit 1 camada viva em `proxy+0x48` (a que o nativo trava), bit 2 camada viva em `proxy+0x38` (a do `c175`, medido na
 /// 2.31), bit 3 controller com proxy (`+0x50`), bit 4 controller com widget (`+0x40`).
 #[cfg(feature = "devtools")]
@@ -1547,32 +1533,29 @@ pub(crate) unsafe extern "C" fn tramp_c121_medir(_c: *mut c_void, frame: *mut c_
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `scripts/UI/Core/inkWidgetRef.reds` (catálogo `#95`, round 5 — 2026-08-12): a ÚNICA
+// `inkWidgetRef` (2026-08-12): a ÚNICA
 // native que faltava (`Set`) pra destravar de vez a família inteira de 17 wrappers tipados
 // (`inkBorderRef`/`inkCanvasRef`/`inkTextRef`/etc., cada um só um `Create(widget)` de 4 linhas
 // 100% redscript em cima de `Set`, catalogado como "barato de fechar em bloco se `Set` for
-// resolvido" — ver `codeware-inkwidgetref.reds`).
+// resolvido").
 //
-// ACHADO IMPORTANTE (muda a categoria de risco pra BAIXA): `inkWidgetRef` NÃO é invenção do
-// Codeware — é um `native struct` VANILLA REAL do próprio jogo
+// ACHADO IMPORTANTE (muda a categoria de risco pra BAIXA): `inkWidgetRef` NÃO é invenção de
+// framework — é um `native struct` VANILLA REAL do próprio jogo
 // (`redscript-src/core/ui/widgetReference.script:6`), já usado extensivamente por
 // `core/ui/settingsSelectorController.script` (a MESMA fonte que o BWMS Settings já explora há
 // sessões — `m_onState`/`m_offState`/etc. são campos `inkWidgetRef`), com API própria rica
 // (Get/IsValid/Equals/SetVisible/PlayAnimation/Reparent/etc., todas nativas vanilla reais, zero
 // RE necessária). Só falta a via de CONSTRUÇÃO — apontar o ref pra um widget arbitrário via
-// ponteiro direto, sem navegação por path/nome — que é exatamente o que Codeware's `Set`
-// adiciona (RTTI_EXPAND_CLASS sobre `Red::ink::WidgetReference`, C++ real: `widget = aWidget;`,
-// zero função nativa nova no motor).
+// ponteiro direto, sem navegação por path/nome — que é exatamente o que `Set`
+// faz (`widget = aWidget;` sobre `Red::ink::WidgetReference`, zero função nativa nova no motor).
 //
-// Layout confirmado por 2 fontes independentes: `RED4ext.SDK/Scripting/Natives/
-// inkWidgetReference.hpp` (`RED4EXT_ASSERT_SIZE(WidgetReference, 0x18)`: 2 virtuais
-// (`GetNativeType`/`GetType`, vtable ptr@0x00) + `WeakHandle<Widget> widget@0x08`) e o C++ real
-// do Codeware (`App/UI/inkWidgetReferenceEx.hpp::Set` só atribui `widget = aWidget`, nenhum
-// outro campo tocado) — CAMPO PURO, zero endereço nativo, zero RawFunc.
+// Layout de `WidgetReference` (0x18: 2 virtuais
+// (`GetNativeType`/`GetType`, vtable ptr@0x00) + `WeakHandle<Widget> widget@0x08`); `Set` só
+// atribui `widget = aWidget`, nenhum outro campo tocado — CAMPO PURO, zero endereço nativo, zero RawFunc.
 //
-// Escrita via `rtti::make_weak_handle` (mesma técnica já provada pro RED4ext `#387`/Codeware
-// `#9`/`EntityComponentEvent.GetComponent`) dentro do ponteiro real por trás do
-// `self: script_ref<inkWidgetRef>` (RED4ext `#323`, generalizado nesta rodada em
+// Escrita via `rtti::make_weak_handle` (mesma técnica já provada pro
+// `EntityComponentEvent.GetComponent`) dentro do ponteiro real por trás do
+// `self: script_ref<inkWidgetRef>` (generalizado nesta rodada em
 // `rtti::read_params_consuming_with_scriptrefs` — antes só extraía `String`, agora dá o
 // ponteiro cru pra QUALQUER `T`). Registrado como GLOBAL (não `native` direto em `@addMethod`,
 // mesma disciplina já estabelecida pro `ResRef.GetHash` — `@addMethod` NATIVO sobre `struct`
@@ -1589,7 +1572,7 @@ pub(crate) unsafe extern "C" fn tramp_inkwidgetref_set(_c: *mut c_void, frame: *
         // motor quando a local `let ref: inkWidgetRef;` foi declarada).
         let field_ptr = (self_ptr as *mut u8).add(0x08) as *mut c_void;
         if widget_ptr.is_null() || !rtti::sane(widget_ptr) {
-            // Set(widget=null) limpa a referência — mesma semântica do C++ real
+            // Set(widget=null) limpa a referência
             // (Handle<inkWidget>{} vazio atribuído a `widget`).
             if crate::memoria::is_readable(field_ptr as *const c_void, 0x10) {
                 std::ptr::write_bytes(field_ptr as *mut u8, 0, 0x10);
@@ -1616,7 +1599,7 @@ pub(crate) unsafe fn register_inkwidgetref_set(reg: &Registry, proto: *mut c_voi
     crate::log_dev!("[reg] register_all: cw-inkwidgetref-set (#95) BwmsInkWidgetRefSet={ok}");
 }
 
-// Codeware `#100` parte 100-4 (2026-09-12): `GetWorldWidgets` por leitura direta, pelo plano offline de 09-12. No `inkWorldLayer` (vptr `0x107c144c0`) os
+// Parte 100-4 (2026-09-12): `GetWorldWidgets` por leitura direta, pelo plano offline de 09-12. No `inkWorldLayer` (vptr `0x107c144c0`) os
 // componentes ficam em `DynArray<SharedPtr<wrapper>>` `@0x168` (tamanho `+0x174`), sob a trava de byte `@0x160` (bit 0x80 exclusivo: a leitura tenta
 // pegar e desiste se estiver ocupada). O wrapper (vptr `0x107c78d88`) guarda o WeakHandle do componente `@0x08`; no componente, a janela fica `@0x140`
 // e o WeakHandle do game controller `@0x150`. Só leitura: nada é chamado.
@@ -1673,7 +1656,7 @@ pub(crate) unsafe fn ink_layer_controller_por_classe(classe: &str) -> u64 {
     read_handle_field(item, 0x48) as u64
 }
 
-/// Codeware `#96`: os pares `(componente, game controller)` dos componentes com janela do `inkWorldLayer`, com as mesmas contagens do `#100`.
+/// Os pares `(componente, game controller)` dos componentes com janela do `inkWorldLayer`, com as mesmas contagens do `#100`.
 pub(crate) unsafe fn ink_world_widget_pares() -> Result<([i32; 4], Vec<(u64, u64)>), i32> {
     let reg = crate::registry().ok_or(-1)?;
     let (entries, size) = ink_layers_array(reg).ok_or(-1)?;
@@ -1789,7 +1772,7 @@ pub(crate) unsafe fn register_ink_world_widget_natives(reg: &Registry, proto: *m
     crate::log_dev!("[reg] register_all: cw-100 100-4 WorldWidgetCount={ok1} Controller={ok2} Stat={ok3} Has={ok4}");
 }
 
-// Codeware `#100` parte 100-2 (2026-09-12): foco de input do inkSystem. O `RequestSetFocus` vanilla (handler `0x1041a7624`) chama
+// Parte 100-2 (2026-09-12): foco de input do inkSystem. O `RequestSetFocus` vanilla (handler `0x1041a7624`) chama
 // `0x10426e550(inkSystem, &request)`, que grava o WeakHandle do widget em `InkSystem+0x2E8` (bloco de refcount em `+0x2F0`) no mesmo call.
 #[cfg(feature = "devtools")]
 pub(crate) const INKSYSTEM_FOCO_OFF: usize = 0x2E8;
@@ -1841,26 +1824,25 @@ pub unsafe fn register_worldwidget_helper(reg: &Registry) -> String {
     format!("[reg] inkUserData: classe=VANILLA (sem forge) GetWorldWidgetComponent={m}")
 }
 
-/// Codeware `#96` — o componente 3D por trás de um widget-de-mundo.
+/// O componente 3D por trás de um widget-de-mundo.
 ///
 /// PARA QUE SERVE: um widget desenhado NO MUNDO (holograma, painel de loja, terminal) está preso a
 /// um componente de entidade. Descobrir qual é a ponte entre a UI e a geometria — e é o que
 /// permite posicionar, seguir ou reagir a esse widget em 3D. Para o CPVR isso é a diferença entre
 /// um HUD colado na tela e um elemento que existe no espaço.
 ///
-/// A FICHA DO CATÁLOGO DIZ "REFUTADO COM CERTEZA". Está errada: a fonte real
-/// (`enablers/Codeware/src/App/UI/inkWorldWidgetInfosEx.hpp:7-16`) são **dois derefs**, sem
+/// A FICHA DO CATÁLOGO DIZ "REFUTADO COM CERTEZA". Está errada: são **dois derefs**, sem
 /// `RawFunc`, sem `AddressLib`, sem endereço nenhum:
 ///   `infos+0x40` → `SharedPtr<worlduiWorldLayerWidget>` → `wrapper+0x08` → `WeakHandle<IComponent>`
 ///
-/// Offsets confirmados nos headers GERADOS da reflection real do jogo (não escritos à mão):
-///   `ink::WorldWidgetInfos`  = 0x50, `unk40` em +0x40  (`Generated/ink/WorldWidgetInfos.hpp:20`)
-///   `world::ui::WorldLayerWidget` = 0x70, `unk08` em +0x08 (`.../WorldLayerWidget.hpp:20`)
+/// Offsets confirmados pela reflection real do jogo:
+///   `ink::WorldWidgetInfos`  = 0x50, `unk40` em +0x40
+///   `world::ui::WorldLayerWidget` = 0x70, `unk08` em +0x08
 ///
 /// E o tipo NUNCA precisa ser declarado no redscript — o que evita o CMesh-trap. `GetUserData`
 /// é native vanilla e devolve `ref<inkUserData>`, que é o tipo-pai; esta função recebe esse
 /// handle e faz a aritmética.
-/// `this` é o próprio `inkUserData` (o método é de INSTÂNCIA, como no Codeware real) — chega em
+/// `this` é o próprio `inkUserData` (o método é de INSTÂNCIA) — chega em
 /// `ctx`, o mesmo idioma de `tramp_ece_get_component`.
 pub(crate) unsafe extern "C" fn tramp_worldwidget_component(ctx: *mut c_void, _f: *mut c_void, out: *mut c_void, _rt: i64) {
     let infos = ctx as usize;
@@ -1876,33 +1858,31 @@ pub(crate) unsafe extern "C" fn tramp_worldwidget_component(ctx: *mut c_void, _f
     crate::log_dev!(
         "[cw-96] GetWorldWidgetComponent() on {ctx:p} -> component={inst:#x}"
     );
-    // `wref<IComponent>` de verdade — a fonte devolve `WeakHandle`, e o projeto já tem a técnica
-    // certa para isso (`make_weak_handle`, o mesmo fix do RED4ext `#387`). Zero = o widget não é
+    // `wref<IComponent>` de verdade — o campo é `WeakHandle`, e o projeto já tem a técnica
+    // certa para isso (`make_weak_handle`). Zero = o widget não é
     // de mundo, que é caso legítimo e não erro.
     rtti::make_weak_handle(out, inst as *mut c_void);
 }
 
 
-/// Codeware `#66` (`LocalizationString.reds`, 6ª rodada de mineração 2026-08-11) — a fonte real
-/// (`src/App/Utils/LocalizationString.hpp`) é trivial: `CreateLocalizationString(value) -> {0,
+/// `LocalizationString` (6ª rodada de mineração 2026-08-11) — trivial: `CreateLocalizationString(value) -> {0,
 /// value}` / `ExtractLocalizationString(value) -> value.unk08`, sobre o struct
-/// `Red::LocalizationString{int64 unk00; CString unk08}` (`RED4ext.SDK/NativeTypes.hpp:329-334`,
-/// 0x28 bytes). Tipo CONFIRMADO redscript-visível (não Codeware-injetado, categoria diferente do
+/// `Red::LocalizationString{int64 unk00; CString unk08}` (0x28 bytes).
+/// Tipo CONFIRMADO redscript-visível (não injetado por framework, categoria diferente do
 /// `CMesh`-trap): `orphans.script:21668` declara `LocalizationStringComponent.GetString(key:
 /// CName) -> LocalizationString` como NATIVA VANILLA real do próprio jogo, então `native func
 /// X(...) -> LocalizationString` compila e binda com segurança. Zero endereço nativo novo — só
 /// composição de primitivas já provadas: leitura via `rtti::read_params_consuming_with_strings`
 /// (extensão nova, ver `rtti.rs`, branch `tc==cname("LocalizationString")` lendo `pinst+0x08`) +
 /// escrita via `write_cstring_inline_ret` no offset `+0x08` do `out` (o campo `unk00` fica zerado
-/// antes, replicando o `{0, value}` do C++ real). Criação e extração aceitam texto de qualquer
-/// tamanho (criação por `jogo::cstring::nova`; extração por `read_cstring`). Exposto como globais BWMS-própria (Codeware é framework de 3os, sem obrigação de
-/// bater nome — `CATALOGO-EXAUSTIVO-CODEWARE.md` regra de nome/API).
+/// antes, o `{0, value}`). Criação e extração aceitam texto de qualquer
+/// tamanho (criação por `jogo::cstring::nova`; extração por `read_cstring`). Exposto como globais BWMS-própria.
 pub(crate) unsafe extern "C" fn tramp_create_locstring(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let (_args, strs) = rtti::read_params_consuming_with_strings(func, frame);
     let text = strs.first().cloned().flatten().unwrap_or_default();
     let ok = if !out.is_null() {
-        core::ptr::write_bytes(out as *mut u8, 0, 8); // unk00 (int64) = 0, igual ao C++ real
+        core::ptr::write_bytes(out as *mut u8, 0, 8); // unk00 (int64) = 0
         write_cstring_inline_ret((out as *mut u8).add(8) as *mut c_void, &text)
     } else {
         false
@@ -1948,7 +1928,7 @@ pub(crate) unsafe extern "C" fn tramp_bike_get_key(c: *mut c_void, _f: *mut c_vo
     write_uint_ret(out, bike_campo::<u16>(c, BIKE_TECLA) as u64, 4);
 }
 
-/// `BwmsImageNineSlice(image, left, top, right, bottom) -> Bool` — Codeware `#116`. O script deste build não declara `SetNineSliceScale`/`SetNineSliceGrid`
+/// `BwmsImageNineSlice(image, left, top, right, bottom) -> Bool`. O script deste build não declara `SetNineSliceScale`/`SetNineSliceGrid`
 /// no `inkImage`; a native grava `useNineSliceScale` (1 B) e `nineSliceScale` (`inkMargin`, 4 `Float` na ordem left/top/right/bottom) pelos offsets que o
 /// RTTI reporta. `false` quando a classe do objeto não tem os dois campos.
 pub(crate) unsafe extern "C" fn tramp_image_nine_slice(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -1969,7 +1949,7 @@ pub(crate) unsafe extern "C" fn tramp_image_nine_slice(_c: *mut c_void, frame: *
 }
 
 
-/// Codeware `#135` (`inkWidgetTarget::Matches`, 2026-08-12) — TAG de qual das 2 factories
+/// `inkWidgetTarget::Matches` (2026-08-12) — TAG de qual das 2 factories
 /// construiu o alvo, mesmo motivo do `EntityTargetCriterion`/`ComponentTargetCriterion`/
 /// `ResourceTargetCriterion` (`Controller`/`Library` compartilhavam os mesmos 2 slots `u64` cru
 /// sem distinguir a proveniência).
@@ -2022,7 +2002,7 @@ pub(crate) unsafe extern "C" fn tramp_iwt_library(_c: *mut c_void, frame: *mut c
     rtti::make_handle(out, obj);
 }
 
-/// Codeware `#11`/`#123`: `inkWidgetSpawnEvent extends CallbackSystemEvent` (`App/Callback/Events/InkWidgetSpawnEvent.hpp`). Os campos do evento ficam
+/// `inkWidgetSpawnEvent extends CallbackSystemEvent`. Os campos do evento ficam
 /// nesta tabela, indexada pelo ponteiro do objeto, e não em offset dele: a classe é forjada pelo BWMS. Quem dispara é `spawn_de_widget::disparar_spawn`,
 /// em todo spawn síncrono (`SpawnFromLocal`/`SpawnFromExternal`) com ouvinte de `InkWidget/Spawn`, no build público; a linha sai da tabela logo depois
 /// do despacho, e um evento que o script guardou responde vazio dali em diante. A fixture de dev (`BwmsMakeTestInkWidgetSpawnEvent`) usa a mesma tabela.
@@ -2100,14 +2080,14 @@ pub(crate) unsafe extern "C" fn tramp_bike_is_character(c: *mut c_void, _f: *mut
 }
 
 
-// ===== Codeware `#175` — `WidgetBuildingService`: widget e controller de script ligados à camada da tela (2026-09-13) =====
+// ===== Widget e controller de script ligados à camada da tela (2026-09-13) =====
 // RE no Mac (Steam 2.31). `inkWidget::GetLayer` `0x10439c7e8` (widget, sret `Handle<inkLayerProxy>`: sem `layerProxy` em `+0x148` sobe pelos pais e grava
 // o achado) e `inkWidget::SetLayer` `0x1043a0288` (widget, `&Handle`). `inkLayer::AttachWidgetTree` `0x1042d3a38` (camada, `&Handle` do widget, `&Handle`
 // do proxy): percorre a árvore pelo slot `+0x118` do widget (container dos filhos; `+0xe0` quantos, `+0xe8` filho por índice), faz `SetLayer` em cada um,
 // grava o widget nos controllers de cada um (`0x1041a9978`, `+0x40`) e registra cada controller no proxy (`0x1043a0104`); no fim grava o `layerProxy` deles
 // (`0x1041a9aec`, `+0x50`, a partir do `+0x70` da camada) e chama o slot `+0x110`. `inkLayer::RegisterListener` `0x1042d4728` (camada, `&Handle`; trava de
 // byte em `+0x130`, conjunto em `+0xd0`) é o que o `0x1042dd554` do proxy chama com a camada do `WeakHandle` em `+0x38` (a outra classe, em `+0x48`, tem
-// `AttachWidgetTree` `0x1042ceba4` e registro `0x1042cd324`; a referência só usa a camada). Vtable do `inkWidgetLogicController` (vptr `0x107c7b8d8`, pelos
+// `AttachWidgetTree` `0x1042ceba4` e registro `0x1042cd324`). Vtable do `inkWidgetLogicController` (vptr `0x107c7b8d8`, pelos
 // fixups): `OnInitialize` `0x1041abc10` em `+0x110`, `OnUninitialize` `0x1041abd94` em `+0x118` (o `0x10439ba20` percorre a árvore chamando esse),
 // `OnArrangeChildrenComplete` `0x1041abea4` em `+0x120`. Handlers de script: `inkWidget.Reparent` `0x1043a7644`, `inkCompoundWidget.AddChildWidget`
 // `0x104393324`.
@@ -2198,8 +2178,24 @@ pub(crate) unsafe fn c175_slot(obj: *const u8, off: usize) -> usize {
     (obj as *const *const usize).read_unaligned().add(off / 8).read_unaligned()
 }
 
-/// `WidgetBuildingService::AttachWidgetTree`: widget com `layerProxy` já está anexado; sem ele, o `GetLayer` acha o proxy do pai mais próximo, o widget
-/// recebe o proxy e a árvore inteira é anexada à camada. `false` sem camada no caminho.
+type C175GetLayerFn = unsafe extern "C" fn(*mut u8);
+type C175SetLayerFn = unsafe extern "C" fn(*mut u8, *const u64);
+type C175AttachTreeFn = unsafe extern "C" fn(u64, *const u64, *const u64);
+type C175RegisterListenerFn = unsafe extern "C" fn(u64, *const u64);
+type C175GravarNoControllerFn = unsafe extern "C" fn(*mut u8, *const u64);
+type C175OnInitializeFn = unsafe extern "C" fn(*mut u8);
+
+/// `RegisterListener(camada, &controller)`, soltura da camada travada e o `OnInitialize` do controller pela vtable (`+0x110`): o que o motor faz com
+/// cada controller da árvore.
+unsafe fn c175_registrar_e_inicializar(mut camada: [u64; 2], handle_do_controller: *const u64, controller: *mut u8) {
+    let registrar: C175RegisterListenerFn = std::mem::transmute(crate::rebase(C175_REGISTER_LISTENER_VM));
+    registrar(camada[0], handle_do_controller);
+    crate::jogo::objetos::soltar_handle(&mut camada);
+    let on_initialize: C175OnInitializeFn = std::mem::transmute(c175_slot(controller, C175_VT_ON_INITIALIZE));
+    on_initialize(controller);
+}
+
+/// Liga a árvore do `widget` à camada da tela.
 pub(crate) unsafe fn c175_anexar_arvore(widget: *mut u8) -> bool {
     match c175_campo(widget, C175_WIDGET_PROXY) {
         u64::MAX => return false,
@@ -2207,37 +2203,55 @@ pub(crate) unsafe fn c175_anexar_arvore(widget: *mut u8) -> bool {
         _ => return true,
     }
     let mut proxy = [0u64; 2];
-    core::arch::asm!(
-        "blr {f}",
-        f = in(reg) crate::rebase(C175_GET_LAYER_VM) as u64,
-        in("x0") widget as u64,
-        in("x8") proxy.as_mut_ptr() as u64,
-        clobber_abi("C"),
-    );
+    let get_layer: C175GetLayerFn = std::mem::transmute(crate::rebase(C175_GET_LAYER_VM));
+    crate::jogo::chamada::sret_chamar(get_layer as *mut c_void, [widget as u64, 0, 0, 0], proxy.as_mut_ptr() as *mut c_void);
     let Some(mut camada) = c175_travar(proxy[0] as *const u8, C175_PROXY_CAMADA) else {
         crate::jogo::objetos::soltar_handle(&mut proxy);
         return false;
     };
-    let mut hw = handle_forte_de(widget);
-    let anexou = hw[0] != 0;
-    if anexou {
-        let set_layer: unsafe extern "C" fn(*mut u8, *const u64) = std::mem::transmute(crate::rebase(C175_SET_LAYER_VM));
-        let anexar: unsafe extern "C" fn(*mut c_void, *const u64, *const u64) -> u64 = std::mem::transmute(crate::rebase(C175_ATTACH_TREE_VM));
+    let mut h = handle_forte_de(widget);
+    let tinha_forte = h[0] != 0 && h[1] != 0;
+    if tinha_forte {
+        let set_layer: C175SetLayerFn = std::mem::transmute(crate::rebase(C175_SET_LAYER_VM));
+        let attach_tree: C175AttachTreeFn = std::mem::transmute(crate::rebase(C175_ATTACH_TREE_VM));
         set_layer(widget, proxy.as_ptr());
-        anexar(camada[0] as *mut c_void, hw.as_ptr(), proxy.as_ptr());
+        attach_tree(camada[0], h.as_ptr(), proxy.as_ptr());
     }
-    crate::jogo::objetos::soltar_handle(&mut hw);
+    crate::jogo::objetos::soltar_handle(&mut h);
     crate::jogo::objetos::soltar_handle(&mut camada);
     crate::jogo::objetos::soltar_handle(&mut proxy);
-    anexou
+    tinha_forte
 }
 
-/// `inkWidget.AttachController` do Codeware: o controller vira o `logicController` do widget (ou entra nos secundários) e, como o
-/// `WidgetBuildingService::AttachController`, recebe o widget e o `layerProxy` dele; com camada viva, é registrado nela e recebe o `OnInitialize` pelo slot
-/// `+0x110`. Controller que já tinha `layerProxy` devolve `true` sem mais nada; widget sem camada devolve `false` (o `OnInitialize` vem do
-/// `AttachWidgetTree` quando a árvore for anexada).
+/// Guarda `referencia` (forte, já contada) no fim dos secundários do widget; sem vaga, solta.
+unsafe fn c175_guardar_secundario(widget: *mut u8, mut referencia: [u64; 2]) {
+    let lista = widget.add(C175_WIDGET_SECUNDARIOS);
+    if !crate::memoria::is_readable(lista as *const c_void, 0x10) {
+        crate::jogo::objetos::soltar_handle(&mut referencia);
+        return;
+    }
+    let (_, n, cap) = crate::jogo::listas::dynarray_no_campo(lista, 0);
+    if n >= cap {
+        // Boot 184: a lista nasce vazia sem alocador no fim, e só o reserve do motor grava o que a soltura dele espera ali.
+        let mover = if n == 0 { std::ptr::null() } else { crate::rebase(MOVER_HANDLES_VM) as *const c_void };
+        crate::jogo::listas::reservar(lista as *mut c_void, n as u32 + 1, 16, 8, mover);
+    }
+    let (entradas, n, cap) = crate::jogo::listas::dynarray_no_campo(lista, 0);
+    if entradas.is_null() || n >= cap {
+        crate::jogo::objetos::soltar_handle(&mut referencia);
+        return;
+    }
+    (entradas.add(n * 16) as *mut [u64; 2]).write_unaligned(referencia);
+    (lista.add(0x0c) as *mut u32).write_unaligned(n as u32 + 1);
+}
+
+/// `inkWidget.AttachController` de mod: o controller vira o do widget (ou secundário) e é ligado à camada.
 pub(crate) unsafe fn c175_ligar_controller(widget: *mut u8, controller: *mut u8, secundario: bool) -> bool {
-    if c175_campo(widget, C175_WIDGET_PROXY) == u64::MAX || c175_campo(controller, C175_CONTROLLER_PROXY) == u64::MAX {
+    if c175_campo(widget, C175_WIDGET_PROXY) == u64::MAX {
+        return false;
+    }
+    let proxy_do_controller = c175_campo(controller, C175_CONTROLLER_PROXY);
+    if proxy_do_controller == u64::MAX {
         return false;
     }
     let mut hc = handle_forte_de(controller);
@@ -2245,67 +2259,49 @@ pub(crate) unsafe fn c175_ligar_controller(widget: *mut u8, controller: *mut u8,
         crate::jogo::objetos::soltar_handle(&mut hc);
         return false;
     }
-    // A referência forte que o widget passa a guardar.
-    let mut dono = hc;
-    (*(dono[1] as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
+    // A referência do widget é dele: +1 no forte, solta pelo motor junto com o widget.
+    (*(hc[1] as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
     if secundario {
-        // O array de secundários nasce vazio, sem alocador no fim do buffer: cresce pelo reserve do motor, como o `PushBack` da referência (boot 184:
-        // o crescimento do BWMS gravou lixo no lugar do alocador e o jogo caiu quando o widget soltou o array).
-        let arr = widget.add(C175_WIDGET_SECUNDARIOS);
-        let tam = (arr.add(0x0c) as *const u32).read_unaligned();
-        if tam >= (arr.add(0x08) as *const u32).read_unaligned() {
-            let mover = if tam == 0 { std::ptr::null() } else { crate::rebase(MOVER_HANDLES_VM) as *const c_void };
-            crate::jogo::listas::reservar(arr as *mut c_void, tam + 1, 0x10, 8, mover);
-        }
-        let entradas = (arr as *const u64).read_unaligned() as *mut u64;
-        if entradas.is_null() || (arr.add(0x08) as *const u32).read_unaligned() <= tam {
-            crate::jogo::objetos::soltar_handle(&mut dono);
-        } else {
-            entradas.add(tam as usize * 2).write_unaligned(dono[0]);
-            entradas.add(tam as usize * 2 + 1).write_unaligned(dono[1]);
-            (arr.add(0x0c) as *mut u32).write_unaligned(tam + 1);
-        }
+        c175_guardar_secundario(widget, hc);
     } else {
-        let campo = widget.add(C175_WIDGET_CONTROLLER) as *mut u64;
-        let mut antigo = [campo.read_unaligned(), campo.add(1).read_unaligned()];
-        campo.write_unaligned(dono[0]);
-        campo.add(1).write_unaligned(dono[1]);
+        let campo = widget.add(C175_WIDGET_CONTROLLER) as *mut [u64; 2];
+        let mut antigo = campo.read_unaligned();
+        campo.write_unaligned(hc);
         crate::jogo::objetos::soltar_handle(&mut antigo);
     }
-    let ligou = 'ligar: {
-        if c175_campo(controller, C175_CONTROLLER_PROXY) != 0 {
-            break 'ligar true;
-        }
-        let mut hw = handle_forte_de(widget);
-        if hw[0] != 0 {
-            let gravar_widget: unsafe extern "C" fn(*mut u8, *const u64) = std::mem::transmute(crate::rebase(C175_CONTROLLER_WIDGET_VM));
-            gravar_widget(controller, hw.as_ptr());
-        }
-        crate::jogo::objetos::soltar_handle(&mut hw);
-        let proxy = c175_campo(widget, C175_WIDGET_PROXY);
-        if proxy == 0 {
-            break 'ligar false;
-        }
-        let gravar_proxy: unsafe extern "C" fn(*mut u8, *const u64) = std::mem::transmute(crate::rebase(C175_CONTROLLER_PROXY_VM));
-        gravar_proxy(controller, widget.add(C175_WIDGET_PROXY) as *const u64);
-        let Some(mut camada) = c175_travar(proxy as *const u8, C175_PROXY_CAMADA) else {
-            break 'ligar false;
-        };
-        let registrar: unsafe extern "C" fn(*mut c_void, *const u64) = std::mem::transmute(crate::rebase(C175_REGISTER_LISTENER_VM));
-        registrar(camada[0] as *mut c_void, hc.as_ptr());
-        crate::jogo::objetos::soltar_handle(&mut camada);
-        let on_initialize: unsafe extern "C" fn(*mut u8) = std::mem::transmute(c175_slot(controller, C175_VT_ON_INITIALIZE));
-        on_initialize(controller);
-        true
-    };
+    let ligado = c175_ligar_a_camada(widget, controller, &hc, proxy_do_controller);
     crate::jogo::objetos::soltar_handle(&mut hc);
-    ligou
+    ligado
 }
 
-// Codeware 1.21.1 ("Fix custom ink controllers events") na 2.5: o `WidgetBuildingService::AttachController` nativo (`0x104154158`, só chamado pelo
+/// Widget e proxy gravados no controller, registro na camada e `OnInitialize`; `true` também com o controller já ligado antes.
+unsafe fn c175_ligar_a_camada(widget: *mut u8, controller: *mut u8, hc: &[u64; 2], proxy_do_controller: u64) -> bool {
+    if proxy_do_controller != 0 {
+        return true;
+    }
+    let mut hw = handle_forte_de(widget);
+    if hw[0] != 0 {
+        let gravar_widget: C175GravarNoControllerFn = std::mem::transmute(crate::rebase(C175_CONTROLLER_WIDGET_VM));
+        gravar_widget(controller, hw.as_ptr());
+    }
+    crate::jogo::objetos::soltar_handle(&mut hw);
+    let proxy = c175_campo(widget, C175_WIDGET_PROXY);
+    if proxy == 0 || proxy == u64::MAX {
+        return false;
+    }
+    let gravar_proxy: C175GravarNoControllerFn = std::mem::transmute(crate::rebase(C175_CONTROLLER_PROXY_VM));
+    gravar_proxy(controller, widget.add(C175_WIDGET_PROXY) as *const u64);
+    let Some(camada) = c175_travar(proxy as *const u8, C175_PROXY_CAMADA) else {
+        return false;
+    };
+    c175_registrar_e_inicializar(camada, hc.as_ptr(), controller);
+    true
+}
+
+// Eventos de controller ink de script na 2.5: o `AttachController` nativo do motor (`0x104154158`, só chamado pelo
 // `inkWidget.AttachController` `0x1043a399c`; x0 `&Handle<inkWidget>`, x1 `&Handle<inkLogicController>`, devolve bool) grava widget e proxy no
 // controller e trava a camada em `proxy+0x48`, morta nos widgets do HUD (lane I de 2026-10-28, `BwmsC121Medir` = 0b11101: `+0x48` morta, `+0x38` viva):
-// sai com 0 sem registrar nem chamar o `OnInitialize`. O gancho completa pela camada de `+0x38`, como o `c175_ligar_controller` e a referência.
+// sai com 0 sem registrar nem chamar o `OnInitialize`.
 pub(crate) const ANEXAR_CONTROLLER_NATIVO_VM: u64 = 0x1_0415_4158;
 
 pub(crate) const ANEXAR_CONTROLLER_NATIVO_PROLOGO: u32 = 0xd101_83ff;
@@ -2315,24 +2311,24 @@ pub(crate) static ORIG_ANEXAR_CONTROLLER: AtomicU64 = AtomicU64::new(0);
 #[cfg(feature = "devtools")]
 pub(crate) static CONTROLLERS_COMPLETADOS: AtomicU64 = AtomicU64::new(0);
 
+/// Gancho do `AttachController` nativo (`ANEXAR_CONTROLLER_NATIVO_VM`).
 pub(crate) unsafe extern "C" fn anexar_controller_hook(widget: *const u64, controller: *const u64) -> u64 {
-    let f: unsafe extern "C" fn(*const u64, *const u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_ANEXAR_CONTROLLER));
-    let r = f(widget, controller);
-    // 0 com o proxy já gravado no controller = a camada de `+0x48` não travou; sem proxy (widget fora de camada) o `AttachWidgetTree` liga depois.
-    if r & 1 != 0 || controller.is_null() {
+    type AnexarControllerFn = unsafe extern "C" fn(*const u64, *const u64) -> u64;
+    let original: AnexarControllerFn = std::mem::transmute(original_publicado(&ORIG_ANEXAR_CONTROLLER));
+    let r = original(widget, controller);
+    if r & 1 != 0 || controller.is_null() || !crate::memoria::is_readable(controller as *const c_void, 16) {
         return r;
     }
-    let c = controller.read_unaligned() as *const u8;
-    let proxy = c175_campo(c, C175_CONTROLLER_PROXY);
-    if matches!(proxy, 0 | u64::MAX) {
+    let obj = controller.read_unaligned() as *mut u8;
+    // Proxy 0: widget fora de camada; a árvore liga o controller quando entrar numa.
+    let proxy = c175_campo(obj, C175_CONTROLLER_PROXY);
+    if proxy == 0 || proxy == u64::MAX {
         return r;
     }
-    let Some(mut camada) = c175_travar(proxy as *const u8, C175_PROXY_CAMADA) else { return r };
-    let registrar: unsafe extern "C" fn(*mut c_void, *const u64) = std::mem::transmute(crate::rebase(C175_REGISTER_LISTENER_VM));
-    registrar(camada[0] as *mut c_void, controller);
-    crate::jogo::objetos::soltar_handle(&mut camada);
-    let on_initialize: unsafe extern "C" fn(*const u8) = std::mem::transmute(c175_slot(c, C175_VT_ON_INITIALIZE));
-    on_initialize(c);
+    let Some(camada) = c175_travar(proxy as *const u8, C175_PROXY_CAMADA) else {
+        return r;
+    };
+    c175_registrar_e_inicializar(camada, controller, obj);
     #[cfg(feature = "devtools")]
     CONTROLLERS_COMPLETADOS.fetch_add(1, Ordering::Relaxed);
     1
@@ -2341,38 +2337,48 @@ pub(crate) unsafe extern "C" fn anexar_controller_hook(widget: *const u64, contr
 /// No `on_load`, sempre: só o `inkWidget.AttachController` chama o `0x104154158`.
 pub(crate) unsafe fn install_anexar_controller() {
     let r = instalar_conferindo_prologo(ANEXAR_CONTROLLER_NATIVO_VM, ANEXAR_CONTROLLER_NATIVO_PROLOGO, anexar_controller_hook as *mut c_void, &ORIG_ANEXAR_CONTROLLER);
-    crate::veredito_dev!("[c121] hook do WidgetBuildingService::AttachController nativo: {r:?}");
+    crate::veredito_dev!("[c121] hook do AttachController nativo: {r:?}");
 }
 
+/// Gancho do handler de script `inkWidget.Reparent`.
 pub(crate) unsafe extern "C" fn c175_depois_do_reparent(widget: *mut c_void, frame: *mut c_void, out: *mut c_void, rt: i64) {
-    let f: C175HandlerFn = std::mem::transmute(original_publicado(&ORIG_C175_REPARENT));
-    f(widget, frame, out, rt);
-    if c175_campo(widget as *const u8, C175_WIDGET_PROXY) == 0 && c175_anexar_arvore(widget as *mut u8) {
+    let original: C175HandlerFn = std::mem::transmute(original_publicado(&ORIG_C175_REPARENT));
+    original(widget, frame, out, rt);
+    let w = widget as *mut u8;
+    if c175_campo(w, C175_WIDGET_PROXY) == 0 && c175_anexar_arvore(w) {
         C175_ANEXADAS[0].fetch_add(1, Ordering::Relaxed);
     }
 }
 
-/// Último filho do widget composto pelo container da vtable; `None` sem filhos.
+/// Último filho do widget composto; `None` sem filhos.
 pub(crate) unsafe fn c175_ultimo_filho(pai: *const u8) -> Option<*mut u8> {
-    let filhos: unsafe extern "C" fn(*const u8) -> *const u8 = std::mem::transmute(c175_slot(pai, C175_VT_FILHOS));
+    type FilhosFn = unsafe extern "C" fn(*const u8) -> *const u8;
+    type QuantosFn = unsafe extern "C" fn(*const u8) -> u32;
+    type FilhoFn = unsafe extern "C" fn(*const u8, u32) -> *mut u8;
+    if pai.is_null() {
+        return None;
+    }
+    let filhos: FilhosFn = std::mem::transmute(c175_slot(pai, C175_VT_FILHOS));
     let container = filhos(pai);
     if container.is_null() {
         return None;
     }
-    let quantos: unsafe extern "C" fn(*const u8) -> u32 = std::mem::transmute(c175_slot(container, C175_VT_QUANTOS));
+    let quantos: QuantosFn = std::mem::transmute(c175_slot(container, C175_VT_QUANTOS));
     let n = quantos(container);
     if n == 0 {
         return None;
     }
-    let filho: unsafe extern "C" fn(*const u8, u32) -> *mut u8 = std::mem::transmute(c175_slot(container, C175_VT_FILHO));
-    let c = filho(container, n - 1);
-    (!c.is_null()).then_some(c)
+    let filho: FilhoFn = std::mem::transmute(c175_slot(container, C175_VT_FILHO));
+    let f = filho(container, n - 1);
+    (!f.is_null()).then_some(f)
 }
 
+/// Gancho do handler de script `inkCompoundWidget.AddChildWidget`.
 pub(crate) unsafe extern "C" fn c175_depois_do_add_child_widget(pai: *mut c_void, frame: *mut c_void, out: *mut c_void, rt: i64) {
-    let f: C175HandlerFn = std::mem::transmute(original_publicado(&ORIG_C175_ADD_CHILD_WIDGET));
-    f(pai, frame, out, rt);
-    if matches!(c175_campo(pai as *const u8, C175_WIDGET_PROXY), 0 | u64::MAX) {
+    let original: C175HandlerFn = std::mem::transmute(original_publicado(&ORIG_C175_ADD_CHILD_WIDGET));
+    original(pai, frame, out, rt);
+    let proxy_do_pai = c175_campo(pai as *const u8, C175_WIDGET_PROXY);
+    if proxy_do_pai == 0 || proxy_do_pai == u64::MAX {
         return;
     }
     if let Some(filho) = c175_ultimo_filho(pai as *const u8) {
@@ -2382,40 +2388,45 @@ pub(crate) unsafe extern "C" fn c175_depois_do_add_child_widget(pai: *mut c_void
     }
 }
 
-/// Resposta de `c175_classe_legada` por classe (`CClass*`), negativa inclusive. A busca das duas props sobe a cadeia inteira com
-/// `is_readable` (≥ 5 syscalls por classe), e o controller comum, sem `detachedWidget`, anda até a raiz em todo `OnInitialize`; a
-/// resposta só depende das props da classe e dos pais. Classe não muda de endereço enquanto o processo vive, e o único escritor de
-/// props de classe existente em runtime é `tipos_do_motor::propriedade_nativa`, que limpa o mapa (prop nova num pai muda as filhas).
+/// Resposta de `c175_classe_legada` por classe (`CClass*`), negativa inclusive: a resposta só depende das props da classe e dos pais, e o único
+/// escritor de props de classe em runtime é `tipos_do_motor::propriedade_nativa`, que limpa o mapa (o teste
+/// `resposta_fica_por_classe_ate_prop_nova` lê as chaves).
 static C175_CLASSES_LEGADAS: Mutex<Option<std::collections::HashMap<usize, bool>>> = Mutex::new(None);
 
 pub(crate) fn c175_esquecer_classes_legadas() {
     *C175_CLASSES_LEGADAS.lock().unwrap_or_else(|e| e.into_inner()) = None;
 }
 
-/// Controller de script com `detachedWidget` e `gameController` (o `inkCustomController` antigo do Codeware), que chama o próprio `OnInitialize`.
+/// Controller de script legado pela classe dele.
 pub(crate) unsafe fn c175_controller_legado(controller: *mut u8) -> bool {
-    c175_classe_legada(crate::rtti::class_of(controller as *mut c_void))
+    c175_classe_legada(rtti::class_of(controller as *mut c_void))
 }
 
-/// `c175_controller_legado` pela classe. A trava fica com a busca: `propriedade_nativa` que limpe o mapa no meio dela não deixa
-/// resposta velha guardada.
+/// Classe de controller legado (guardada por classe em [`C175_CLASSES_LEGADAS`]).
 pub(crate) unsafe fn c175_classe_legada(cls: *mut c_void) -> bool {
     if cls.is_null() {
         return false;
     }
     let mut guardadas = C175_CLASSES_LEGADAS.lock().unwrap_or_else(|e| e.into_inner());
-    *guardadas.get_or_insert_with(std::collections::HashMap::new).entry(cls as usize).or_insert_with(|| {
-        !crate::rtti::find_property_in_class(cls, "detachedWidget").is_null() && !crate::rtti::find_property_in_class(cls, "gameController").is_null()
-    })
+    let mapa = guardadas.get_or_insert_with(std::collections::HashMap::new);
+    if let Some(&legada) = mapa.get(&(cls as usize)) {
+        return legada;
+    }
+    // O controller antigo com `detachedWidget` e `gameController` se inicializa sozinho; o `OnInitialize` da árvore seria o 2º.
+    let legada =
+        !rtti::find_property_in_class(cls, "detachedWidget").is_null() && !rtti::find_property_in_class(cls, "gameController").is_null();
+    mapa.insert(cls as usize, legada);
+    legada
 }
 
+/// Gancho do `OnInitialize` do `inkWidgetLogicController` (slot `+0x110`).
 pub(crate) unsafe extern "C" fn c175_on_initialize(controller: *mut u8) {
     if !controller.is_null() && c175_controller_legado(controller) {
         C175_LEGADOS_PULADOS.fetch_add(1, Ordering::Relaxed);
         return;
     }
-    let f: unsafe extern "C" fn(*mut u8) = std::mem::transmute(original_publicado(&ORIG_C175_ON_INITIALIZE));
-    f(controller);
+    let original: unsafe extern "C" fn(*mut u8) = std::mem::transmute(original_publicado(&ORIG_C175_ON_INITIALIZE));
+    original(controller);
 }
 
 #[cfg(test)]
@@ -2487,21 +2498,25 @@ mod c175_classes_legadas_tests {
     }
 }
 
-/// Instala os hooks do `Reparent`, do `AddChildWidget` e do `OnInitialize` (no `on_load`) com o prólogo conferido: com `bwms-widget-building.reds` no bundle
-/// ou `~/.bwms-hook-c175-teste`.
+/// No `on_load`: os ganchos da ligação de widget e controller de mod à camada.
 pub(crate) unsafe fn install_c175_widget_building() {
-    let no_bundle = crate::dylib_dir().is_some_and(|d| std::path::Path::new(&d).join("../r6/scripts/blackwall-mods/bwms-widget-building.reds").exists());
-    let teste = marcador_individual("c175-teste");
-    if !no_bundle && !teste {
+    let no_bundle = crate::dylib_dir()
+        .is_some_and(|d| std::path::Path::new(&d).join("../r6/scripts/blackwall-mods/bwms-widget-building.reds").exists());
+    if !no_bundle && !marcador_individual("c175-teste") {
         return;
     }
     let reparent = instalar_conferindo_prologo(C175_REPARENT_VM, C175_REPARENT_PROLOGO, c175_depois_do_reparent as *mut c_void, &ORIG_C175_REPARENT);
-    let add_child = instalar_conferindo_prologo(C175_ADD_CHILD_WIDGET_VM, C175_ADD_CHILD_WIDGET_PROLOGO, c175_depois_do_add_child_widget as *mut c_void, &ORIG_C175_ADD_CHILD_WIDGET);
-    let on_initialize = instalar_conferindo_prologo(C175_ON_INITIALIZE_VM, C175_ON_INITIALIZE_PROLOGO, c175_on_initialize as *mut c_void, &ORIG_C175_ON_INITIALIZE);
-    // `None` é o hook já no alvo: no ar também.
-    C175_ATIVO.store([reparent, add_child, on_initialize].iter().all(|r| *r != Some(false)), Ordering::Relaxed);
+    let filho = instalar_conferindo_prologo(
+        C175_ADD_CHILD_WIDGET_VM,
+        C175_ADD_CHILD_WIDGET_PROLOGO,
+        c175_depois_do_add_child_widget as *mut c_void,
+        &ORIG_C175_ADD_CHILD_WIDGET,
+    );
+    let iniciar = instalar_conferindo_prologo(C175_ON_INITIALIZE_VM, C175_ON_INITIALIZE_PROLOGO, c175_on_initialize as *mut c_void, &ORIG_C175_ON_INITIALIZE);
+    let ativo = ![reparent, filho, iniciar].contains(&Some(false));
+    C175_ATIVO.store(ativo, Ordering::Relaxed);
     crate::veredito_dev!(
-        "[c175] hooks do WidgetBuildingService (reds no bundle {no_bundle}, marcador {teste}): Reparent {reparent:?}, AddChildWidget {add_child:?}, OnInitialize {on_initialize:?}"
+        "[c175] ganchos da camada: Reparent {reparent:?}, AddChildWidget {filho:?}, OnInitialize {iniciar:?}; reds no bundle={no_bundle}; ativo={ativo}"
     );
 }
 
@@ -2510,8 +2525,8 @@ pub(crate) unsafe fn install_c175_widget_building() {
 
 
 
-// ===== ArchiveXL 1.27.2: `resource.patch` de `.inkanim` pelo `OnDependenciesReady` do serializer =====
-// A referência (`ResourcePatch/Extension.cpp`, `OnInkAnimResourceLoad`) troca as `sequences` da biblioteca alvo pelas do patch com o mesmo `name` e
+// ===== `resource.patch` de `.inkanim` pelo `OnDependenciesReady` do serializer =====
+// O patch troca as `sequences` da biblioteca alvo pelas do patch com o mesmo `name` e
 // acrescenta as que o alvo não tem; nada mais é mesclado. O gancho é o da 51g (`arquivos_do_jogo::dependencias_prontas_hook`). `sequences` é
 // `DynArray<Handle<inkanimSequence>>` (16 B por handle); os offsets dela e do `name` da sequência saem do RTTI na carga da tabela. A sequência que entra
 // ganha +1 no contador forte (o patch continua dono da dele); a que sai fica com a referência que tinha.

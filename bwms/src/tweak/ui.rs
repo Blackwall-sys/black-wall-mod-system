@@ -26,7 +26,7 @@ pub fn serve(addr: &str) -> Result<(), String> {
     eprintln!("carregando tweakdb + nomes (uma vez)...");
     let db = super::open(None)?;
     let names = super::load_names(false)
-        .ok_or("a UI precisa da lista de nomes (tweakdbstr.kark)")?;
+        .ok_or_else(|| format!("a UI navega pelos nomes: {}", super::SEM_LISTA_DE_NOMES))?;
     let state = Arc::new(State { db, names });
 
     let listener = TcpListener::bind(addr).map_err(|e| format!("bind {addr}: {e}"))?;
@@ -312,11 +312,11 @@ fn api_apply(st: &State, body: &str, is_yaml: bool, check_only: bool) -> String 
     let mut fail = 0usize;
 
     if is_yaml {
-        let root = match bwms_primitives::tweakxl::yaml::parse(body) {
+        let root = match bwms_primitives::tweaks::yaml::parse(body) {
             Ok(r) => r,
             Err(e) => return jerror(&format!("YAML: {e}")),
         };
-        let ops = match bwms_primitives::tweakxl::interpret(&root) {
+        let ops = match bwms_primitives::tweaks::interpret(&root) {
             Ok(o) => o,
             Err(e) => return jerror(&e),
         };

@@ -1,8 +1,7 @@
 // bwms-primitivas.reds — as natives dos utilitários (Bits/Hash/Number/String/Compatibility), a reflexão getf/setf/callf no player e as
 // vias globais do CallbackSystem, declaradas pra que um mod as alcance (native registrada sem declaração `.reds` é inalcançável).
 //
-// Bits/Hash/Number/String usam nome próprio BWMS (não Codeware — framework de 3os, sem
-// obrigação de replicar nome, ver dist/MODDER-API.md). Bloco de registro no Rust é gated por
+// Bits/Hash/Number/String usam nome próprio BWMS (ver dist/MODDER-API.md). Bloco de registro no Rust é gated por
 // `reds_uses(...)` — precisa de >=1 identificador deste arquivo pra ativar o cluster inteiro.
 
 // ===== Utils/Bits.reds — 16 funções (4 larguras x 4 operações) =====

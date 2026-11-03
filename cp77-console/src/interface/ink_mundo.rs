@@ -1,6 +1,6 @@
 //! Camada de UI no mundo (`inkWorldLayer`): as telas, anúncios e hologramas que o jogo desenha como widget no mundo 3D.
 //!
-//! Teto de world widgets (ArchiveXL `#102`): o job que atualiza os componentes do layer (`0x1043181c8`, corpo de `ParallelFor` sobre a faixa
+//! Teto de world widgets: o job que atualiza os componentes do layer (`0x1043181c8`, corpo de `ParallelFor` sobre a faixa
 //! de índices) só manda os 10 primeiros componentes marcados (bit 1 do byte `+0x8` do objeto que o componente devolve em `vt+0x100`) pra
 //! atualização (`0x104315560`); do 11º em diante, `cmp x22, #0x9; b.hi` desvia pra `0x10431422c`. Um mod com mais de 10 widgets no mundo via o
 //! resto parado. O patch troca o `b.hi` (`0x1043182f8`) por `nop`: todo componente marcado vai pra atualização, como na referência (onde é o

@@ -1,4 +1,4 @@
-//! overlay.rs — janela in-game (estilo CET) desenhada por cima do frame do jogo.
+//! overlay.rs — janela in-game desenhada por cima do frame do jogo.
 //!
 //! Swizzla `-[<AGXFamilyCommandBuffer> presentDrawable:]` pra desenhar o terminal no `drawable.texture` (render pass
 //! loadAction=Load preserva o jogo) e `-[NSApplication sendEvent:]` pro teclado e o mouse (toggle por `). O terminal é montado
@@ -250,8 +250,7 @@ pub unsafe fn disable_app_nap() {
 /// Ponte do clipboard do sistema (NSPasteboard), extraída em funções standalone (`clipboard_get`/
 /// `clipboard_set`) — reusadas por 2 consumidores: (1) `AreaDoSistema` (abaixo, campo de texto do
 /// terminal — Cmd+C/Cmd+X/Cmd+V no console, colar comandos longos); (2) `register.rs::tramp_ink_*`
-/// (Codeware `#100`/`inkSystem.GetClipboardText`/`SetClipboardText` — a fonte real usa a lib de 3o
-/// `clip::get_text`/`clip::set_text`, C++-only; aqui é a MESMA capacidade via a ponte NSPasteboard
+/// (`inkSystem.GetClipboardText`/`SetClipboardText` — via a ponte NSPasteboard
 /// que este projeto já tinha, provada em produção pelo console há sessões — zero código novo de
 /// baixo nível, só reuso). `pub(crate)` pra ser visível de `register.rs` sem duplicar a ponte ObjC.
 pub(crate) unsafe fn clipboard_get() -> Option<String> {
@@ -293,7 +292,7 @@ pub(crate) unsafe fn clipboard_set(value: &str) {
     f(pb, sel!("setString:forType:"), ns, ty);
 }
 
-/// Quantos tipos o clipboard do sistema tem agora (0 = vazio de verdade; texto, imagem etc. contam). Codeware `#100` 100-3.
+/// Quantos tipos o clipboard do sistema tem agora (0 = vazio de verdade; texto, imagem etc. contam).
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn clipboard_tipos() -> Option<usize> {
     let cls = class("NSPasteboard");
@@ -477,7 +476,7 @@ pub unsafe fn cg_key_event(keycode: u16, down: bool) {
     }
 }
 
-/// `cw-real-mod-e2e`/`axl-link-visual-proof` (2026-07-19): navegação de menu nativo por MOUSE.
+/// Mod real ponta a ponta/prova visual do link (2026-07-19): navegação de menu nativo por MOUSE.
 /// Achado de sessão anterior (documentado em `proofs/2026-07-18-redscript-cheat-effects-proof-
 /// CLIQUE-REAL-PROVADO.log`): o jogo lê DELTA relativo de HID pro cursor renderizado por ele
 /// (não posição absoluta — `CGWarpMouseCursorPosition` não sincroniza). MESMA receita de
@@ -552,7 +551,7 @@ pub unsafe fn cg_click() {
 static LOGGED: AtomicBool = AtomicBool::new(false);
 static SHOW: AtomicBool = AtomicBool::new(false); // começa ESCONDIDO (` abre)
 static PREV_SHOW: AtomicBool = AtomicBool::new(false); // p/ detectar a borda fechar→devolver o mouse
-/// `cet-lifecycle-events`: bordas abrir/fechar do overlay, sinalizadas AQUI (thread do render, via
+/// Eventos de ciclo de vida: bordas abrir/fechar do overlay, sinalizadas AQUI (thread do render, via
 /// presentDrawable) mas consumidas+disparadas (`fire_event`) de dentro do `cp77_tick` (thread do
 /// jogo) — chamar a VM/redscript fora da thread do jogo é arriscado (lição desta sessão: 3ptest/
 /// fbtest/etc. só chamam call_func do cp77_tick). Ver o consumo em `lib.rs`.
@@ -665,7 +664,7 @@ unsafe fn log_input_event(event: Id, t: usize) {
     input_file_log(&ev);
 }
 
-/// Força o estado aberto/fechado do overlay (teste de `cet-lifecycle-events` via canal, sem HID —
+/// Força o estado aberto/fechado do overlay (teste dos eventos de ciclo de vida via canal, sem HID —
 /// dispara a MESMA borda que o toggle real do backtick dispara em desenhar_terminal).
 pub fn set_shown(v: bool) {
     SHOW.store(v, Ordering::Relaxed);
@@ -720,7 +719,7 @@ extern "C" fn my_sendevent(this: Id, cmd: Sel, event: Id) {
                     } else if efeito != Efeito::Segue {
                         consume = true;
                     } else if !SHOW.load(Ordering::Relaxed) {
-                        // CallbackSystem RawInput (2026-07-18, `cw-rawinput-realname`): mapeia o
+                        // CallbackSystem RawInput (2026-07-18, input cru com nome real): mapeia o
                         // keycode+char pro valor REAL de EInputKey + lê os modificadores AppKit,
                         // enfileira TODOS pro evento "Input/Key" (drenado no cp77_tick, que
                         // constrói+despacha um `ref<KeyInputEvent>` REAL na thread do jogo).
@@ -732,7 +731,7 @@ extern "C" fn my_sendevent(this: Id, cmd: Sel, event: Id) {
                         crate::entrada::push_raw_key(mapped_key, raw_shift, raw_control, raw_alt);
                         #[cfg(feature = "lua")]
                         if let Some(c) = ch.chars().next() {
-                            crate::cet::tecla(c, true);
+                            crate::mods_lua::tecla(c, true);
                         }
                         // escondido: captura a tecla SÓ pro buffer K-LOG (não pro console),
                         // e só se a captura estiver ligada (aba K-LOG). Mantém o console limpo.
@@ -799,7 +798,7 @@ extern "C" fn my_sendevent(this: Id, cmd: Sel, event: Id) {
                                 }
                             }
                         }
-                        // CET `VKBindings` (2026-08-11): metade que faltava do CallbackSystem
+                        // Tecla solta (2026-08-11): metade que faltava do CallbackSystem
                         // RawInput — captura da tecla SOLTA, mesma técnica de mapeamento/
                         // enfileiramento do keydown (linha ~647 acima), só o destino é a fila
                         // IRMÃ (`push_raw_key_up`, drenada como "Input/KeyUp" no `cp77_tick`).
@@ -814,7 +813,7 @@ extern "C" fn my_sendevent(this: Id, cmd: Sel, event: Id) {
                         crate::entrada::push_raw_key_up(mapped_key_up, up_shift, up_control, up_alt);
                         #[cfg(feature = "lua")]
                         if let Some(c) = ch_up {
-                            crate::cet::tecla(c, false);
+                            crate::mods_lua::tecla(c, false);
                         }
                     }
                 }
@@ -915,7 +914,7 @@ struct UiState {
 impl UiState {
     /// Recall do histórico do console (↑=up=true = comando mais antigo; ↓=up=false = mais recente,
     /// passar do fim volta ao campo livre). Muda `cmd_history_idx` + `cmd_buf`. Extraído do render loop
-    /// pra ser testável (`cet-console-history`). É EXATAMENTE a lógica que a tecla ↑/↓ aciona no overlay.
+    /// pra ser testável (histórico do console). É EXATAMENTE a lógica que a tecla ↑/↓ aciona no overlay.
     fn history_recall(&mut self, up: bool) {
         if self.cmd_history.is_empty() {
             return;
@@ -941,7 +940,7 @@ impl UiState {
         }
     }
 
-    /// `cet-console-history` — self-test AUTOMATIZÁVEL no menu (sem HID): exercita o `cmd_history` REAL
+    /// Histórico do console — self-test AUTOMATIZÁVEL no menu (sem HID): exercita o `cmd_history` REAL
     /// do overlay com a MESMA lógica de recall que a tecla ↑/↓ aciona, + o comando `help`. Loga cada
     /// passo. Prova a paridade de console (↑ recupera o último comando no campo; `help` lista in-overlay)
     /// sem precisar digitar/apertar teclas. Restaura o estado no fim. Ver `desenhar_terminal` (gate marcador).
@@ -1099,7 +1098,7 @@ fn montar_quadro<'a>(ui: &mut UiState, p: &'a mut Persistente, e: Entrada, area:
     montar_terminal(&mut t, ui);
     crate::mods_do_usuario::api::desenhar_plugins(&mut t);
     #[cfg(feature = "lua")]
-    crate::cet::interface::desenhar(&mut t);
+    crate::mods_lua::interface::desenhar(&mut t);
     t.terminar()
 }
 
@@ -1621,7 +1620,7 @@ pub(crate) const TEXTO_DA_ABA_MODS: &str = "Para pôr um mod no jogo, extraia a 
 static LUT_PRESET: AtomicU32 = AtomicU32::new(0);
 const LUT_COUNT: u32 = 7;
 const LUT_NAMES: [&str; 7] = ["off", "Quente", "Frio", "P&B", "Contraste", "Sepia", "Bodycam"];
-/// `cet-lut-pixel-proof`: seta o preset por comando (sem depender de F2 nem de clique na aba, útil pro
+/// Prova de pixel da LUT: seta o preset por comando (sem depender de F2 nem de clique na aba, útil pro
 /// cmd-channel de dev). MESMO write atômico que o clique da aba "LUT" já faz — zero risco novo.
 pub(crate) fn set_lut_preset(n: u32) {
     LUT_PRESET.store(n % LUT_COUNT, Ordering::Relaxed);
@@ -1935,7 +1934,7 @@ fn save_favs(f: &[(String, String)]) {
 
 /// Catálogo mínimo de itens (id\tlabel\ttipo\tcategoria), dados próprios. O picker é só
 /// conveniência — `give Items.X N` aceita qualquer ID do TweakDB do próprio usuário.
-const CATALOG_TSV: &str = include_str!("../cet_catalog.tsv");
+const CATALOG_TSV: &str = include_str!("../catalogo_de_itens.tsv");
 fn catalog() -> &'static Vec<[&'static str; 4]> {
     static C: std::sync::OnceLock<Vec<[&'static str; 4]>> = std::sync::OnceLock::new();
     C.get_or_init(|| {
@@ -2377,11 +2376,11 @@ unsafe fn desenhar_terminal(cb_raw: Id, drawable: Id) {
     if show {
         CGAssociateMouseAndMouseCursorPosition(true);
         if !prev_show {
-            OVERLAY_OPEN_EDGE.store(true, Ordering::Relaxed); // `cet-lifecycle-events`: onOverlayOpen
+            OVERLAY_OPEN_EDGE.store(true, Ordering::Relaxed); // Eventos de ciclo de vida: onOverlayOpen
         }
     } else if prev_show {
         CGAssociateMouseAndMouseCursorPosition(false); // fechou agora → mouse volta pra câmera
-        OVERLAY_CLOSE_EDGE.store(true, Ordering::Relaxed); // `cet-lifecycle-events`: onOverlayClose
+        OVERLAY_CLOSE_EDGE.store(true, Ordering::Relaxed); // Eventos de ciclo de vida: onOverlayClose
     }
     if !show {
         return;
@@ -2414,7 +2413,7 @@ unsafe fn desenhar_terminal(cb_raw: Id, drawable: Id) {
         if show && rd.ui.frame % 30 == 1 {
             rd.ui.log_lines = tail_log(60);
         }
-        // `cet-console-history` self-test AUTOMATIZÁVEL no menu (sem HID): roda 1× no `cmd_history` REAL
+        // Histórico do console: self-test AUTOMATIZÁVEL no menu (sem HID): roda 1× no `cmd_history` REAL
         // do overlay, gate ~/.bwms-histtest (dev). Ver `run_history_selftest`.
         {
             static HISTTEST_DONE: AtomicBool = AtomicBool::new(false);
@@ -2940,7 +2939,7 @@ extern "C" fn my_present(this: Id, cmd: Sel, drawable: Id) {
         #[cfg(feature = "devtools")]
         sonda_de_pixels::fim_do_quadro(this, drawable);
         // VR: captura a cor do drawable final (game + UI/ink + nosso overlay) pro Quest.
-        // Mesmo hook = VR e CET juntos, um dylib. Só compila com `--features capture`.
+        // Mesmo hook = VR e terminal juntos, um dylib. Só compila com `--features capture`.
         #[cfg(feature = "capture")]
         crate::vr::captura::on_present(this, drawable);
         let orig = ORIG_PRESENT.load(Ordering::Relaxed);
@@ -3136,7 +3135,7 @@ pub(crate) mod prova_visual {
     /// da linha seguinte.
     pub(crate) const LINHAS_LONGAS: [&str; 4] = [
         "[give] 1x Items.Preset_Katana_Saburo -> inventário. Não esqueça de conferir o peso do inventário antes de pegar mais armas pesadas.",
-        "[tweakxl] base\\characters\\appearances\\player\\items\\clothing\\torso\\t2_jacket_aldecaldos_rich_rich.app,carregado,sem,erro",
+        "[tweaks] base\\characters\\appearances\\player\\items\\clothing\\torso\\t2_jacket_aldecaldos_rich_rich.app,carregado,sem,erro",
         "a,b;c!d?e\"f.g,h;i!j?k\"l.m,n;o!p?q\"r.s,t;u!v?w\"x.y,z a,b;c!d?e\"f.g,h;i!j?k\"l.m,n;o!p?q\"r.s,t;u!v?w\"x.y,z fim",
         "palavra      com      muitos      espaços      entre      elas      para      ver      onde      a      linha      quebra      agora",
     ];
@@ -3397,7 +3396,7 @@ pub(crate) mod prova_visual {
         ("campo-cursor-apagado", 0x954e3eaf7a9572f0),
         ("campo-selecao", 0xc9167d0b46cc918a),
         ("campo-rolado", 0xedb25a6657b7a79c),
-        ("linhas-longas", 0x72391af0d9a9aba6),
+        ("linhas-longas", 0xf10679245c215c82),
         ("escala-2x-mods", 0x893dd7600520958e),
         ("escala-2x-1920", 0xaacead9e56d9b584),
         // As 5 de plugin: o desenho é o aprovado; o título, a linha e a largura da janela, que segue o texto, são os de `PLUGIN`.
@@ -3440,9 +3439,9 @@ pub(crate) mod prova_visual {
         ("tema3-lut", 0xe97c45fc24b40f66),
         // A lista da aba Mods (etapa 3), aprovada pelo dono em 2026-10-24 (imagens em `z031/relatorios/M-prova-visual/`). Estas 6 e
         // as 5 `tema*-mods`/`escala-2x-mods` são com 0 plugins: `desenhar` zera os contadores dos plugins antes de cada caso.
-        ("mods-um", 0x3b2cd5a9dbb79674),
-        ("mods-tres-cores", 0xd04c5577f8949da0),
-        ("mods-dois-caminhos", 0x6e14cded29f9013d),
+        ("mods-um", 0x3e1c52a11e3c8809),
+        ("mods-tres-cores", 0xcc7bfb5059e385c8),
+        ("mods-dois-caminhos", 0x63046f426cf8eef0),
         ("mods-cem", 0x13d62eacfe344277),
         ("mods-dez-mil", 0x47367e078fcc044a),
         ("mods-nome-longo", 0x8f0e5d2a7220f74e),
@@ -4024,7 +4023,7 @@ mod prova_metal {
     }
 }
 
-/// Quadro do jogo em pixels, do último render (o `GetDisplayResolution` dos mods CET); `(0, 0)` antes do 1º quadro.
+/// Quadro do jogo em pixels, do último render (o `GetDisplayResolution` dos mods Lua); `(0, 0)` antes do 1º quadro.
 #[cfg(feature = "lua")]
 pub(crate) fn tamanho_do_quadro() -> (f32, f32) {
     (f32::from_bits(FRAME_W.load(Ordering::Relaxed)), f32::from_bits(FRAME_H.load(Ordering::Relaxed)))

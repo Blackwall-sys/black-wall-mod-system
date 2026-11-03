@@ -2,7 +2,7 @@
 //
 // `BwmsConfigGet/Set(key, value)` (redscript-mod-persistence, FECHADO 2026-07-13) já é um
 // arquivo externo persistente (`~/.bwms-modconfig.txt`, fora do save) — mas é um namespace FLAT
-// GLOBAL: só o próprio God Mode do BWMS usa. O CET real dá a CADA mod Lua seu próprio settings
+// GLOBAL: só o próprio God Mode do BWMS usa. O runtime Lua dá a CADA mod Lua seu próprio settings
 // store (`GetMod():GetSettings()`). Aqui: 100% redscript, ZERO native nova — só prefixa a key
 // com o id do mod antes de chamar o mesmo native já provado. Um mod de 3os chama
 // `BwmsModConfigSet("meu-mod", "volume", "0.8")` e nunca colide com outro mod ou com o BWMS.

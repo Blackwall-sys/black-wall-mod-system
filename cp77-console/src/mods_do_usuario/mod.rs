@@ -25,20 +25,20 @@ use std::ffi::c_void;
 use crate::rtti::{self};
 use crate::register::*;
 
-/// Os plugues de framework que o BWMS atende pela porta `<classe>.Version()`/`<classe>.Require(v)`, cada um com a versão da
-/// referência contra a qual o catálogo dele fechou (`_referencia-de-terceiro/enablers/<classe>`). `Version()` devolve a versão do
+/// Os plugues de framework que o BWMS atende pela porta `<classe>.Version()`/`<classe>.Require(v)`, cada um com a versão
+/// contra a qual o catálogo dele fechou. `Version()` devolve a versão do
 /// BWMS, que é quem responde; `Require(v)` aceita v ≤ a versão coberta, e acima disso o mod pede mais do que o BWMS cobre e o
 /// BWMS precisa ser atualizado (decisão do dono de 2026-10-03, `proofs/20261003-refino-r33-plugues-respondem-pelo-bwms.log`).
-/// TweakXL 1.12.0 pelo delta de 1.11.3 (2026-10-27): os flats extras novos da 2.5 estão no pool de scripts que o BWMS lê, o hash de tipo de
-/// record já sai do nome, e o mapa de herança da 2.5 vai no pacote (`red4ext/bwms-heranca.yaml`). Codeware 1.21.1 e ArchiveXL 1.28.1 pelo delta
+/// `PLUGUE_TWEAKS` 1.12.0 pelo delta de 1.11.3 (2026-10-27): os flats extras novos da 2.5 estão no pool de scripts que o BWMS lê, o hash de tipo de
+/// record já sai do nome, e o mapa de herança da 2.5 vai no pacote (`red4ext/bwms-heranca.yaml`). `PLUGUE_VERSAO` 1.21.1 e `PLUGUE_RECURSOS` 1.28.1 pelo delta
 /// dos commits até elas, provado nas lanes H, I e G de 2026-10-27/28 (`proofs/20261028-lane-I-*`, `proofs/20261028-lane-G-2-*`).
 pub(crate) const VERSOES_COBERTAS: [(&str, &str); 3] = [("Codeware", "1.21.1"), ("ArchiveXL", "1.28.6"), ("TweakXL", "1.12.0")];
 
 /// A chave de cada plugue em `VERSOES_COBERTAS`. O registro da fachada a passa para `tramp_version`/`tramp_require`, porque o
 /// handler de native recebe só o frame e não sabe de qual classe foi chamado.
-pub(crate) const PLUGUE_CODEWARE: usize = 0;
-pub(crate) const PLUGUE_ARCHIVEXL: usize = 1;
-pub(crate) const PLUGUE_TWEAKXL: usize = 2;
+pub(crate) const PLUGUE_VERSAO: usize = 0;
+pub(crate) const PLUGUE_RECURSOS: usize = 1;
+pub(crate) const PLUGUE_TWEAKS: usize = 2;
 
 /// Resposta do `Require`: a versão coberta alcança a pedida pela precedência SemVer 2.0 completa (`api::semver_precedence`).
 pub(crate) fn cobertura_atende(coberta: &str, pedida: &str) -> bool {
@@ -167,23 +167,23 @@ mod testes_dos_plugues {
 
     #[test]
     fn chave_de_cada_plugue_aponta_a_classe_e_a_versao_decididas() {
-        assert_eq!(VERSOES_COBERTAS[PLUGUE_CODEWARE], ("Codeware", "1.21.1"));
-        assert_eq!(VERSOES_COBERTAS[PLUGUE_ARCHIVEXL], ("ArchiveXL", "1.28.6"));
-        assert_eq!(VERSOES_COBERTAS[PLUGUE_TWEAKXL], ("TweakXL", "1.12.0"));
+        assert_eq!(VERSOES_COBERTAS[PLUGUE_VERSAO], ("Codeware", "1.21.1"));
+        assert_eq!(VERSOES_COBERTAS[PLUGUE_RECURSOS], ("ArchiveXL", "1.28.6"));
+        assert_eq!(VERSOES_COBERTAS[PLUGUE_TWEAKS], ("TweakXL", "1.12.0"));
     }
 
-    /// Os pares que o R33 mediu ao vivo (`proofs/20261003-refino-r33-plugues-respondem-pelo-bwms.log`); os do TweakXL andaram com a cobertura.
+    /// Os pares que o R33 mediu ao vivo (`proofs/20261003-refino-r33-plugues-respondem-pelo-bwms.log`); os de `PLUGUE_TWEAKS` andaram com a cobertura.
     #[test]
     fn require_responde_pela_cobertura_como_no_r33() {
         let casos = [
-            (PLUGUE_ARCHIVEXL, "1.26.0", true),
-            (PLUGUE_ARCHIVEXL, "1.28.6", true),
-            (PLUGUE_ARCHIVEXL, "1.28.7", false),
-            (PLUGUE_TWEAKXL, "1.12.0", true),
-            (PLUGUE_TWEAKXL, "1.12.1", false),
-            (PLUGUE_CODEWARE, "1.20.2", true),
-            (PLUGUE_CODEWARE, "1.21.1", true),
-            (PLUGUE_CODEWARE, "1.22.0", false),
+            (PLUGUE_RECURSOS, "1.26.0", true),
+            (PLUGUE_RECURSOS, "1.28.6", true),
+            (PLUGUE_RECURSOS, "1.28.7", false),
+            (PLUGUE_TWEAKS, "1.12.0", true),
+            (PLUGUE_TWEAKS, "1.12.1", false),
+            (PLUGUE_VERSAO, "1.20.2", true),
+            (PLUGUE_VERSAO, "1.21.1", true),
+            (PLUGUE_VERSAO, "1.22.0", false),
         ];
         for (plugue, pedida, esperado) in casos {
             let (classe, coberta) = VERSOES_COBERTAS[plugue];
@@ -223,10 +223,10 @@ mod testes_dos_plugues {
             rtti::red_string_read(slot.as_ptr())
         }
         unsafe {
-            assert_eq!(versao_por(tramp_version::<PLUGUE_CODEWARE>), crate::BWMS_VERSION);
-            assert_eq!(versao_por(tramp_version::<PLUGUE_ARCHIVEXL>), crate::BWMS_VERSION);
-            assert_eq!(versao_por(tramp_version::<PLUGUE_TWEAKXL>), crate::BWMS_VERSION);
-            tramp_version::<PLUGUE_CODEWARE>(std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), 0);
+            assert_eq!(versao_por(tramp_version::<PLUGUE_VERSAO>), crate::BWMS_VERSION);
+            assert_eq!(versao_por(tramp_version::<PLUGUE_RECURSOS>), crate::BWMS_VERSION);
+            assert_eq!(versao_por(tramp_version::<PLUGUE_TWEAKS>), crate::BWMS_VERSION);
+            tramp_version::<PLUGUE_VERSAO>(std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut(), 0);
         }
     }
 }

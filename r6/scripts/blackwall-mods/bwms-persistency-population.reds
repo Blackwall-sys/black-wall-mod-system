@@ -1,11 +1,10 @@
-// bwms-persistency-population.reds — Codeware `PENDENCIAS-UNIFICADAS.md` itens
-// #75/#76/#138/#139/#141/#143, continuação direta do achado do systemMap (2026-08-14,
+// bwms-persistency-population.reds — continuação direta do achado do systemMap (2026-08-14,
 // `bwms-systembyname.reds`). Aquele achado destravou o PONTEIRO de `gamePersistencySystem`/
 // `gamePopulationSystem`/`gameContainerManager`/`questWorldStateSystem`, mas `funclistdump`
 // confirmou (2 dos 4 testados) que essas classes não expõem API própria pro redscript — mesma
 // categoria de `MappinSystem`/`CommunitySystem`, precisam de dispatch por SLOT DE VTABLE. Este
 // arquivo ataca o item de MENOR risco/MAIOR valor: `IPersistencySystem`/`IPopulationSystem`
-// (RED4ext.SDK vendorizado, `Scripting/Natives/gameIPersistencySystem.hpp`/
+// (headers gerados `Scripting/Natives/gameIPersistencySystem.hpp`/
 // `gameIPopulationSystem.hpp`, headers com nomes de método REAIS documentados — ao contrário de
 // `IContainerManager`, cujo header não lista nenhum método além de `IGameSystem`, sem offset
 // disponível). 2 GETTERS PUROS (sem mutação), mesmo shift Itanium Mac=Windows+0x08 já

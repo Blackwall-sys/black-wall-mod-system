@@ -1,4 +1,4 @@
-//! Argumentos de lançamento do jogo (RED4ext `#458`, `GetLaunchParameters`): o que veio na linha de comando do processo, pro script
+//! Argumentos de lançamento do jogo (`GetLaunchParameters`): o que veio na linha de comando do processo, pro script
 //! (`BwmsGetLaunchArg`/`BwmsHasLaunchArg`) e pros plugins (`BwmsApi.launch_arg`). Lidos do próprio processo (`_NSGetArgv`).
 //!
 //! Formas aceitas, como o motor e os launchers escrevem: `-nome valor`, `--nome valor`, `-nome=valor`, `--nome=valor`; um argumento sem

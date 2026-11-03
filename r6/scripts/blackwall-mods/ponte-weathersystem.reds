@@ -1,19 +1,14 @@
-// ponte-weathersystem.reds — Codeware `World/WeatherSystem.reds` (itens #81/#140): ler, trocar e restaurar o clima, com nomes do
-// BWMS. O Codeware (`src/App/World/WeatherSystemEx.hpp`/`.cpp`) passa por `Raw::RuntimeSystemWeather::SetWeatherByName`/
-// `SetWeatherByIndex`/`GetEnvironmentDefinition`/`GetWeatherState`; aqui as leituras de estado são campos de DADO e a troca usa a
+// ponte-weathersystem.reds — ler, trocar e restaurar o clima, com nomes do
+// BWMS. As leituras de estado são campos de DADO e a troca usa a
 // sequência que o próprio motor já tem.
 //
-// Leitura do estado atual/anterior, pelos campos de `worldRuntimeSystemWeather` (`enablers/Codeware/src/Red/RuntimeScene.hpp`,
-// `Core::OffsetPtr`, sem vtable nem hash):
+// Leitura do estado atual/anterior, pelos campos de `worldRuntimeSystemWeather` (offsets fixos, sem vtable nem hash):
 //
-//   namespace Raw::WeatherScriptInterface { using System = Core::OffsetPtr<0x40,
-//       Red::worldRuntimeSystemWeather*>; }               // dentro de WeatherSystem
-//   namespace Raw::RuntimeSystemWeather {
-//     using CycleWeather        = Core::OffsetPtr<0x8C, bool>;
-//     using CurrentStateIndex   = Core::OffsetPtr<0x90, uint32_t>;
-//     using CurrentSource       = Core::OffsetPtr<0x98, Red::CName>;
-//     using PreviouseStateIndex = Core::OffsetPtr<0xB8, uint32_t>;
-//   }
+//   WeatherSystem+0x40             = worldRuntimeSystemWeather*
+//   worldRuntimeSystemWeather+0x8C = cycleWeather: bool
+//   worldRuntimeSystemWeather+0x90 = currentStateIndex: uint32
+//   worldRuntimeSystemWeather+0x98 = currentSource: CName
+//   worldRuntimeSystemWeather+0xB8 = previousStateIndex: uint32
 //
 // Composição em mundo/mod.rs (`register_weathersystem_state_natives`/`weathersystem_read_state`/`decode_weather_runtime_state`): segue
 // `WeatherSystem+0x40 -> worldRuntimeSystemWeather*`, lê um bloco de 0xC0 bytes (`memoria::read_chunk`) e decodifica os 3 campos, sem
@@ -44,8 +39,8 @@ public func GetPreviousWeatherStateIndex() -> Uint32 {
     return BwmsWeatherSystemGetPreviousStateIndex(this);
 }
 
-// TROCAR o clima (`register_weathersystem_set_natives`, mundo/mod.rs): o próprio motor tem a sequência do Codeware pronta
-// (`SetWeatherByName` + ciclo desligado). Nome próprio do BWMS (`SetWeatherState`/`ResetWeatherState`), não o do Codeware.
+// TROCAR o clima (`register_weathersystem_set_natives`, mundo/mod.rs): o próprio motor tem a sequência pronta
+// (`SetWeatherByName` + ciclo desligado). Nome próprio do BWMS (`SetWeatherState`/`ResetWeatherState`).
 //
 //   SetWeatherState(n"24h_weather_rain", 10.0, 9)  -> força o estado pelo nome; desliga o ciclo natural
 //   ResetWeatherState(true, 5.0)                    -> religa o ciclo; `true` volta já pro estado 0
@@ -64,7 +59,7 @@ public func ResetWeatherState(forceRestore: Bool, blendTime: Float) -> Bool {
     return BwmsWeatherSystemResetWeather(this, forceRestore, blendTime);
 }
 
-// LER o ambiente e o estado de clima (o `GetEnvironmentDefinition`/`GetWeatherState` do Codeware, com nome próprio do BWMS). Os 2 objetos
+// LER o ambiente e o estado de clima (`GetEnvironmentDefinition`/`GetWeatherState`, com nome próprio do BWMS). Os 2 objetos
 // do motor (`worldEnvironmentDefinition` e `worldWeatherState`) não derivam de `IScriptable`: chegam dentro de um `BwmsSerializable`, e o
 // `GetObjectClassName()` dele dá a classe. Só leitura.
 //

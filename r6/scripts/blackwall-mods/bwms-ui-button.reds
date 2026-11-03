@@ -1,4 +1,4 @@
-// bwms-ui-button.reds — botão de mod (catálogo Codeware #99), construído sobre `BwmsUIController`.
+// bwms-ui-button.reds — botão de mod, construído sobre `BwmsUIController`.
 //
 // O QUE ENTREGA: um botão que um mod monta em duas linhas, com estado visual de hover/press e um
 // callback de clique — sem o mod ter que saber como a engine roteia evento de widget.

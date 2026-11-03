@@ -1,6 +1,6 @@
-// bwms-quest-accessor.reds — Codeware `#160` (`QuestPhaseGraphAccessor`) no BWMS: consulta de grafo de fase de quest.
+// bwms-quest-accessor.reds — `QuestPhaseGraphAccessor` no BWMS: consulta de grafo de fase de quest.
 //
-// Nós por nome de classe (só o grafo ou com as fases aninhadas, na ordem da referência: nós do grafo e depois cada `phaseGraph` não nulo), os 14 `Find*`
+// Nós por nome de classe (só o grafo ou com as fases aninhadas, nesta ordem: nós do grafo e depois cada `phaseGraph` não nulo), os 14 `Find*`
 // e `GetAllGraphNodePaths`. Entrada por um grafo qualquer; `BwmsQuestPhaseResourceGraph` dá o de uma fase carregada. Os tipos concretos de nó não são
 // declarados em script: todo handle volta como `ref<IScriptable>` e a classe real sai de `GetClassName()`. Só leitura.
 native func BwmsQuestPhaseResourceGraph(resource: ref<IScriptable>) -> ref<IScriptable>

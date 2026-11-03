@@ -3,7 +3,7 @@
 //! `CreateRecord` só marcam o record como de mod. As chaves são os 40 bits de baixo do `TweakDBID` (hash + tamanho do nome), sem o offset.
 //!
 //! A herança fica por flat: cada flat de um clone anota de qual flat da base herdou, e o escritor único leva a mudança de um flat aos
-//! herdeiros que ainda usam o valor antigo (TweakXL `#22`: editar a base e a mudança chegar nos derivados que não a sobrescreveram).
+//! herdeiros que ainda usam o valor antigo (editar a base e a mudança chegar nos derivados que não a sobrescreveram).
 
 use bwms_primitives::tweak_db_id_chave;
 use std::collections::{BTreeSet, HashMap, HashSet};

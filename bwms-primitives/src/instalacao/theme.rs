@@ -36,7 +36,7 @@ pub const CATEGORIES: &[Category] = &[
     Category { slug: "estetica",  label: "Estética (V)",    keywords: &["complexion", "skin", "face", "makeup", "freckle", "scar", "tattoo", "eye", "eyebrow", " brow ", " brows ", "body texture", "pele", "rosto", "smoother"] },
     Category { slug: "animacoes", label: "Animações",       keywords: &["animation", " anim ", "idle", "emote", "pose", "gesture", "locomotion", "mocap", "walk cycle", "photomode pose"] },
     Category { slug: "audio",     label: "Áudio",           keywords: &["audio", "music", "soundtrack", "ost", "song", "sfx", "sound effect", "voice", "radio station", "wem", "sound replacer"] },
-    // `*hud`: sigla colada em outra toda maiúscula ("LHUD", pasta do Limited HUD) não tem fronteira dentro do token
+    // `*hud`: sigla colada em outra toda maiúscula ("LHUD") não tem fronteira dentro do token
     Category { slug: "interface", label: "Interface",       keywords: &["*hud", " ui ", "interface", "menu", "minimap", "map marker", "inkatlas", "font", "crosshair", "widget", "quickhack ui"] },
     Category { slug: "visual",    label: "Visual/Texturas", keywords: &["texture", "retexture", " hd ", "2k", "4k", "8k", "upscale", "material", "mesh", "model replacer", "quality mod"] },
     Category { slug: "gameplay",  label: "Gameplay",        keywords: &["balance", "difficulty", "combat", "economy", " ai ", "cyberware", "stamina", "loot", "autoloot", "spawn rate", "overhaul", "gameplay", "rebalance", "perk"] },
@@ -726,7 +726,7 @@ mod tests {
             let (cat, _, motivo_agora) = sugestao(nome, &[]);
             assert_eq!((cat.as_str(), motivo_agora.as_str()), (categoria, motivo), "{nome}");
         }
-        // linha do censo: a pasta LHUD do Limited HUD é a única pista de interface
+        // linha do censo: a pasta LHUD é a única pista de interface
         let arquivos = [
             "r6/scripts/Z_BetterEnemyHealthBar.reds",
             "r6/scripts/Z_ShowPlayerHPScanner.reds",
@@ -847,9 +847,15 @@ mod tests {
     /// ou a regra muda, a falha lista cada linha que mudou com a categoria de agora, para conferir e copiar.
     #[test]
     fn censo_de_112_mods_da_a_categoria_do_fixture() {
+        // O censo fica fora do crate publicado (`bwms-dev/dados/`): sem ele, o teste é pulado.
+        let caminho = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../bwms-dev/dados/censo-de-mods.tsv");
+        let Ok(censo) = std::fs::read_to_string(&caminho) else {
+            eprintln!("sem {}: censo de mods pulado", caminho.display());
+            return;
+        };
         let mut linhas = 0;
         let mut divergentes = Vec::new();
-        for linha in include_str!("../../testdata/censo-de-mods.tsv").lines().filter(|l| !l.starts_with('#')) {
+        for linha in censo.lines().filter(|l| !l.starts_with('#')) {
             let mut campos = linha.split('\t');
             let (nome, no_fixture) = (campos.next().unwrap(), campos.next().unwrap());
             let arquivos: Vec<&str> = campos.collect();

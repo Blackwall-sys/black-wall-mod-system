@@ -75,8 +75,7 @@ pub(crate) unsafe extern "C" fn tramp_vehicleobject_get_burnout(_c: *mut c_void,
 
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `Vehicle/VehicleSystem.reds` — `ToggleGarageVehicle` (catálogo `#72`, round 3 —
-// 2026-08-12): o endereço já foi RE'd e confirmado ao vivo via hook-probe OBSERVE-ONLY em
+// `VehicleSystem.ToggleGarageVehicle` (2026-08-12): o endereço já foi RE'd e confirmado ao vivo via hook-probe OBSERVE-ONLY em
 // 2026-07-29 (`jogo::mundo::VEHICLESYSTEM_TOGGLEGARAGEVEHICLE_VM`, ABI
 // documentada lá: `x0=this(VehicleSystem*), x1=&GarageVehicleID{TweakDBID recordID@0, CName
 // name@8}(16B, by-ref), w2=bool enable, w0=bool ret`, ALTA confiança — 3 callers validados,
@@ -94,8 +93,7 @@ pub(crate) unsafe extern "C" fn tramp_vehicleobject_get_burnout(_c: *mut c_void,
 // documentada com alta confiança, não adivinhada agora; (3) mesma categoria de risco já aceita
 // neste arquivo pra `tramp_componentwrapper_refresh_appearance` (chama
 // `APPEARANCE_REBUILD_PROXY_VM` direto, também função real do motor, também já confirmada).
-// Por isso NÃO tem smoke test automático que dispare sozinho (ver `codeware-vehiclesystem-
-// smoke.reds`) — só compila e fica pronta pro próximo boot confirmar com um veículo real.
+// Por isso NÃO tem smoke test automático que dispare sozinho — só compila e fica pronta pro próximo boot confirmar com um veículo real.
 pub(crate) unsafe extern "C" fn tramp_vehiclesystem_toggle_garage_vehicle(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let sys = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -106,9 +104,8 @@ pub(crate) unsafe extern "C" fn tramp_vehiclesystem_toggle_garage_vehicle(_c: *m
         let target = crate::rebase(crate::jogo::mundo::VEHICLESYSTEM_TOGGLEGARAGEVEHICLE_VM);
         if !target.is_null() && crate::memoria::is_readable(target as *const c_void, 4) {
             // GarageVehicleID{TweakDBID recordID@0, CName name@8} — 16 bytes, by-ref (ABI
-            // documentada em `jogo/mundo.rs`). `name` fica default-zerado: a fonte real do
-            // Codeware (`WorldStateSystem`/`VehicleSystem.EnablePlayerVehicleID`) também só
-            // popula `recordID` em todo uso conhecido.
+            // documentada em `jogo/mundo.rs`). `name` fica default-zerado: todo uso conhecido só
+            // popula `recordID`.
             let mut garage_id = [0u8; 16];
             garage_id[0..8].copy_from_slice(&record_id.to_le_bytes());
             type ToggleGarageVehicleFn = unsafe extern "C" fn(*mut c_void, *const u8, u8) -> u8;
@@ -142,7 +139,7 @@ pub(crate) unsafe fn register_vehiclesystem_toggle_garage_native(reg: &Registry,
 /// veículo (`+0x33c..+0x3b0`); o motor só a chama ao anexar o componente (`0x102aa8790`). GOG `0x101730940`.
 pub(crate) const CARREGAR_SETUP_DE_CHAMADA_VM: u64 = 0x1_02aa_79a8;
 
-/// `GarageComponent.LoadSummonSetup()` (Codeware 1.21.1), registrada na visita do validador ao `GarageComponent`, que existe no RTTI e o script
+/// `GarageComponent.LoadSummonSetup()`, registrada na visita do validador ao `GarageComponent`, que existe no RTTI e o script
 /// vanilla da 2.5 não declara (`ponte-vehiclesystem.reds`): o mod mexe no record e pede a releitura sem esperar o próximo anexo.
 pub(crate) unsafe fn registrar_garagem(reg: &Registry) -> String {
     let Some(proto) = method_donor_proto(reg) else {
@@ -165,8 +162,7 @@ pub(crate) unsafe extern "C" fn tramp_carregar_setup_de_chamada(c: *mut c_void, 
 
 pub static VEHICLE_LIGHT_ARMADO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Codeware `#128`: `Vehicle/ToggleAuxLights` com o veículo dono do controller, o `on` e o tipo de luz, só com dono, como o `VehicleLightControlHook`
-/// da referência.
+/// `Vehicle/ToggleAuxLights` com o veículo dono do controller, o `on` e o tipo de luz, só com dono.
 pub unsafe fn disparar_luz_de_veiculo(controller: *mut c_void, ligado: bool, tipo: u32) -> usize {
     let dono = dono_do_componente(controller);
     if dono == 0 {
@@ -186,8 +182,8 @@ pub unsafe fn disparar_luz_de_veiculo(controller: *mut c_void, ligado: bool, tip
     enviados
 }
 
-/// `VehicleLightControlEvent extends EntityLifecycleEvent` — `cw-event-target-classes`
-/// (2026-07-24). Fonte real: `public native class VehicleLightControlEvent extends
+/// `VehicleLightControlEvent extends EntityLifecycleEvent` — classes de evento-alvo
+/// (2026-07-24). Declaração: `public native class VehicleLightControlEvent extends
 /// EntityLifecycleEvent { IsEnabled()->Bool; IsLightType(lightType: vehicleELightType)->Bool }`.
 /// `vehicleELightType` é um enum REAL vanilla (`orphans.script:401`, pré-primado, mesma categoria
 /// de `EInputKey`). `IsLightType` lê o param via `read_params_consuming` — MESMO padrão já
@@ -258,31 +254,23 @@ pub unsafe fn make_vehiclelightcontrolevent_arg(enabled: bool, light_type: i32, 
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `Vehicle/VehicleObject.reds` (catálogo `#71`, round 3 — 2026-08-12, agente offline
-// dedicado) — leitura pura de campo, ZERO RawFunc/AddressLib novo. Offsets Windows CONFIRMADOS
-// pelo header vendorizado OFICIAL (`RED4ext.SDK/include/RED4ext/Scripting/Natives/
-// vehicleBaseObject.hpp`, `RED4EXT_ASSERT_OFFSET`, não chutados):
+// `VehicleObject` (2026-08-12) — leitura pura de campo, ZERO RawFunc/AddressLib novo. Offsets Windows
+// CONFIRMADOS do layout de `vehicleBaseObject` (não chutados):
 //   isOnGround   : bool  @ +0x25C
 //   acceleration : float @ +0x264
 //   deceleration : float @ +0x268
 //   isReversing  : bool  @ +0x2A3
 //   burnout      : float @ +0x2BC (Mac 2.5: +0x2C4)
 // Todos campo de DADO (não vtable/RawFunc) — regra já estabelecida no projeto (reconfirmada
-// hoje mesmo pro `#142`/MappinSystem e pro `#81`/WeatherSystem): offset de campo porta 1:1
+// hoje mesmo pro MappinSystem e pro WeatherSystem): offset de campo porta 1:1
 // Windows->Mac, sem o shift Itanium (+0x08) que só afeta slots de VTABLE/método.
 //
-// DIVERGÊNCIA DE ESCOPO DELIBERADA vs a fonte real: `enablers/Codeware/scripts/Vehicle/
-// VehicleObject.reds` expõe isso via `@addField(VehicleObject) public native let X` — a MESMA
-// categoria de risco já documentada e evitada neste catálogo (`#20`/`#29`, "CMesh-trap"):
-// `native let` reivindica uma property RTTI que só existe de verdade no Windows porque o C++
-// do Codeware a REGISTRA em runtime (`RTTI_PROPERTY`, `src/App/Entity/VehicleObjectEx.hpp`,
-// `RTTI_EXPAND_CLASS(Red::vehicleBaseObject, {RTTI_PROPERTY(isOnGround); ...})`); no Mac essa
-// property NUNCA é registrada (não rodamos o C++ do Codeware), então declarar o campo como
-// `native let` arriscaria o mesmo crash de bind do `#30`/CMesh (validação de ancestralidade em
-// RUNTIME, não compile-time). Padrão seguro já estabelecido no projeto (ver nota em
-// `codeware-meshcomponent.reds`/item `#29`): GETTER via FUNÇÃO nativa lendo o offset real,
-// nunca `@addField...native let` direto — mesma disciplina já aplicada hoje em `#81`/
-// WeatherSystem e `#168`/ComponentWrapper.
+// Sem `@addField(VehicleObject) public native let X`: `native let` reivindica uma property RTTI
+// que o motor não registra para esses campos, então declarar o campo como `native let`
+// arriscaria o crash de bind do CMesh (validação de ancestralidade em RUNTIME, não
+// compile-time). Padrão seguro já estabelecido no projeto: GETTER via FUNÇÃO nativa lendo o
+// offset real, nunca `@addField...native let` direto — mesma disciplina já aplicada hoje em
+// WeatherSystem e ComponentWrapper.
 //
 // `VehicleObject` (alias Windows de `vehicleBaseObject`) confirmado vanilla real e
 // redscript-visível: é o tipo de retorno de natives vanilla já usadas em scripts reais do jogo
@@ -304,7 +292,7 @@ pub(crate) const VEHICLEOBJECT_CHUNK_LEN: usize = 0x2C8; // cobre até burnout+4
 
 /// Núcleo PURO (testável offline, sem memória real): decodifica os 5 campos de telemetria a
 /// partir de um buffer que espelha os primeiros `VEHICLEOBJECT_CHUNK_LEN` bytes do
-/// `VehicleObject*` real. Espelha byte-a-byte os offsets do header vendorizado oficial.
+/// `VehicleObject*` real. Espelha byte-a-byte os offsets confirmados acima.
 pub(crate) fn decode_vehicleobject_telemetry(buf: &[u8]) -> Option<(bool, f32, f32, bool, f32)> {
     if buf.len() < VEHICLEOBJECT_CHUNK_LEN {
         return None;
@@ -365,7 +353,7 @@ pub(crate) unsafe extern "C" fn vehicle_aux_lights_handler(ctrl: *mut c_void, en
     }
 }
 
-/// Codeware `#128`/`#118`: instala o hook do `vehicleController::ToggleLights` no `RegisterCallback` de `Vehicle/ToggleAuxLights`, de novo depois de uma
+/// Instala o hook do `vehicleController::ToggleLights` no `RegisterCallback` de `Vehicle/ToggleAuxLights`, de novo depois de uma
 /// desinstalação.
 pub(crate) unsafe fn garantir_hook_de_luz() {
     if let Some(ok) = instalar_conferindo_prologo(VEHICLE_AUX_VM, VEHICLE_AUX_PROLOGO, vehicle_aux_lights_handler as *mut c_void, &ORIG_VEHICLE_AUX) {

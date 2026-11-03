@@ -1,5 +1,5 @@
-// BWMS — TweakDBManager (TweakXL #44/#45): a API que mods do Nexus importam (`import TweakXL.*`, `TweakDBManager.SetFlat/CreateRecord/
-// UpdateRecord/RegisterName`; fonte em `enablers/TweakXL/src/App/Tweaks/Executable/Scriptable/ScriptManager.hpp`) sobre o escritor de
+// BWMS — TweakDBManager: a API que mods do Nexus chamam (`TweakDBManager.SetFlat/CreateRecord/
+// UpdateRecord/RegisterName`) sobre o escritor de
 // TweakDB do BWMS (`tweakdb/`).
 //
 // Classe `native` sem `extends` explícito: o Rust preenche os métodos (`register_facade_methods`) no validador do motor
@@ -25,7 +25,7 @@ public abstract native class TweakDBManager {
   public final static native func RegisterName(name: CName) -> Bool;
   public final static native func StartBatch() -> ref<TweakDBBatch>;
 
-  // Overloads por NOME (conveniência real do TweakXL — mod author escreve string, não TDBID cru).
+  // Overloads por NOME (mod author escreve string, não TDBID cru).
   // `TDBID.Create` já é uma função redscript vanilla real (compila o TweakDBID em runtime a partir
   // da string, mesmo algoritmo CRC32|len<<32 que `tweak_db_id` replica no lado Rust) — não precisa
   // de nenhuma native nova pra esses overloads, só delega pro caminho por-ID acima.

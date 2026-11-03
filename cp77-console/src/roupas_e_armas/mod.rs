@@ -81,8 +81,7 @@ pub(crate) unsafe extern "C" fn tramp_equip_readback(_c: *mut c_void, frame: *mu
     write_bool_ret(out, true);
 }
 
-// Codeware `WardrobeSystem.ForgetItemID` (catálogo item #46/#208, candidato barato, 2026-08-11,
-// 3ª rodada) — ver `selftest::wardrobe_forget_by_tdbid` pro algoritmo/offsets completos (scan
+// `WardrobeSystem.ForgetItemID` (2026-08-11, 3ª rodada) — ver `selftest::wardrobe_forget_by_tdbid` pro algoritmo/offsets completos (scan
 // linear por `ItemID.tdbid`, mesma mecânica já provada de `wardrobe_forget_item`/2026-07-31,
 // generalizada pra varrer todos os buckets em vez de 1 só). Registrado como GLOBAL (não
 // `@addMethod`), mesmo padrão já usado por `BwmsGameObjectAddTag`/etc. — o `.reds` embrulha com
@@ -105,49 +104,44 @@ pub(crate) unsafe extern "C" fn tramp_wardrobe_forget_by_tdbid(_c: *mut c_void, 
 /// Offset REAL de uma propriedade dentro do objeto, perguntado ao RTTI do jogo.
 ///
 /// **Isto substituiu uma tabela de offsets por classe, e o motivo importa.** A tabela vinha dos
-/// headers gerados do RED4ext.SDK e já tinha uma armadilha conhecida (o mesmo campo `mesh` fica em
+/// headers gerados de layout e já tinha uma armadilha conhecida (o mesmo campo `mesh` fica em
 /// `0x150` no `entMeshComponent` e noutro lugar no `entSkinnedMeshComponent`, que é outro ramo).
 /// Aí a medição ao vivo mostrou uma segunda camada do problema: **o header diz `0x228` e nesta
 /// build o campo está em `0x220`** — o próprio header declara `uint8_t unk1E0[0x228-0x1E0]`, ou
-/// seja, o autor do SDK não conhecia essa faixa e chutou a borda.
+/// seja, quem gerou o header não conhecia essa faixa e chutou a borda.
 ///
 /// Provado por conteúdo, não por forma: o `u64` em `0x220` reverte para
 /// `base\characters\common\base_bodies\man_average\_old_to_delete\t0_001_ma_base_hq__torso.mesh`
 /// nos 663.364 paths do install — o mesh do próprio componente `torso`. O de `0x228` não reverte
 /// pra path nenhum.
 ///
-/// O RTTI carrega o offset certo desta build em `CProperty::valueOffset@0x20`
-/// (`RED4EXT_ASSERT_OFFSET` no SDK). Perguntar elimina a classe inteira do erro — e vale pra
+/// O RTTI carrega o offset certo desta build em `CProperty::valueOffset@0x20`. Perguntar elimina a classe inteira do erro — e vale pra
 /// QUALQUER propriedade, não só as 7 que eu tinha tabelado.
 pub(crate) const CPROPERTY_VALUE_OFFSET: usize = 0x20;
 
-/// Classifica um componente na MESMA ordem de `App::ComponentWrapper::ComponentWrapper`
-/// (Wrapper.cpp:83-106): `MeshComponent` primeiro, depois `MorphTargetSkinnedMeshComponent`,
-/// depois `GarmentSkinnedMeshComponent` (tem que vir ANTES de `SkinnedMeshComponent` puro —
-/// Garment `IsA` Skinned também, checar na ordem errada classificaria Garment como Skinned
-/// genérico, o que na prática não muda offset mas quebraria a fidelidade à fonte), por
-/// último `SkinnedMeshComponent`.
+/// Tipo de componente de malha pela classe RTTI. O morph vem antes da família skinned: ele também é skinned no RTTI, mas a malha dele
+/// está em `morphResource`. `entMeshComponent` não é ancestral das skinned, então a ordem entre esses dois ramos não importa.
 pub(crate) unsafe fn detect_garment_component_kind(reg: &crate::rtti::Registry, inst: *mut c_void) -> GarmentComponentKind {
     if inst.is_null() {
         return GarmentComponentKind::Unsupported;
     }
-    let cls = crate::rtti::class_of(inst);
-    if cls.is_null() {
+    let classe = rtti::class_of(inst);
+    if !rtti::sane(classe) {
         return GarmentComponentKind::Unsupported;
     }
-    if class_is_kind_of(cls, reg.class_by_name("entMeshComponent")) {
-        return GarmentComponentKind::MeshComponent;
+    let deriva = |nome: &str| {
+        let alvo = reg.class_by_name(nome);
+        rtti::sane(alvo) && class_is_kind_of(classe, alvo)
+    };
+    if deriva("entMeshComponent") {
+        GarmentComponentKind::MeshComponent
+    } else if deriva("entMorphTargetSkinnedMeshComponent") {
+        GarmentComponentKind::MorphTarget
+    } else if deriva("entGarmentSkinnedMeshComponent") || deriva("entSkinnedMeshComponent") {
+        GarmentComponentKind::SkinnedFamily
+    } else {
+        GarmentComponentKind::Unsupported
     }
-    if class_is_kind_of(cls, reg.class_by_name("entMorphTargetSkinnedMeshComponent")) {
-        return GarmentComponentKind::MorphTarget;
-    }
-    if class_is_kind_of(cls, reg.class_by_name("entGarmentSkinnedMeshComponent")) {
-        return GarmentComponentKind::SkinnedFamily;
-    }
-    if class_is_kind_of(cls, reg.class_by_name("entSkinnedMeshComponent")) {
-        return GarmentComponentKind::SkinnedFamily;
-    }
-    GarmentComponentKind::Unsupported
 }
 
 pub(crate) unsafe fn offset_por_rtti(inst: *mut c_void, nome: Option<&str>) -> Option<usize> {
@@ -164,65 +158,16 @@ pub(crate) unsafe fn garment_mesh_appearance_offset(inst: *mut c_void, kind: Gar
     offset_por_rtti(inst, nome_prop_aparencia(kind))
 }
 
-/// Offset do `RaRef<CMesh> mesh` (`morphResource` no MorphTarget) — `ComponentWrapper::GetResourcePath`/`SetResourcePath`.
+/// Offset do `RaRef<CMesh> mesh` (`morphResource` no MorphTarget), o caminho que o componente carrega.
 /// `RaRef<T>` é só o `ResourcePath` de 8 bytes, sem indireção.
 pub(crate) unsafe fn garment_mesh_path_offset(inst: *mut c_void, kind: GarmentComponentKind) -> Option<usize> {
     offset_por_rtti(inst, nome_prop_path(kind))
 }
 
-// ===== Codeware `#168` (`ComponentWrapper::ResetMaterialCache`) — 2026-08-15, RE AO VIVO
-// dedicada: `CMesh::FindAppearance` FECHADO SEM ENDEREÇO NATIVO NENHUM =====
-//
-// A rodada 18 (2026-08-15, 100% offline) tentou 5 ângulos de RE de ENDEREÇO nativo pra
-// `Raw::CMesh::FindAppearance(CMesh*, CName) -> Handle<mesh::MeshAppearance>&` (símbolo, header
-// gerado, disassembly de `RefreshAppearance`, mineração de log-strings do handler de
-// `AppearanceMeshLoadedEvent`, xref do array-reallocator) — TODOS negativos, concluindo que só
-// RE ao vivo (breakpoint/memory-watch sobre o ptr-to-member de `SkinnedMeshComponent::
-// OnMeshLoaded`) destravaria isso.
-//
-// **Esta rodada achou que não precisa de endereço nenhum — `FindAppearance` é um scan-linear
-// TRIVIAL sobre dado 100% documentado pelo próprio RED4ext.SDK, implementável em Rust puro:**
-//
-//  - `CMesh::appearances: DynArray<Handle<mesh::MeshAppearance>> @ 0x1E0` — header HAND-WRITTEN
-//    oficial (`RED4ext.SDK/include/RED4ext/Scripting/Natives/CMesh.hpp`), validado pelo próprio
-//    SDK via `RED4EXT_ASSERT_SIZE(CMesh, 0x230)` contra o jogo real (não é palpite).
-//  - `mesh::MeshAppearance::name: CName @ 0x30` — header GERADO da reflection real
-//    (`Generated/mesh/MeshAppearance.hpp`, `RED4EXT_ASSERT_SIZE(MeshAppearance, 0xA8)`).
-//  - `Handle<T>` = 16 bytes `{instance: T* @0x00, refCount: RefCnt* @0x08}`
-//    (`RED4ext.SDK/include/RED4ext/Memory/SharedPtr.hpp`, `RED4EXT_ASSERT_OFFSET` explícito).
-//  - `DynArray<T>` = 16 bytes header `{entries@0x00, capacity(u32)@0x08, size(u32)@0x0C}`
-//    (`RED4ext.SDK/include/RED4ext/Containers/DynArray.hpp`, membros com offset em comentário).
-//
-// `FindAppearance` (a variante SEGURA, devolve vazio se não achar — em oposição a `GetAppearance`,
-// que provavelmente afirma/crasha se não achar, por isso NÃO reimplementada aqui) é: pegar
-// `CMesh::appearances`, andar as `size` entradas, comparar `entries[i].instance->name` contra o
-// CName pedido, devolver o 1º match. Zero função nativa chamada, zero endereço de motor.
-//
-// **Entrada da função (`meshHandle`) — offset DIFERENTE do `mesh`/`RaRef<CMesh>` já usado por
-// `GetResourcePath`** (esse é o caminho de CARREGAR; `meshHandle` é o `CMesh*` já RESOLVIDO,
-// exatamente o que `ComponentWrapper::ResetMaterialCache` usa, `ComponentWrapper.cpp:369/374`):
-//  - `MeshComponent`: fonte real faz `reinterpret_cast<Handle<CMesh>*>(&component->unk158)` —
-//    o header GERADO não nomeia esse campo (bloco opaco `unk158[0x158-0x178]`), mas confirma
-//    que o Handle começa exatamente em `0x158` (onde o bloco opaco começa).
-//  - `SkinnedFamily` (`entSkinnedMeshComponent`/`entGarmentSkinnedMeshComponent`, ex. 'torso'):
-//    `meshHandle: Handle<CMesh> @ 0x200` — header GERADO nomeia EXPLICITAMENTE (maior confiança
-//    que o caso `MeshComponent` acima).
-//  - `MorphTarget`: FORA de escopo desta rodada — a fonte real dereferencia mais 1 nível
-//    (`meshHandle->baseMesh.Get()`, `MorphTargetMesh::baseMesh: Ref<CMesh> @ 0x60`,
-//    `RED4ext.SDK/.../Scripting/Natives/MorphTargetMesh.hpp`) e `Ref<T>` (≠ `Handle<T>`) NUNCA
-//    teve seu layout confirmado neste projeto — decisão consciente de não adivinhar.
-//
-// ⚠️ REGRA DE OURO: só a LEITURA (`FindAppearance`) foi implementada e é 100% observe-only
-// (zero escrita). O RESTO de `ResetMaterialCache` (`MeshAppearanceEx::ResetMaterialCache`,
-// `MeshAppearanceEx.hpp:19-42`) — `Red::WaitForJob(materialJob, 5000ms)` + lock exclusivo +
-// `Raw::RenderData::Release(materialPtr.data)` + `materialMap.Clear()` + `materialCached=false`
-// — precisa de PELO MENOS 2 endereços nativos novos (`WaitForJob`/`RenderData::Release`, nunca
-// resolvidos em lugar nenhum deste projeto) + o layout de `Map<CName,Handle<IMaterial>>` (nunca
-// confirmado) pra um `Clear()` seguro (decrementar refcount de cada entrada corretamente) — RE
-// de endereço nativo genuína, deliberadamente NÃO tentada nesta rodada (risco de corromper
-// dado de render live sem entender o `Clear()` por completo). Item `#168` continua REAL_GAP,
-// mas o bloqueador que a rodada 18 achou insuperável sem RE ao vivo está removido — o resto
-// do item é RE de endereço puro e conhecido, sem incerteza de mecanismo.
+// O `Handle<CMesh>` já carregado do componente (o `CMesh*` resolvido, diferente do `RaRef<CMesh>` de carga acima) é por onde se lê
+// `CMesh::appearances` (`DynArray<Handle<mesh::MeshAppearance>>` em `0x1E0`, nome da aparência em `+0x30`) sem endereço nativo.
+// `MeshComponent`: o handle começa em `0x158`. MorphTarget: a malha base fica um nível abaixo (`baseMesh: Ref<CMesh>` em `0x60`) e o
+// layout do `Ref<T>` não foi medido, então não há offset.
 /// Família skinned: o `Handle<CMesh>` fica em `0x200` (2.5) — onde a closure de conclusão do `LoadResource` (`0x10199264c`) grava o
 /// mesh carregado; `0x200` é o bloco de contagem desse handle.
 pub(crate) fn garment_mesh_handle_offset(kind: GarmentComponentKind) -> Option<usize> {
@@ -236,30 +181,29 @@ pub(crate) fn garment_mesh_handle_offset(kind: GarmentComponentKind) -> Option<u
     }
 }
 
-/// ArchiveXL #97 (2026-08-11): `Facade::EnableGarmentOffsets()`/`DisableGarmentOffsets()` —
-/// fonte real (`App/Extensions/Garment/Extension.cpp:883-890`) é um `static inline bool
-/// s_garmentOffsetsEnabled` puro, sem chamada nativa nenhuma — só seta um flag global lido no
+/// `EnableGarmentOffsets()`/`DisableGarmentOffsets()` da fachada de recursos (2026-08-11): um bool
+/// global puro, sem chamada nativa nenhuma — só seta um flag lido no
 /// hook do `ComputePlayerGarment` ([`install_offsets_de_roupa`]).
 pub(crate) static GARMENT_OFFSETS_ENABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 pub(crate) unsafe extern "C" fn tramp_offsets_de_roupa_ligar(_c: *mut c_void, _f: *mut c_void, _out: *mut c_void, _rt: i64) {
     GARMENT_OFFSETS_ENABLED.store(true, std::sync::atomic::Ordering::Relaxed);
-    crate::log_dev!("[reg] >>> ArchiveXL.EnableGarmentOffsets chamado — flag=true");
+    crate::log_dev!("[reg] >>> EnableGarmentOffsets chamado — flag=true");
 }
 
 pub(crate) unsafe extern "C" fn tramp_offsets_de_roupa_desligar(_c: *mut c_void, _f: *mut c_void, _out: *mut c_void, _rt: i64) {
     GARMENT_OFFSETS_ENABLED.store(false, std::sync::atomic::Ordering::Relaxed);
-    crate::log_dev!("[reg] >>> ArchiveXL.DisableGarmentOffsets chamado — flag=false");
+    crate::log_dev!("[reg] >>> DisableGarmentOffsets chamado — flag=false");
 }
 
-/// Diagnóstico (não faz parte da API real do ArchiveXL — o C++ real não tem getter) pro comando
+/// Diagnóstico (fora da fachada de recursos, que não tem getter) pro comando
 /// de canal `garmentoffsets` conseguir provar o round-trip Enable/Disable ao vivo.
 pub fn garment_offsets_enabled() -> bool {
     GARMENT_OFFSETS_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 
-/// axl-garment-apply / axl-transmog-apply (2026-08-02, /goal): endereço C++ RAW de
+/// Equipar e transmog por script (2026-08-02): endereço C++ RAW de
 /// `ScriptableSystem::QueueRequest` (= `EquipmentSystem::QueueRequest`, herdado — `IEquipmentSystem`
 /// não sobrescreve, confirmado por RE dedicada). Achado via a MESMA técnica que fechou
 /// `IComponent::Toggle`/`vehicleController::ToggleLights` (bloco de nomes nativos no `__cstring` +
@@ -321,7 +265,7 @@ pub(crate) unsafe extern "C" fn tramp_queue_request_raw(_c: *mut c_void, frame: 
     write_bool_ret(out, ok);
 }
 
-/// axl-garment-apply / axl-transmog-apply (2026-08-02, /goal): 3ª via, achado pelo agente de RE que
+/// Equipar e transmog por script (2026-08-02): 3ª via, achado pelo agente de RE que
 /// desmontou `GetInvokable()` em si (`0x1008c5c9c` — stub trivial, SEMPRE retorna null, ignora `this`
 /// por completo; refuta a hipótese antiga do bit4/`unkAC` como mecanismo interno). A lógica condicional
 /// REAL fica um nível acima, no caller (`Func C`/`0x101099c44` → `0x10109d20c`): se `struct+0x18`
@@ -378,35 +322,31 @@ pub(crate) unsafe extern "C" fn tramp_inv_state(_c: *mut c_void, _f: *mut c_void
 }
 
 
-/// `RegisterOffsetOverrides(estado, hash, definição, deslocamento)`: devolve quantas partes.
-pub(crate) unsafe fn es20_registrar_offsets(entidade: u64, hash: u64, definicao: *const u8, deslocamento: i32) -> usize {
-    let partes = es20_partes(definicao);
-    for parte in &partes {
-        add_offset_override(entidade, hash, *parte, deslocamento);
-    }
-    partes.len()
-}
 
-/// `ApplyOffsetOverrides(estado, offsets, resources)`: com tamanhos diferentes, `Reserve` do tamanho dos recursos (reserve do motor); ligados
-/// (`EnableGarmentOffsets`), a lista refeita com o deslocamento de cada recurso (0 sem estado); desligados, o padrão, a lista vazia. `false` se o
-/// `Reserve` não deu lugar.
+/// Refaz a lista de deslocamentos de roupa (`DynArray<i32>` do motor, um por recurso do contexto): ligados, o deslocamento registrado da
+/// entidade para cada recurso (0 sem registro); desligados ou sem recurso, lista vazia. `false` quando a lista não tem vaga para os recursos.
 pub(crate) unsafe fn es20_aplicar_deslocamentos(entidade: u64, deslocamentos: *mut u8, recursos: &[u64], ligados: bool) -> bool {
-    let tamanho = deslocamentos.add(0x0c) as *mut u32;
-    if tamanho.read_unaligned() as usize != recursos.len() {
-        crate::jogo::listas::reservar(deslocamentos as *mut c_void, recursos.len() as u32, 4, 4, std::ptr::null());
+    if deslocamentos.is_null() {
+        return false;
+    }
+    let n = recursos.len();
+    let tamanho = deslocamentos.add(0x0C) as *mut u32;
+    if tamanho.read_unaligned() as usize != n {
+        crate::jogo::listas::reservar(deslocamentos as *mut c_void, n as u32, 4, 4, std::ptr::null());
     }
     tamanho.write_unaligned(0);
-    if !ligados || recursos.is_empty() {
+    if !ligados || n == 0 {
         return true;
     }
-    let valores = (deslocamentos as *const u64).read_unaligned() as *mut i32;
-    if valores.is_null() || ((deslocamentos.add(0x08) as *const u32).read_unaligned() as usize) < recursos.len() {
+    let entradas = (deslocamentos as *const u64).read_unaligned() as *mut i32;
+    let capacidade = (deslocamentos.add(0x08) as *const u32).read_unaligned() as usize;
+    if entradas.is_null() || capacidade < n {
         return false;
     }
     for (k, recurso) in recursos.iter().enumerate() {
-        valores.add(k).write_unaligned(get_offset_override(entidade, *recurso));
+        entradas.add(k).write_unaligned(get_offset_override(entidade, *recurso));
     }
-    tamanho.write_unaligned(recursos.len() as u32);
+    tamanho.write_unaligned(n as u32);
     true
 }
 
@@ -417,20 +357,17 @@ const COMPUTAR_ROUPA_PROLOGO: u32 = 0xd104_83ff;
 const CONTEXTO_RECURSOS: u64 = 0x40;
 static ORIG_COMPUTAR_ROUPA: AtomicU64 = AtomicU64::new(0);
 
-/// Desligados, o padrão, a lista de offsets vai vazia ao motor, como o `OnComputeGarment` da referência. Sem isso o `garmentOffset` que o Equipment-EX grava em
-/// todo `Clothing_Record` (100000+) chega ao montador e o V perde pedaços da roupa na terceira pessoa (lanes L-28 a L-34). Ligados, a lista do motor segue.
+/// Antes do `ComputePlayerGarment`: com os deslocamentos desligados (o padrão), a lista chega vazia ao montador. O mod de guarda-roupa
+/// grava `garmentOffset` em todo record de roupa, e com esses valores o V em terceira pessoa perde tronco e calça.
 #[allow(clippy::too_many_arguments)]
 unsafe extern "C" fn computar_roupa_hook(a1: u64, entidade: *const u64, deslocamentos: *mut u8, dados: *const u64, a5: u64, a6: u64, a7: u64, a8: u64) {
     let contexto = if dados.is_null() { 0 } else { dados.read_unaligned() };
     if contexto != 0 && !deslocamentos.is_null() && !garment_offsets_enabled() {
-        let recursos = ((contexto + CONTEXTO_RECURSOS) as *const u64).read_unaligned() as *const u64;
-        let n = if recursos.is_null() { 0 } else { ((contexto + CONTEXTO_RECURSOS + 0x0c) as *const u32).read_unaligned() as usize };
-        let lista: &[u64] = if n == 0 { &[] } else { std::slice::from_raw_parts(recursos, n) };
-        es20_aplicar_deslocamentos(0, deslocamentos, lista, false);
+        (deslocamentos.add(0x0C) as *mut u32).write_unaligned(0);
     }
-    let f: unsafe extern "C" fn(u64, *const u64, *mut u8, *const u64, u64, u64, u64, u64) =
+    let original: unsafe extern "C" fn(u64, *const u64, *mut u8, *const u64, u64, u64, u64, u64) =
         std::mem::transmute(crate::ganchos::original_publicado(&ORIG_COMPUTAR_ROUPA));
-    f(a1, entidade, deslocamentos, dados, a5, a6, a7, a8);
+    original(a1, entidade, deslocamentos, dados, a5, a6, a7, a8)
 }
 
 /// No `on_load`, sempre, depois dos hooks de teste do mesmo alvo, que fazem esta conta por conta própria.
@@ -439,19 +376,15 @@ pub(crate) unsafe fn install_offsets_de_roupa() {
     crate::veredito_dev!("[roupa] hook do ComputePlayerGarment: {r:?}");
 }
 
-/// `EnableGarmentOffsets`/`DisableGarmentOffsets` (a flag do `ApplyOffsetOverrides`).
+/// `EnableGarmentOffsets`/`DisableGarmentOffsets`: a flag que liga os offsets de roupa.
 pub(crate) fn es20_deslocamentos_ligados() -> bool {
     garment_offsets_enabled()
 }
 
 
-/// Codeware `WardrobeSystemEx::ForgetItemID` (catálogo item #46/#208, agente de candidatos
-/// baratos 2026-08-11, 3ª rodada da sessão) — fallback de SCAN LINEAR por `ItemID.tdbid`, a
-/// mesma técnica que a fonte real usa quando a remoção direta por CName-derivado-de-flat falha
-/// (`WardrobeSystemEx.hpp`: calcula `appearanceName` via `GetFlatValue<CName>({itemID.tdbid,
-/// ".appearanceName"})`, tenta remover por essa chave, e se isso falhar varre `store.ForEach`
-/// comparando `tdbid` e remove TODAS as entradas que baterem). **Divergência de escopo
-/// consciente**: em vez de replicar as DUAS etapas (derivar CName via flat + fallback), uso só
+/// `WardrobeSystem.ForgetItemID` (2026-08-11, 3ª rodada da sessão) — SCAN LINEAR por
+/// `ItemID.tdbid`. Em vez de derivar a chave CName pelo flat `.appearanceName` e só varrer quando
+/// a remoção por essa chave falha, uso
 /// o SCAN por tdbid como via ÚNICA e PRIMÁRIA — mais robusto (não depende do item ter um flat
 /// `.appearanceName` populado no TweakDB) e reusa 100% a mecânica já provada em
 /// `wardrobe_forget_item_locked` (mesmo `SharedSpinLock@+0xF4`, mesmo layout de `HashMap<CName,
@@ -459,11 +392,10 @@ pub(crate) fn es20_deslocamentos_ligados() -> bool {
 /// peça nova é o CRITÉRIO de match: em vez de comparar a CHAVE (`node.key`, um CName que o
 /// caller já precisa saber), compara o campo `tdbid` do VALOR (`node+0x10`) — `ItemID{tdbid:
 /// TweakDBID@0x00(8 bytes), rngSeed@0x08, uniqueCounter@0x0C, structure@0x0E, flags@0x0F}`,
-/// `RED4EXT_ASSERT_SIZE(ItemID, 0x10)` confirmado em `RED4ext.SDK/include/RED4ext/
-/// NativeTypes.hpp:128` (ground-truth oficial vendorizado, não chute) — como `tdbid` é o
+/// `ItemID` de 0x10 bytes — como `tdbid` é o
 /// PRIMEIRO campo do struct, fica exatamente em `node+0x10` sem offset adicional. Varre TODOS
 /// os buckets (não só o bucket do hash de 1 chave) e remove TODAS as entradas que baterem
-/// (mesma semântica "remove todas" da fonte real) — devolve a CONTAGEM removida.
+/// — devolve a CONTAGEM removida.
 pub(crate) unsafe fn wardrobe_forget_by_tdbid(wardrobe_sys: *mut u8, target_tdbid: u64) -> u32 {
     if !crate::memoria::is_readable(wardrobe_sys as *const c_void, 0x100) {
         crate::log_dev!("[wardrobe-forget-tdbid] instância ilegível");
@@ -544,7 +476,7 @@ pub(crate) unsafe fn wardrobe_forget_by_tdbid_locked(hm: *mut u8, target_tdbid: 
     removed
 }
 
-// ===== axl-garment-apply/axl-transmog-apply (2026-08-03, /goal, cont.30): FIX CIRÚRGICO de
+// ===== Equipar e transmog por script (2026-08-03): FIX CIRÚRGICO de
 // `GetInvokable()` =====
 // Achado desta madrugada (equiprawv5): chamar `0x102445e8c` DIRETO com um `CScriptStackFrame`
 // à mão (mesma receita de `call_func`) roda SEM CRASH mas NÃO FAZ NADA — o bytecode sintético
@@ -609,7 +541,7 @@ pub(crate) unsafe fn install_getinvokable_fix(descriptor: *mut c_void, native_st
 }
 
 
-/// ArchiveXL `#9`: o valor de 1 sufixo de aparência pro item e o dono, como o `GetSuffixValue` do motor (game thread).
+/// O valor de 1 sufixo de aparência pro item e o dono, como o `GetSuffixValue` do motor (game thread).
 pub(crate) unsafe fn a9_valor_do_sufixo(reg: &crate::rtti::Registry, dono_h: &[u64; 2], item: &[u8; 16], sufixo: u64) -> String {
     let s = bwms_primitives::tweak_db_id_chave(sufixo);
     let id = |n: &str| bwms_primitives::tweak_db_id(&format!("itemsFactoryAppearanceSuffix.{n}"));
@@ -687,5 +619,54 @@ pub unsafe fn remove(
     );
     crate::log_dev!("[remove] {name} x{qty} -> {:02x?}", r);
     r
+}
+
+#[cfg(test)]
+mod deslocamentos_de_roupa_tests {
+    use super::es20_aplicar_deslocamentos;
+
+    /// `DynArray<i32>` de teste com o tamanho igual ao nº de recursos (sem ir ao reserve do motor): devolve (retorno, tamanho, valores).
+    fn rodar(entidade: u64, valores: &mut [i32], tamanho: u32, recursos: &[u64], ligados: bool) -> (bool, u32, Vec<i32>) {
+        let mut lista = [valores.as_mut_ptr() as u64, valores.len() as u64 | u64::from(tamanho) << 32];
+        let ok = unsafe { es20_aplicar_deslocamentos(entidade, lista.as_mut_ptr() as *mut u8, recursos, ligados) };
+        let tam = (lista[1] >> 32) as u32;
+        (ok, tam, valores[..tam as usize].to_vec())
+    }
+
+    /// Vetores `[B14]` sem deslocamento registrado no caminho: desligados ou sem recurso, a lista sai vazia.
+    #[test]
+    fn desligados_ou_sem_recurso_esvaziam_a_lista() {
+        let recursos = [0xAA01, 0xAA02, 0xAA03];
+        assert_eq!(rodar(0xB14E_0001, &mut [1, 2, 3], 3, &recursos, false), (true, 0, vec![]));
+        assert_eq!(rodar(0xB14E_0001, &mut [5], 0, &[], true), (true, 0, vec![]));
+        assert_eq!(rodar(0xB14E_0002, &mut [9, 9, 9], 3, &recursos, false), (true, 0, vec![]));
+    }
+
+    /// Vetores `[B14]` ligados: cada posição recebe o deslocamento da entidade para o recurso dela (0 sem registro); a entidade 0, a que o
+    /// gancho de produção passaria, não tem registro.
+    #[test]
+    fn ligados_gravam_o_deslocamento_de_cada_recurso() {
+        let (entidade, fonte) = (0xB14E_0003u64, 9u64);
+        unsafe {
+            crate::aparencia::add_offset_override(entidade, fonte, 0xAA02, -4);
+            crate::aparencia::add_offset_override(entidade, fonte, 0xAA03, 7);
+        }
+        let recursos = [0xAA01, 0xAA02, 0xAA03];
+        let com = rodar(entidade, &mut [1, 2, 3], 3, &recursos, true);
+        let sem = rodar(0, &mut [1, 2, 3], 3, &recursos, true);
+        let removidos = unsafe { crate::aparencia::remove_offset_overrides(entidade, fonte) };
+        assert_eq!(com, (true, 3, vec![0, -4, 7]));
+        assert_eq!(sem, (true, 3, vec![0, 0, 0]));
+        assert_eq!(removidos, 2);
+    }
+
+    /// A lista sem buffer não recebe os deslocamentos.
+    #[test]
+    fn lista_sem_buffer_recusa() {
+        let mut cheia = [0u64, 3u64 << 32];
+        // Tamanho 3 com 3 recursos (sem reserve), mas sem buffer: `false` e a lista fica vazia.
+        assert!(!unsafe { es20_aplicar_deslocamentos(0, cheia.as_mut_ptr() as *mut u8, &[1, 2, 3], true) });
+        assert_eq!(cheia[1] >> 32, 0);
+    }
 }
 

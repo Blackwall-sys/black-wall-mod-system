@@ -5,16 +5,13 @@
 pub(crate) mod depot;
 
 use crate::jogo::fila::com_fila_de_jobs;
-use crate::curvas::a51g_mesclar_curvas;
 use crate::jogo::buffers::realocar_rawbuffer;
-use crate::jogo::recursos::PostLoadFn;
 use crate::jogo::objetos::travar_fraco;
 use crate::jogo::aparencia::APPRESOURCE_APPEARANCES_OFF;
 use crate::jogo::aparencia::APPDEF_NAME_OFF;
 use crate::jogo::aparencia::APPDEF_PARTSOVERRIDES_OFF;
 use crate::jogo::aparencia::APPDEF_PARTSVALUES_OFF;
 use crate::jogo::aparencia::APPDEF_VISUALTAGS_OFF;
-use crate::jogo::listas::MOVER_HANDLES_VM;
 use crate::jogo::listas::dynarray_no_campo;
 use crate::marcador_individual;
 use crate::curvas::A51G_ATIVO;
@@ -31,20 +28,12 @@ use crate::entidades::*;
 use crate::mundo::*;
 use crate::ganchos::*;
 use crate::diagnostico::{
-    a51_databuffer_igual, a51d3_buffers_iguais, a51k_job_texto, register_ativacao_118_utils, register_targets_utils, A51d2Amostra,
-    A17_PATCHES_APLICADOS, A17_PATCHES_INEXISTENTES, A17_PATCHES_NAO_PRONTOS, A48_ESTADOS_CRIADOS, A51B_CRIADOS, A51B_SCHEMAS_CRIADOS,
-    A51B_TESTE_ALVO, A51C4_AMOSTRA, A51D2_AMOSTRAS, A51D3_AMOSTRAS, A51D3_CONFERIDAS, A51D3_COPIADOS, A51D3_DIVERGENTES, A51D3_FALHAS, A51F2_TESTE,
-    A51F2_TESTE_NONE, A51F3_TESTE, A51G_CONTEXTOS, A51I2_AMOSTRAS, A51I2_ANEXADAS, A51I2_FALHAS, A51I2_LOGADOS, A51I2_NAO_PRONTOS, A51I2_TROCADAS,
-    A51I3_AMOSTRAS, A51I3_CONFERIDAS, A51I3_COPIADOS, A51I3_DIVERGENTES, A51I3_FALHAS, A51I3_LOGADOS, A51I_LOGADOS, A51I_MESHES, A51I_NOMES,
-    A51J_MUNDO, A51K_CASADOS_28, A51K_CASADOS_30, A51K_CHAMADAS, A51K_JA_PRONTOS, A51K_JUNCOES, A51_APLICADOS, A51_NAO_PRONTOS, C122_CONTEXTOS,
-    C122_DESPACHOS,
+    register_ativacao_118_utils, register_targets_utils, A17_PATCHES_INEXISTENTES, A51B_TESTE_ALVO, A51F2_TESTE, A51F2_TESTE_NONE, A51F3_TESTE,
+    C122_CONTEXTOS, C122_DESPACHOS,
 };
-// A contagem dos `PostLoad`, que só a sonda das 8 primeiras chamadas usa.
-#[cfg(feature = "devlog")]
-use crate::diagnostico::{POSTLOAD_CNT_APPEARANCERESOURCE, POSTLOAD_CNT_CMESH, POSTLOAD_CNT_ENTITYTEMPLATE, POSTLOAD_CNT_MORPHTGT};
 // Só os ramos de teste da tabela de patches usam, e o público não os cita.
 #[cfg(feature = "devtools")]
-use crate::diagnostico::{a51d3_apos_original, a51i3_apos_original, a51k_observar_postload, A51F_TESTE_ALVOS, A51G_TESTE, A51H_TESTE};
+use crate::diagnostico::{A51F_TESTE_ALVOS, A51G_TESTE, A51H_TESTE};
 use crate::tipos_do_motor::*;
 use crate::aparencia::*;
 use crate::interface::*;
@@ -58,35 +47,27 @@ use crate::register::*;
 #[cfg(not(feature = "devtools"))]
 const BLOCO_DE_PROVA: u8 = 0b001;
 
-// Codeware `App::ResourceHelper::GetReferencePath` (item #199 do catálogo Codeware, agente de
-// pesquisa 2026-08-11, cont.225) — fonte real (`App/Depot/ResourceHelper.hpp`): resolve a
+// `ResourceHelper.GetReferencePath` (2026-08-11, cont.225): resolve a
 // property por CName na classe do owner, confirma que é categoria `ERTTIType::ResourceReference`
 // (11), lê `ResourceReference<>.path@+0x00` (u64, o mesmo hash FNV1a64 de `resource_path_hash`) —
 // composição pura de `resolve_prop_in_class`+`type_kind`+`field_ptr`, todos já provados em outras
 // natives desta sessão. Zero RE de endereço nativo. `0` = property não achada / não é
-// ResourceReference / holder ainda não inicializado (todos os casos "sem dado", igual ao C++ real
-// que devolve `{}` default-construído nesses mesmos casos).
+// ResourceReference / holder ainda não inicializado (todos os casos "sem dado").
 //
-// DIVERGÊNCIA CONSCIENTE 2026-08-12 (agente dedicado, rodada de composição barata, offline,
-// NÃO é bug fix — a nota anterior já tinha testado isto ao vivo em 2026-08-11 e confirmado que o
-// `0` devolvido pra `entMeshComponent.mesh` é o comportamento CORRETO/fiel ao C++ real): o smoke
-// test canônico deste item (`codeware-resourcehelper-smoke.reds`) mira `entMeshComponent.mesh`,
-// que o header vendorizado real (`RED4ext.SDK/.../ent/MeshComponent.hpp:32`) documenta como
-// `RaRef<CMesh> mesh` — ou seja `ResourceAsyncReference<CMesh>` (`ERTTIType::
+// ESCOLHA CONSCIENTE 2026-08-12 (agente dedicado, rodada de composição barata, offline,
+// NÃO é bug fix — a nota anterior já tinha testado isto ao vivo em 2026-08-11 e confirmado o
+// `0` devolvido pra `entMeshComponent.mesh` com o aceite só da categoria 11): o smoke
+// test canônico deste item (o smoke do resource helper) mira `entMeshComponent.mesh`,
+// que é `RaRef<CMesh> mesh` — ou seja `ResourceAsyncReference<CMesh>` (`ERTTIType::
 // ResourceAsyncReference = 12`, SEM `token`, só `path@+0x00`), não `ResourceReference` (`=11`,
-// COM token). O `App::ResourceHelper::GetReferencePath` REAL só aceita categoria 11 (`prop->type->
-// GetType() != Red::ERTTIType::ResourceReference` → early-return `{}`) — o check antigo
-// (`type_kind(ty)==Some(11)`) já estava FIEL a essa fonte, não era bug. Alargar aqui pra aceitar
-// TAMBÉM a categoria 12 é uma escolha de ENRIQUECIMENTO consciente (framework de 3os, sem
-// obrigação de replicar limitação da fonte original — regra já estabelecida no projeto), segura
-// porque `path` mora no MESMO offset (+0x00) nas duas variantes (confirmado nos 2 headers
-// vendorizados: `ResourceReference<>` e `ResourceAsyncReference<>`, ambos com `ResourcePath path`
-// como 1º campo) — cobre o caso mais comum do jogo real (a maioria dos campos de recurso em
-// componentes vanilla é `RaRef<T>`, não `Ref<T>` — confirmado por grep no SDK vendorizado,
-// `RaRef<...>` aparece dezenas de vezes vs poucas `Ref<...>` sem o prefixo Async). Com isso,
+// COM token). Aceitar TAMBÉM a categoria 12 é seguro
+// porque `path` mora no MESMO offset (+0x00) nas duas variantes (`ResourceReference<>` e
+// `ResourceAsyncReference<>`, ambos com `ResourcePath path` como 1º campo) — cobre o caso mais
+// comum do jogo real (a maioria dos campos de recurso em componentes vanilla é `RaRef<T>`, não
+// `Ref<T>`). Com isso,
 // `entMeshComponent.mesh` deve passar a devolver o hash real (não mais `0`) — reteste recomendado
 // no próximo boot. `IsReferenceLoaded`/`GetReferenceResource` (abaixo) SEGUEM exigindo
-// estritamente `type_kind==11` (fiéis à fonte real) — só ESSE layout tem `token` pra ler.
+// estritamente `type_kind==11` — só ESSE layout tem `token` pra ler.
 pub(crate) unsafe extern "C" fn tramp_resource_helper_get_reference_path(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let owner = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -107,20 +88,18 @@ pub(crate) unsafe extern "C" fn tramp_resource_helper_get_reference_path(_c: *mu
     write_uint_ret(out, path, 8);
 }
 
-/// Codeware `App::ResourceHelper::IsReferenceLoaded`/`GetReferenceResource` (item #199). O 3º
-/// método, `LoadReferenceResource`, é `tramp_resource_helper_load_reference` (abaixo). Fonte real
-/// (`App/Depot/ResourceHelper.hpp`): resolve a property (mesmo mecanismo de `GetReferencePath`,
+/// `ResourceHelper.IsReferenceLoaded`/`GetReferenceResource`. O 3º
+/// método, `LoadReferenceResource`, é `tramp_resource_helper_load_reference` (abaixo). Resolve a
+/// property (mesmo mecanismo de `GetReferencePath`,
 /// mas AQUI restrito a `type_kind==11`/`ResourceReference` — só esse layout tem o campo `token`
 /// que os 2 métodos precisam), lê `ResourceReference<>.token@+0x08` (`SharedPtr<ResourceToken>`,
-/// layout `RED4ext.SDK/Memory/SharedPtr.hpp`: `{instance*@+0x00, refCount*@+0x08}`, 16 bytes —
+/// `{instance*@+0x00, refCount*@+0x08}`, 16 bytes —
 /// mesmo layout de `Handle<T>` já usado em toda `make_handle`/`make_weak_handle` deste projeto).
 /// Se `token.instance` for null (nunca carregado), `IsReferenceLoaded`→`false`/
-/// `GetReferenceResource`→`ref` nulo — mesmo comportamento do C++ real (`token && token->
-/// IsLoaded()`/early-return `{}`).
+/// `GetReferenceResource`→`ref` nulo.
 ///
-/// `token->finished@+0x58`(i32)/`token->error@+0x5C`(u8) — offsets exatos do header vendorizado
-/// (`RED4ext.SDK/ResourceLoader.hpp:98-99`, `ResourceToken<T>` real, ZERO shift Itanium — são
-/// CAMPOS DE DADOS puros, não slots de vtable, mesma regra já estabelecida no projeto inteiro).
+/// `token->finished@+0x58`(i32)/`token->error@+0x5C`(u8) — offsets de `ResourceToken<T>`, ZERO
+/// shift Itanium — são CAMPOS DE DADOS puros, não slots de vtable, mesma regra já estabelecida no projeto inteiro.
 /// `token->resource@+0x28` (`Handle<T>`, 16 bytes) — `GetReferenceResource` lê o `.instance`
 /// (1º qword) e reconstrói um handle FORTE de verdade via `rtti::make_handle` (a rotina real do
 /// motor acha/reusa o bloco de refcount já existente do objeto, não duplica).
@@ -129,12 +108,11 @@ pub(crate) unsafe extern "C" fn tramp_resource_helper_is_reference_loaded(_c: *m
     write_bool_ret(out, token_da_property(frame).is_some_and(|t| status_do_token(t) == 1));
 }
 
-/// `BwmsLoadResourceReference(owner: ref<IScriptable>, propName: CName, pathHash: Uint64) -> Bool` — Codeware
-/// `ResourceHelper::LoadReferenceResource` (item `#199`, 2026-09-11): resolve a property `ResourceReference<T>` (type_kind 11)
+/// `BwmsLoadResourceReference(owner: ref<IScriptable>, propName: CName, pathHash: Uint64) -> Bool` —
+/// `ResourceHelper.LoadReferenceResource` (2026-09-11): resolve a property `ResourceReference<T>` (type_kind 11)
 /// pelo nome, grava o path e põe no token (`+0x08`) o `SharedPtr` que o loader devolve pelo caminho do motor
-/// (`selftest::token_do_path`, `0x1010f0d34`, provado no boot 15 do RED4ext `#408`), e espera o job numa fila
-/// (`selftest::esperar_token`). Divergências conscientes: sem espera bloqueante (o `aWaitForResource` do Codeware segura a
-/// thread até 2 s), e o token que o campo tinha antes NÃO é solto — vaza 1 referência em vez de mexer no alocador do motor.
+/// (`selftest::token_do_path`, `0x1010f0d34`, provado no boot 15), e espera o job numa fila
+/// (`selftest::esperar_token`). Sem espera bloqueante, e o token que o campo tinha antes NÃO é solto — vaza 1 referência em vez de mexer no alocador do motor.
 pub(crate) unsafe extern "C" fn tramp_resource_helper_load_reference(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let owner = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -179,9 +157,9 @@ pub(crate) unsafe extern "C" fn tramp_resource_helper_load_reference(_c: *mut c_
     write_bool_ret(out, ok);
 }
 
-/// `BwmsDepotRemoveResourceFromCache(path: Uint64) -> Bool` — Codeware `ResourceDepot.RemoveResourceFromCache` (item `#198`,
-/// 2026-09-11): `ResourceBank::ForgetResource` (`0x1010e4454`) no bank do loader, soltando o handle devolvido como o motor solta.
-/// `true` = havia loader e a chamada foi feita (o Codeware não devolve nada); o log diz se o bank tinha o recurso.
+/// `BwmsDepotRemoveResourceFromCache(path: Uint64) -> Bool` — `ResourceDepot.RemoveResourceFromCache`
+/// (2026-09-11): `ResourceBank::ForgetResource` (`0x1010e4454`) no bank do loader, soltando o handle devolvido como o motor solta.
+/// `true` = havia loader e a chamada foi feita; o log diz se o bank tinha o recurso.
 pub(crate) unsafe extern "C" fn tramp_depot_remove_resource_from_cache(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let path = args.first().map(|(v, _)| *v).unwrap_or(0);
@@ -205,9 +183,8 @@ pub(crate) unsafe fn token_da_property(frame: *mut c_void) -> Option<u64> {
     token_de(owner, prop_hash)
 }
 
-/// Espera o token terminar, como o `Red::WaitForResource` do Codeware (que bloqueia numa condition variable até um job atrás do
-/// job do token rodar). A fila com `Wait` no job não bloqueia neste binário — no boot 22 voltou com o token ainda carregando —
-/// então a espera confere o `finished` do próprio token a cada 1 ms, com teto de 2 s (o do `LoadReferenceResource` do Codeware).
+/// Espera o token terminar. A fila com `Wait` no job não bloqueia neste binário — no boot 22 voltou com o token ainda carregando —
+/// então a espera confere o `finished` do próprio token a cada 1 ms, com teto de 2 s.
 /// `true` = terminou (carregado ou falhou) dentro do teto.
 pub(crate) unsafe fn esperar_terminar(t: u64) -> bool {
     crate::arquivos_do_jogo::esperar_token(t);
@@ -221,8 +198,8 @@ pub(crate) unsafe fn esperar_terminar(t: u64) -> bool {
     true
 }
 
-/// `BwmsResourceTokenWatch(token, target, function, id, owner, propName) -> Bool` — Codeware `ResourceToken.RegisterCallback` (item
-/// `#18`, 2026-09-11): põe o token no vigia do tick (`selftest::vigiar_tokens`), que chama `target.function(token)` quando carrega.
+/// `BwmsResourceTokenWatch(token, target, function, id, owner, propName) -> Bool` — `ResourceToken.RegisterCallback`
+/// (2026-09-11): põe o token no vigia do tick (`selftest::vigiar_tokens`), que chama `target.function(token)` quando carrega.
 /// `id != 0` = token guardado por id; senão, a property `propName` de `owner`. `false` = parâmetro inválido.
 pub(crate) unsafe extern "C" fn tramp_resource_token_watch(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
@@ -254,8 +231,8 @@ pub(crate) unsafe extern "C" fn tramp_resource_token_watch(_c: *mut c_void, fram
     write_bool_ret(out, ok);
 }
 
-/// `BwmsDepotLoadResourceToken(path: Uint64) -> Uint64` — Codeware `ResourceDepot.LoadResource` (item `#198`, 2026-09-11): carga
-/// assíncrona pelo loader do motor (`0x1010f0d34`, RED4ext `#408`) sem esperar; devolve o id do token guardado (0 = sem loader).
+/// `BwmsDepotLoadResourceToken(path: Uint64) -> Uint64` — `ResourceDepot.LoadResource` (2026-09-11): carga
+/// assíncrona pelo loader do motor (`0x1010f0d34`) sem esperar; devolve o id do token guardado (0 = sem loader).
 pub(crate) unsafe extern "C" fn tramp_depot_load_resource_token(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let path = args.first().map(|(v, _)| *v).unwrap_or(0);
@@ -283,7 +260,7 @@ pub(crate) unsafe extern "C" fn tramp_token_id_resource(_c: *mut c_void, frame: 
     entregar_recurso(out, inst);
 }
 
-/// `BwmsResourceTokenIdJob(id: Uint64) -> Uint64` — Codeware `ResourceToken.GetJobHandle` (item `#18`): o `JobHandle` do token, opaco.
+/// `BwmsResourceTokenIdJob(id: Uint64) -> Uint64` — `ResourceToken.GetJobHandle`: o `JobHandle` do token, opaco.
 pub(crate) unsafe extern "C" fn tramp_token_id_job(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     write_uint_ret(out, token_do_id(frame).map(|t| ((t + 0x50) as *const u64).read_unaligned()).unwrap_or(0), 8);
 }
@@ -328,10 +305,10 @@ pub(crate) unsafe extern "C" fn tramp_resource_helper_token_status(_c: *mut c_vo
 /// DIFERENTES entre si, ou se o deref de `token_ptr` lê memória que muda entre as 3 chamadas
 /// separadas de `IsFinished`/`IsLoaded`/`IsFailed`). Este native devolve o `type_kind` CRU
 /// resolvido (0-15, ver `rtti::decode_ertti_type`) ou `-1` se a property não resolveu — chamado
-/// MÚLTIPLAS vezes seguidas pro mesmo (owner,propName) no smoke test (`codeware-resourcetoken-
-/// smoke.reds`) pra confirmar/refutar a hipótese "resolução de tipo instável" vs. "campo
+/// MÚLTIPLAS vezes seguidas pro mesmo (owner,propName) no smoke test do resource token
+/// pra confirmar/refutar a hipótese "resolução de tipo instável" vs. "campo
 /// genuinamente não é tipo 11 (Ref), e a leitura de status é que lê lixo por outro motivo" —
-/// nunca antes isolado, a nota do catálogo (`CATALOGO-EXAUSTIVO-CODEWARE.md` item `#18`) pedia
+/// nunca antes isolado, a nota do catálogo exaustivo (item `#18`) pedia
 /// exatamente esta instrumentação como "próximo passo real" antes de testar outro alvo.
 #[cfg(feature = "devtools")]
 pub(crate) unsafe extern "C" fn tramp_resource_helper_debug_typekind(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -351,18 +328,16 @@ pub(crate) unsafe extern "C" fn tramp_resource_helper_debug_typekind(_c: *mut c_
     write_uint_ret(out, kind as u64, 4);
 }
 
-// ===== Codeware `Utils/Compatibility.reds::GameFileExists` (`PENDENCIAS-UNIFICADAS.md` item #64,
-// duplicata #184) — **achado 2026-08-09: `Number.reds`(#67/#181)/`String.reds`(#68/#182) já
-// estavam 100% implementados** (`register_number_utils`/`register_string_utils`, acima —
+// ===== `GameFileExists` — **achado 2026-08-09: as utilidades de número e de texto já
+// estavam 100% implementadas** (`register_number_utils`/`register_string_utils`, acima —
 // primeira tentativa desta rodada duplicou esse trabalho por não ter checado antes; revertida).
-// `GameFileExists` é o único item genuinamente novo desse lote: fonte C++ real
-// (`App/Utils/Compatibility.hpp`) = `std::filesystem::exists` com guarda de path-traversal, zero
-// dependência de RTTI/endereço nativo.
+// `GameFileExists` é o único item genuinamente novo desse lote: existência de arquivo
+// com guarda de path-traversal, zero dependência de RTTI/endereço nativo.
 pub(crate) unsafe extern "C" fn tramp_game_file_exists(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let (_args, strings) = rtti::read_params_consuming_with_strings(func, frame);
     let rel = strings.first().cloned().flatten().unwrap_or_default();
-    // Mesma guarda de path-traversal da fonte real (rejeita path que normalize pra fora do jogo).
+    // Guarda de path-traversal (rejeita path que normalize pra fora do jogo).
     let exists = if rel.is_empty() || rel.contains("..") {
         false
     } else {
@@ -378,7 +353,7 @@ pub(crate) unsafe fn register_compatibility_utils(reg: &Registry, proto: *mut c_
     crate::log_dev!("[reg] register_all: cw-utils Compatibility.GameFileExists={ok1}");
 }
 
-// ===== Codeware `#16`/`#198` (`PENDENCIAS-UNIFICADAS.md`, `ResourceDepot.ResourceExists`) —
+// ===== `ResourceDepot.ResourceExists` —
 // ponta redscript-callable do mecanismo interno `crate::resource_exists` (PROVADO ao vivo
 // 2026-08-10 via comando de canal `resexists`, composição de `PATHB_DEPOT`+
 // `CheckResource@0x10151aa2c`). Mesmo padrão de trampolim String→Bool que `GameFileExists`
@@ -391,7 +366,7 @@ pub(crate) unsafe extern "C" fn tramp_resource_exists(_c: *mut c_void, frame: *m
     write_bool_ret(out, exists);
 }
 
-/// Codeware `#16`/`#198` (`ResourceDepot.ArchiveExists`) — ponta redscript-callable de
+/// `ResourceDepot.ArchiveExists` — ponta redscript-callable de
 /// `crate::archive_exists_by_name` (layout de `ArchiveInfo`/RedString CONFIRMADO ao vivo 2026-08-10
 /// via `archivenamedump`, refutando a incerteza de 2026-07-17). Mesmo padrão String→Bool.
 pub(crate) unsafe extern "C" fn tramp_archive_exists(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -402,7 +377,7 @@ pub(crate) unsafe extern "C" fn tramp_archive_exists(_c: *mut c_void, frame: *mu
     write_bool_ret(out, exists);
 }
 
-/// Codeware `#16` (`ResourceDepot.LoadResource`) — ponta redscript-callable da consulta ao
+/// `ResourceDepot.LoadResource` — ponta redscript-callable da consulta ao
 /// **cache de recursos vivos** do motor, identificado em 2026-08-21.
 ///
 /// **Como o mapa foi identificado (por CONTEÚDO, não por forma):** `reslinkdump` capturou hashes
@@ -426,7 +401,7 @@ pub(crate) unsafe extern "C" fn tramp_depot_resource_loaded(_c: *mut c_void, fra
     write_bool_ret(out, !classe.is_empty());
 }
 
-/// Codeware `#16` — companheira da anterior: devolve o NOME DA CLASSE RTTI do recurso carregado
+/// Companheira da anterior: devolve o NOME DA CLASSE RTTI do recurso carregado
 /// (ex.: `"inkTextureAtlas"` pra um `.inkatlas`), ou `""` se não estiver no cache. É o que
 /// substitui, com segurança, o "me dê o recurso": o mod descobre o tipo real sem tocar no handle.
 pub(crate) unsafe extern "C" fn tramp_depot_resource_class(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -438,7 +413,7 @@ pub(crate) unsafe extern "C" fn tramp_depot_resource_class(_c: *mut c_void, fram
     let _ = write_cstring_inline_ret(out, &nome);
 }
 
-// ===== Codeware `#17` (`ResourceRef`/`ResourceAsyncRef`) — 4 dos ~15 métodos, habilitados pelo
+// ===== `ResourceRef`/`ResourceAsyncRef` — 4 dos ~15 métodos, habilitados pelo
 // cache de recursos identificado em 2026-09-04 (o mapa no bank `[loader+0x48]`).
 //
 // O item estava 2/~15 (`OperatorEqual`/`NotEqual` + `GetHash`). Estes 4 saem de graça agora:
@@ -447,7 +422,7 @@ pub(crate) unsafe extern "C" fn tramp_depot_resource_class(_c: *mut c_void, fram
 //   `IsEmpty`   — `hash == 0`, definição da própria struct (é um u64 e nada mais).
 //   `IsLoaded`  — consulta ao cache vivo: presente E com classe RTTI resolvível.
 //   `GetResource` (parcial) — devolve a CLASSE do recurso carregado, não o handle. Mesma
-//                 divergência consciente do `#16`: entregar `ref<>` faria o redscript tomar
+//                 escolha do `LoadResource` acima: entregar `ref<>` faria o redscript tomar
 //                 refcount de objeto que não possui, que é o mecanismo de crash já provado.
 pub(crate) unsafe extern "C" fn tramp_resref_from_path(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
@@ -499,9 +474,9 @@ pub(crate) unsafe extern "C" fn tramp_resref_resource_class(_c: *mut c_void, fra
     let _ = write_cstring_inline_ret(out, &nome);
 }
 
-// ===== Codeware `#137` (`ResourceTarget`) — filtro de path por wildcard/regex.
+// ===== `ResourceTarget` — filtro de path por wildcard/regex.
 //
-// Porte do algoritmo real (`App/Callback/Targets/ResourceTarget.hpp:70-83`). Lógica pura: não toca
+// Lógica pura: não toca
 // memória do jogo, não chama nada nativo — por isso é exatamente o tipo de gap que dá pra fechar
 // sem depender de RE. O núcleo vive em `bwms_primitives::restarget` (motor em `bwms_primitives::regex`),
 // testado offline; aqui é só a ponta redscript.
@@ -522,7 +497,7 @@ pub(crate) unsafe extern "C" fn tramp_restarget_matches(_c: *mut c_void, frame: 
     write_uint_ret(out, r as u64, 4);
 }
 
-/// Devolve a regex que o Codeware montaria pro padrão — auditável contra a fonte.
+/// Devolve a regex montada pro padrão — auditável.
 #[cfg(feature = "devtools")]
 pub(crate) unsafe extern "C" fn tramp_restarget_regex(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
@@ -535,7 +510,7 @@ pub(crate) unsafe extern "C" fn tramp_restarget_regex(_c: *mut c_void, frame: *m
 pub(crate) unsafe fn register_restarget_137_utils(reg: &Registry, proto: *mut c_void) {
     let a = registro_de_prova!(register_argful_by_types(reg, proto, &["String", "String"], "BwmsResTargetMatches", "BwmsResTargetMatches", corpo_de_prova!(tramp_restarget_matches)));
     let b = registro_de_prova!(register_argful_by_types(reg, proto, &["String"], "BwmsResTargetRegex", "BwmsResTargetRegex", corpo_de_prova!(tramp_restarget_regex)));
-    crate::log_dev!("[reg] register_all: Codeware.#137 ResTargetMatches={a} ResTargetRegex={b}");
+    crate::log_dev!("[reg] register_all: ResTargetMatches={a} ResTargetRegex={b}");
 }
 
 pub(crate) unsafe fn register_resref_17_utils(reg: &Registry, proto: *mut c_void) {
@@ -546,14 +521,14 @@ pub(crate) unsafe fn register_resref_17_utils(reg: &Registry, proto: *mut c_void
     // `BwmsHashToResRef` já é registrado no bloco dos casts (item `#63`).
     let f17 = register_argful_by_types(reg, proto, &["Uint64", "Int32"], "BwmsResourcePathPart", "BwmsResourcePathPart", tramp_resource_path_part as NativeHandler);
     crate::log_dev!("[reg] register_all: cw-17 ResourcePathPart={f17}");
-    crate::log_dev!("[reg] register_all: Codeware.#17 FromPath={a} IsEmpty={b} IsLoaded={c} ResourceClass={d}");
+    crate::log_dev!("[reg] register_all: ResRef FromPath={a} IsEmpty={b} IsLoaded={c} ResourceClass={d}");
 }
 
 pub(crate) unsafe fn register_resourcedepot_utils(reg: &Registry, proto: *mut c_void) {
     let ok = register_argful_by_types(reg, proto, &["String"], "BwmsResourceExists", "BwmsResourceExists", tramp_resource_exists);
-    crate::log_dev!("[reg] register_all: Codeware.Depot.ResourceExists (BwmsResourceExists)={ok}");
+    crate::log_dev!("[reg] register_all: Depot.ResourceExists (BwmsResourceExists)={ok}");
     let ok2 = register_argful_by_types(reg, proto, &["String"], "BwmsArchiveExists", "BwmsArchiveExists", tramp_archive_exists);
-    crate::log_dev!("[reg] register_all: Codeware.Depot.ArchiveExists (BwmsArchiveExists)={ok2}");
+    crate::log_dev!("[reg] register_all: Depot.ArchiveExists (BwmsArchiveExists)={ok2}");
     register_resref_17_utils(reg, proto);
     register_restarget_137_utils(reg, proto);
     register_targets_utils(reg, proto);
@@ -562,22 +537,21 @@ pub(crate) unsafe fn register_resourcedepot_utils(reg: &Registry, proto: *mut c_
     register_ativacao_118_utils(reg, proto);
     let ok3 = register_argful_by_types(reg, proto, &["String"], "BwmsDepotIsResourceLoaded", "BwmsDepotIsResourceLoaded", tramp_depot_resource_loaded);
     let ok4 = register_argful_by_types(reg, proto, &["String"], "BwmsDepotLoadedResourceClass", "BwmsDepotLoadedResourceClass", tramp_depot_resource_class);
-    crate::log_dev!("[reg] register_all: Codeware.Depot.LoadResource (BwmsDepotIsResourceLoaded={ok3} BwmsDepotLoadedResourceClass={ok4})");
+    crate::log_dev!("[reg] register_all: Depot.LoadResource (BwmsDepotIsResourceLoaded={ok3} BwmsDepotLoadedResourceClass={ok4})");
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#58` (`Scripting/ISerializable.reds::ProcessPostLoad`, round 9 — 2026-08-12, agente
+// `ProcessPostLoad` (round 9 — 2026-08-12, agente
 // offline dedicado). Ver nota grande em `rtti::iserializable_process_post_load` pro raciocínio
 // completo (offset 0x30 já confirmado 2x independentemente via `CMESH_POSTLOAD_VM`/
-// `MORPHTGT_POSTLOAD_VM`). **Divergência de escopo deliberada vs. a fonte real**: o Codeware
-// declara `public abstract native class ISerializable` — mesma categoria CMesh-trap já
+// `MORPHTGT_POSTLOAD_VM`). **Escopo deliberado**: declarar
+// `public abstract native class ISerializable` cai na mesma categoria CMesh-trap já
 // documentada à exaustão neste catálogo (`ISerializable` tem ZERO ocorrências em
 // `redscript-src`, grep confirmado). Expus como `@addMethod(IScriptable)` em vez de
 // `ISerializable` — `IScriptable` É um tipo vanilla real/seguro (`orphans.script:11256`,
 // `public native class IScriptable`, já usado extensivamente por todo o projeto) e herda a
 // MESMA posição de slot de vtable pra `PostLoad` (raiz da hierarquia RTTI, slots base nunca se
-// movem por herança). `RefreshResource` (nome real da fonte, `this.ProcessPostLoad(...)`)
-// replicado como sugar puro.
+// movem por herança). `RefreshResource` (`this.ProcessPostLoad(...)`) é sugar puro.
 pub(crate) unsafe extern "C" fn tramp_iscriptable_process_postload(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let inst = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -602,7 +576,7 @@ pub(crate) unsafe fn register_iscriptable_postload_native(reg: &Registry, proto:
 }
 
 
-/// Texto do caminho registrado pra `hash` (caminhos que passaram como texto pelo BWMS, como o `ResourcePathRegistry` da referência).
+/// Texto do caminho registrado pra `hash` (caminhos que passaram como texto pelo BWMS).
 pub(crate) fn caminho_texto(hash: u64) -> Option<String> {
     CAMINHOS_POR_HASH.lock().ok().and_then(|m| m.as_ref().and_then(|mapa| mapa.get(&hash).cloned()))
 }
@@ -610,12 +584,11 @@ pub(crate) fn caminho_texto(hash: u64) -> Option<String> {
 // ===== 6 subclasses NOVAS `extends CallbackSystemTarget` (2026-07-24, rodada 2 — mesma sessão de
 // `ComponentTarget` acima) =====================================================================
 //
-// Fontes reais: `enablers/Codeware/scripts/Callback/Targets/{ResourceTarget,InkWidgetTarget,
-// DynamicEntityTarget,StaticEntityTarget,EntityTarget,InputTarget}.reds` — CONFIRMADO por leitura
-// direta de cada arquivo que as 6 `extends CallbackSystemTarget` DIRETO (nenhuma via parent
+// `ResourceTarget`, `InkWidgetTarget`, `DynamicEntityTarget`, `StaticEntityTarget`, `EntityTarget` e
+// `InputTarget`: as 6 `extends CallbackSystemTarget` DIRETO (nenhuma via parent
 // intermediário; `inkWidgetTarget`/`EntityTarget`/`InputTarget` não passam por `ComponentTarget`
 // nem entre si).
-/// Codeware `#137` (`ResourceTarget::Matches`, 2026-08-12) — TAG de qual das 2 factories construiu
+/// `ResourceTarget::Matches` (2026-08-12) — TAG de qual das 2 factories construiu
 /// o alvo, mesmo motivo do `EntityTargetCriterion`/`ComponentTargetCriterion` (`Type`/`Path`
 /// compartilhavam o mesmo slot `u64` cru sem distinguir a proveniência). O `u64` de `Type` é a classe que a
 /// fábrica resolveu (`classe_do_alvo`); o de `Path`, o hash do `ResourcePath`.
@@ -702,16 +675,16 @@ pub unsafe fn register_resourcetarget(reg: &Registry) -> String {
     )
 }
 
-/// `ResourceEvent extends CallbackSystemEvent` — `cw-controller-misc` (2026-07-19). Fonte real:
+/// `ResourceEvent extends CallbackSystemEvent` — controller de recurso (2026-07-19). Forma:
 /// `public native class ResourceEvent extends CallbackSystemEvent { GetResource()->ref<CResource>;
-/// GetPath()->ResRef; GetJobGroup()->JobGroup }` (Codeware `ResourceEvent.reds`/`.hpp`). MESMA
+/// GetPath()->ResRef; GetJobGroup()->JobGroup }`. MESMA
 /// receita 100% segura de `GameSessionEvent`/`KeyInputEvent` (registry Rust por-instância +
 /// `register_type_instantiable_with_parent`, parent `CallbackSystemEvent` real).
 ///
 /// **Divergência documentada:** `GetPath()` devolve `Uint64` — o hash FNV-1a64 do `ResourcePath`,
 /// a MESMA representação canônica que `resource.link`/`reslinkdump`/`bwms-primitives::resource_path_
 /// hash` usam em TODO o resto do projeto (nenhum resultado novo é "menos real": é como este
-/// engine trata paths internamente, RED4ext/CET fazem igual) — em vez do tipo `ResRef` real
+/// engine trata paths internamente) — em vez do tipo `ResRef` real
 /// (marshalling de retorno String/ResRef é RE nova, fora de escopo desta rodada, mesma categoria
 /// do gap residual documentado em `array:String` do TweakDB). `GetResource`/`GetJobGroup` fora
 /// (não fazem parte do `proof_needed` literal, que só pede "path correto").
@@ -742,7 +715,7 @@ pub unsafe fn register_resourceevent(reg: &Registry) -> String {
         None => return "[reg] register_resourceevent: classe=OK mas sem protótipo — GetPath NÃO registrado".into(),
     };
     let m1 = register_method(reg, "ResourceEvent", proto, "GetPath", "GetPath", tramp_re_get_path, false);
-    // Codeware `#122`: o `CResource` do evento despachado pelo hook do serializer.
+    // O `CResource` do evento despachado pelo hook do serializer.
     let m2 = register_method(reg, "ResourceEvent", proto, "GetResource", "GetResource", tramp_re_get_resource, false);
     format!("[reg] ResourceEvent: classe=OK (INSTANCIÁVEL, parent=CallbackSystemEvent real) GetPath={m1} GetResource={m2}")
 }
@@ -767,7 +740,7 @@ pub unsafe fn make_resourceevent_arg(path_hash: u64) -> Option<rtti::Arg> {
     Some(rtti::Arg::Handle(inst, refc))
 }
 
-/// Codeware `#122`: `(instância do ResourceEvent, handle forte do CResource)` dos eventos despachados pelo hook do serializer.
+/// `(instância do ResourceEvent, handle forte do CResource)` dos eventos despachados pelo hook do serializer.
 pub(crate) static RESOURCEEVENT_RECURSOS: Mutex<Vec<(usize, [u64; 2])>> = Mutex::new(Vec::new());
 
 pub(crate) unsafe extern "C" fn tramp_re_get_resource(c: *mut c_void, _f: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -781,7 +754,7 @@ pub(crate) unsafe extern "C" fn tramp_re_get_resource(c: *mut c_void, _f: *mut c
     core::ptr::write_unaligned((out as *mut u64).add(1), h[1]);
 }
 
-/// Codeware `#122`: `Resource/Load` com o `CResource` de `recurso` (`{instância, bloco}` do array de serializables, +1 no forte durante o despacho) e o hash
+/// `Resource/Load` com o `CResource` de `recurso` (`{instância, bloco}` do array de serializables, +1 no forte durante o despacho) e o hash
 /// do caminho (`+0x30`). Depois dos ouvintes, o evento e o recurso saem das tabelas e são soltos.
 /// `Resource/Load` só com o caminho (o `watchres` do terminal): dispara, tira o estado e solta o handle do evento.
 pub(crate) unsafe fn disparar_resource_load_do_caminho(caminho: u64) -> usize {
@@ -826,10 +799,7 @@ pub unsafe fn disparar_resource_load(recurso: [u64; 2]) -> usize {
     enviados
 }
 
-/// Núcleo PURO de `ResourceToken::IsLoaded()` (`RED4ext.SDK/ResourceLoader.hpp:85`: `return
-/// finished && !error;` — campos `finished@+0x58`(i32 atômico)/`error@+0x5C`(u8), layout EXATO do
-/// header vendorizado, zero endereço nativo). Extraído fora da glue RTTI pra ser testável offline
-/// sem boot — mesmo padrão já usado por `entity_recordid_targets_allow` (item `#6`/`#134`).
+/// `ResourceToken.IsLoaded` a partir dos campos do token do motor (`finished` i32 em `+0x58`, `error` u8 em `+0x5C`): terminou e sem erro.
 pub(crate) fn resource_token_is_loaded(finished: i32, error: u8) -> bool {
     finished != 0 && error == 0
 }
@@ -852,11 +822,10 @@ pub(crate) unsafe fn token_de(owner: *mut c_void, prop_hash: u64) -> Option<u64>
     (t != 0 && crate::memoria::is_readable(t as *const c_void, 0x60)).then_some(t)
 }
 
-/// Núcleo PURO do status combinado de `ResourceToken` (`RED4ext.SDK/ResourceLoader.hpp:80-93`:
-/// `IsFinished(){return IsLoaded()||IsFailed();}`, `IsLoaded(){return finished&&!error;}`,
-/// `IsFailed(){return error;}`) — 0=ainda carregando (nunca finalizado), 1=carregado com sucesso,
-/// 2=falhou. Item Codeware `#18` (`ResourceToken.reds`, 2026-08-12, Codeware round 6): a classe
-/// redscript real expõe `IsFinished`/`IsLoaded`/`IsFailed` como 3 métodos separados; o status packed
+/// Núcleo PURO do status combinado de `ResourceToken` (finalizado = carregado ou falhou,
+/// carregado = `finished && !error`, falhou = `error`) — 0=ainda carregando (nunca finalizado), 1=carregado com sucesso,
+/// 2=falhou (2026-08-12, round 6): a classe
+/// redscript `ResourceToken` expõe `IsFinished`/`IsLoaded`/`IsFailed` como 3 métodos separados; o status packed
 /// responde os 3 com 1 leitura do token (`register::status_do_token`, token por `token_de`).
 pub(crate) fn resource_token_status(finished: i32, error: u8) -> i32 {
     if error != 0 {
@@ -876,17 +845,17 @@ pub(crate) unsafe fn register_hash_wrapper_utils(reg: &Registry, proto: *mut c_v
         }
     }
     // `CreateNodeRef` (item #63, rodada 20, 2026-08-15) — ver `tramp_string_to_noderef`.
-    // Print/ModLog ficam com o nome do Codeware de propósito (2026-08-07): usados internamente
+    // Print/ModLog ficam com o nome que os mods chamam, de propósito (2026-08-07): usados internamente
     // em ~5 .reds do próprio BWMS (bwms-autocontinue/bwms-blindspot-tests/etc.) — renomear tem
     // risco real de quebra por pouco ganho (utilitário de debug genérico, não API distintiva).
-    // Codeware `ResourceHelper.GetReferencePath` (item #199, 2026-08-11) — composição pura de
+    // `ResourceHelper.GetReferencePath` (2026-08-11) — composição pura de
     // primitivas já provadas, zero endereço nativo novo (ver `tramp_resource_helper_get_reference_path`).
     let ok14 = register_argful_by_types(
         reg, proto, &["handle:IScriptable", "CName"],
         "BwmsGetResourceReferencePath", "BwmsGetResourceReferencePath",
         tramp_resource_helper_get_reference_path,
     );
-    // Codeware `ResourceHelper.IsReferenceLoaded`/`GetReferenceResource` (item #199), ver
+    // `ResourceHelper.IsReferenceLoaded`/`GetReferenceResource`, ver
     // `tramp_resource_helper_is_reference_loaded`/`tramp_resource_helper_get_reference_resource`.
     let ok25 = register_argful_by_types(
         reg, proto, &["handle:IScriptable", "CName"],
@@ -898,14 +867,14 @@ pub(crate) unsafe fn register_hash_wrapper_utils(reg: &Registry, proto: *mut c_v
         "BwmsGetResourceReferenceResource", "BwmsGetResourceReferenceResource",
         tramp_resource_helper_get_reference_resource,
     );
-    // Codeware `ResourceHelper.LoadReferenceResource` (item #199, 2026-09-11) — o loader do motor já carrega (RED4ext `#408`).
+    // `ResourceHelper.LoadReferenceResource` (2026-09-11) — o loader do motor já carrega.
     let ok_load_ref = register_argful_by_types(
         reg, proto, &["handle:IScriptable", "CName", "Uint64"],
         "BwmsLoadResourceReference", "BwmsLoadResourceReference",
         tramp_resource_helper_load_reference,
     );
     crate::log_dev!("[reg] register_all: cw-199 BwmsLoadResourceReference={ok_load_ref}");
-    // Codeware `ResourceDepot.RemoveResourceFromCache` (item #198, 2026-09-11) — `ResourceBank::ForgetResource` no bank do loader.
+    // `ResourceDepot.RemoveResourceFromCache` (2026-09-11) — `ResourceBank::ForgetResource` no bank do loader.
     let ok_forget = register_argful_by_types(
         reg, proto, &["Uint64"],
         "BwmsDepotRemoveResourceFromCache", "BwmsDepotRemoveResourceFromCache",
@@ -934,7 +903,7 @@ pub(crate) unsafe fn register_hash_wrapper_utils(reg: &Registry, proto: *mut c_v
     crate::log_dev!(
         "[reg] register_all: tokens-por-id LoadResourceToken={ok_tk1} Status={ok_tk2} Hash={ok_tk3} Resource={ok_tk4} Job={ok_tk5} Wait={ok_tk6} RefJob={ok_tk7} RefWait={ok_tk8}"
     );
-    // Codeware `ResourceToken` (item #18, 2026-08-12, Codeware round 6) — status packed
+    // `ResourceToken` (2026-08-12, round 6) — status packed
     // (0=carregando/1=carregado/2=falhou), ver `tramp_resource_helper_token_status`. Completa
     // `IsFinished`/`IsLoaded`/`IsFailed` do wrapper `ponte-resourcetoken.reds` com 1 native só.
     let ok29 = register_argful_by_types(
@@ -949,19 +918,19 @@ pub(crate) unsafe fn register_hash_wrapper_utils(reg: &Registry, proto: *mut c_v
         reg, proto, &["handle:IScriptable", "CName"],
         "BwmsResourceTokenDebugTypeKind", "BwmsResourceTokenDebugTypeKind", corpo_de_prova!(tramp_resource_helper_debug_typekind),
     ));
-    // Codeware `EngineTime.FromTicks`/`ToTicks` (item #22, 2026-08-12) — identidade pura, zero
+    // `EngineTime.FromTicks`/`ToTicks` (2026-08-12) — identidade pura, zero
     // endereço nativo (ver `tramp_identidade_8_bytes`).
-    // Codeware `DistrictResolver.GetDistrict`/`GetArea` (item #151, 2026-08-11) — dado puro, zero
+    // `DistrictResolver.GetDistrict`/`GetArea` (2026-08-11) — dado puro, zero
     // endereço nativo (ver `crate::mundo::distrito`, 6/6 testes offline).
-    // Codeware `GameObject.AddTag` (item #27, 2026-08-11) — composição pura de RTTI já provado
+    // `GameObject.AddTag` (2026-08-11) — composição pura de RTTI já provado
     // (ver `tramp_gameobject_add_tag`).
     register_argful_by_types(
         reg, proto, &["handle:IScriptable", "CName"],
         "BwmsGameObjectAddTag", "BwmsGameObjectAddTag",
         tramp_gameobject_add_tag,
     );
-    // Codeware `TagList.RemoveTag`/`TagCount`/`Clear` (item #32, 2026-08-11) — mesma composição
-    // do AddTag/#27, ver `tramp_gameobject_remove_tag`/`tramp_gameobject_tag_count`/
+    // `TagList.RemoveTag`/`TagCount`/`Clear` (2026-08-11) — mesma composição
+    // do AddTag, ver `tramp_gameobject_remove_tag`/`tramp_gameobject_tag_count`/
     // `tramp_gameobject_clear_tags`.
     register_argful_by_types(
         reg, proto, &["handle:IScriptable", "CName"],
@@ -978,17 +947,17 @@ pub(crate) unsafe fn register_hash_wrapper_utils(reg: &Registry, proto: *mut c_v
         "BwmsGameObjectClearTags", "BwmsGameObjectClearTags",
         tramp_gameobject_clear_tags,
     );
-    // Codeware `Scripting.GetStackTrace` (item #60, 2026-08-11) — getter indexado (composição
+    // `Scripting.GetStackTrace` (2026-08-11) — getter indexado (composição
     // pura de offsets de campo já confirmados, ver `stack_frame_at`).
-    // Codeware `WardrobeSystem.ForgetItemID` (item #46/#208, 2026-08-11, 3ª rodada) — ver
+    // `WardrobeSystem.ForgetItemID` (2026-08-11, 3ª rodada) — ver
     // `tramp_wardrobe_forget_by_tdbid`/`selftest::wardrobe_forget_by_tdbid`.
     let ok24 = register_argful_by_types(
         reg, proto, &["handle:IScriptable", "Uint64"],
         "BwmsWardrobeForgetByTDBID", "BwmsWardrobeForgetByTDBID",
         tramp_wardrobe_forget_by_tdbid,
     );
-    // Codeware `PersistentID.ToHash` (item #31, 2026-08-14) — completa o algoritmo real de hash
-    // (`RED4ext::game::PersistentID::GetHash()`, ver `persistent_id_hash` acima) pro caso
+    // `PersistentID.ToHash` (2026-08-14) — completa o algoritmo real de hash
+    // (`PersistentID::GetHash()`, ver `persistent_id_hash` acima) pro caso
     // COMPONENT, nunca replicado até hoje.
     crate::log_dev!(
         "[reg] register_all: cw-utils {registradas} de {} pela tabela; ResourceReferencePath={ok14} Wardrobe={ok24} Token={ok25}/{ok26} Persistent={ok29}",
@@ -1020,20 +989,20 @@ pub(crate) unsafe fn depot_loaded_resource_class(path: &str) -> String {
     crate::cname::resolve_cname(rtti::type_name_getname(cls))
 }
 
-// Codeware `#17` (2026-09-12): registro hash → caminho de recurso, o equivalente do `ResourcePathRegistry` da referência. O `ResourcePath` guarda só o
-// hash (FNV-1a64 do caminho normalizado), então só volta a texto caminho que passou como texto por uma native do BWMS; hash desconhecido fica vazio,
-// como na referência. Teto de 65536 caminhos.
-// BACKLOG (F1-28): a referência também grava todo `ResourcePath::Create` do motor (Codeware `ResourcePathRegistry.cpp:25`, `:47-53`). Aqui o gancho do
+// Registro hash → caminho de recurso (2026-09-12). O `ResourcePath` guarda só o
+// hash (FNV-1a64 do caminho normalizado), então só volta a texto caminho que passou como texto por uma native do BWMS; hash desconhecido fica vazio.
+// Teto de 65536 caminhos.
+// BACKLOG (F1-28): gravar também todo `ResourcePath::Create` do motor. Aqui o gancho do
 // motor (`HashSanitized` 0x10106c8c4) só existe no selftest 48c-1, com marcador e registro próprio (`A48C_DINAMICOS`). Por isso um `ResourceTarget` com
 // `*` ou `regex:` só casa `Resource/Load` de caminho que passou pelo `BwmsResRefFromPath`, e o texto de caminho dinâmico do `es20_resolver_caminho` só
 // existe com esse marcador (no build público o stub devolve None). Para levar o gancho ao produto falta medir hashes únicos e memória deste mapa por
-// boot e o custo do gancho (497010 chamadas até o veredito do boot 156, `proofs/20260913-boot156-archivexl-48c1-registro-registro-ok-PROVADA.log`), e
+// boot e o custo do gancho (497010 chamadas até o veredito do boot 156, prova de 2026-09-13 do registro de caminhos), e
 // provar que um `ResRef` literal de script passa pelo gancho.
 pub(crate) static CAMINHOS_POR_HASH: std::sync::Mutex<Option<std::collections::HashMap<u64, String>>> = std::sync::Mutex::new(None);
 
 
-/// Codeware `#122`: no `RegisterCallback` de `Resource/Load`, liga o despacho e instala o hook do `OnDependenciesReady` com as outras threads paradas,
-/// quando o ArchiveXL não o instalou no boot. Quem chama serializa ativação e desativação.
+/// No `RegisterCallback` de `Resource/Load`, liga o despacho e instala o hook do `OnDependenciesReady` com as outras threads paradas,
+/// quando o boot não o instalou. Quem chama serializa ativação e desativação.
 pub(crate) unsafe fn garantir_hooks_de_recurso() {
     if CLASSE_CRESOURCE.load(Ordering::Relaxed).is_null() {
         if let Some(reg) = crate::rtti::Registry::obtain() {
@@ -1056,8 +1025,8 @@ pub(crate) unsafe fn esperar_token(obj: u64) {
     com_fila_de_jobs(&mut |fila| wait(fila, (obj as usize + 0x50) as *const c_void));
 }
 
-/// `ResourceBank::ForgetResource` (Codeware `#198` `RemoveResourceFromCache`, 2026-09-11): `x0` = bank (`[loader+0x48]`, o mesmo
-/// `loader->unk48` que o Codeware passa, lido assim pelo `0x1010e710c`), `x1` = path, `x8` = sret `Handle`. Com os locks do próprio
+/// `ResourceBank::ForgetResource` (`RemoveResourceFromCache`, 2026-09-11): `x0` = bank (`[loader+0x48]`, lido assim pelo
+/// `0x1010e710c`), `x1` = path, `x8` = sret `Handle`. Com os locks do próprio
 /// bank (`+0x82` cache de jogo, `+0x80` mapa), tira o recurso do cache de jogo e a entrada do mapa, devolvendo um handle forte.
 /// Achado na TU `resourceBank.cpp`; os 2 chamadores (`0x1010e8374`, `0x1010e8ecc`) soltam o handle devolvido como `soltar_handle`.
 pub(crate) const RESBANK_FORGET_VM: u64 = 0x1_010e_4454;
@@ -1093,9 +1062,9 @@ pub(crate) unsafe fn esquecer_recurso(path_hash: u64) -> Option<bool> {
     Some(tinha)
 }
 
-/// Tokens de carga guardados pelo BWMS pra `ResourceToken` sem property dona (Codeware `#198` `ResourceDepot.LoadResource`, `#168`
+/// Tokens de carga guardados pelo BWMS pra `ResourceToken` sem property dona (`ResourceDepot.LoadResource`,
 /// `LoadResourceToken`). O `SharedPtr` devolvido pelo loader fica aqui com a referência forte dele; o id é o índice + 1. Nunca é
-/// solto — a mesma divergência consciente do `#199` (o Codeware solta quando o wrapper morre; o redscript não avisa o BWMS).
+/// solto — a mesma escolha do `LoadReferenceResource` (o redscript não avisa o BWMS quando o wrapper morre).
 pub(crate) static TOKENS_GUARDADOS: std::sync::Mutex<Vec<[u64; 2]>> = std::sync::Mutex::new(Vec::new());
 
 pub(crate) fn guardar_token(token: [u64; 2]) -> u64 {
@@ -1114,7 +1083,7 @@ pub(crate) unsafe fn token_guardado(id: u64) -> Option<u64> {
     (inst != 0 && crate::memoria::is_readable(inst as *const c_void, 0x60)).then_some(inst)
 }
 
-/// Carga assíncrona por path, guardada: id do token (0 sem loader ou token nulo). Não espera — o `LoadResource` do Codeware também não.
+/// Carga assíncrona por path, guardada: id do token (0 sem loader ou token nulo). Não espera.
 pub(crate) unsafe fn carregar_e_guardar(path_hash: u64) -> u64 {
     match token_do_path(path_hash) {
         Some(t) if t[0] != 0 => guardar_token(t),
@@ -1128,9 +1097,9 @@ pub(crate) enum OrigemToken {
     Property { dono: [u64; 2], prop: u64 },
 }
 
-/// `ResourceToken.RegisterCallback` (Codeware `#18`): `ouvinte.funcao(token)` quando o token carrega. O Codeware usa o
-/// `ResourceToken::OnLoaded` do motor; aqui `vigiar_tokens` confere a cada tick de gameplay. O `ResourceToken` do script fica seguro
-/// por handle forte até avisar; o ouvinte, por handle fraco (o `WeakHandle` do Codeware) — ouvinte morto não é chamado.
+/// `ResourceToken.RegisterCallback`: `ouvinte.funcao(token)` quando o token carrega. `vigiar_tokens` confere a cada tick de
+/// gameplay. O `ResourceToken` do script fica seguro
+/// por handle forte até avisar; o ouvinte, por handle fraco — ouvinte morto não é chamado.
 pub(crate) struct Vigia {
     pub token_script: [u64; 2],
     pub ouvinte: [u64; 2],
@@ -1214,7 +1183,7 @@ pub(crate) unsafe fn vigiar_tokens() {
 }
 
 
-// `axl-pathb-injection-arbitrary`: injeta um .archive fora do glob no content-group via um `replace`
+// Injeção de archive arbitrário (rota B): injeta um .archive fora do glob no content-group via um `replace`
 // no InitializeArchives (0x10151a118). A replacement chama a original (constrói TODOS os archives do
 // boot) e DEPOIS injeta — na THREAD DO JOGO, com o depot REAL (x0 do InitializeArchives, ≠ o singleton
 // [0x109d23188+0x1f8] que tem +0x10=NULL vivo — mesmo erro do cont.78), segurando o lock@depot+0x78,
@@ -1224,7 +1193,7 @@ pub(crate) static INIT_ARCH_ORIG: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static PATHB_HOOK_ON: AtomicBool = AtomicBool::new(false);
 
-/// `ArchiveXL.RegisterArchive`/`RegisterDir` (`PENDENCIAS-UNIFICADAS.md`, Facade.hpp — achado já
+/// `RegisterArchive`/`RegisterDir` da fachada de recursos (`PENDENCIAS-UNIFICADAS.md`, achado já
 /// desde 2026-07-13 nunca implementado): o `depot` REAL capturado 1x por `init_archives_replacement`
 /// (sempre instalado agora, não mais só sob `~/.bwms-pathbtest`) fica cacheado aqui pra qualquer
 /// chamada FUTURA de `RegisterArchive` (redscript, tempo de execução do mod) reusar sem precisar
@@ -1250,7 +1219,7 @@ pub(crate) unsafe extern "C" fn init_archives_replacement(depot: *mut c_void) ->
 
 /// Instala o `replace` no InitializeArchives (uma vez, cedo — do on_load/thread do jogo). Ver
 /// `init_archives_replacement`. **Sempre instalado agora** (não mais só sob `~/.bwms-pathbtest`) —
-/// vira base de uma capacidade shipada (`ArchiveXL.RegisterArchive`), não mais só probe de dev.
+/// vira base de uma capacidade shipada (`RegisterArchive`), não mais só probe de dev.
 /// Risco: baixo — a replacement SEMPRE chama a original primeiro (constrói os archives do boot
 /// normalmente); o único efeito extra incondicional é guardar 1 ponteiro num `AtomicPtr`.
 pub(crate) unsafe fn install_pathb_capture() {
@@ -1270,7 +1239,7 @@ pub(crate) unsafe fn install_pathb_capture() {
 }
 
 /// Acha o grupo REAL de content do depot: o de MAIOR count, HEAP (não sentinela estático de
-/// imagem). Extraído de `axl-pathb-injection-arbitrary` (achado 2026-07-17: key==3 fica vazio,
+/// imagem). Extraído da injeção de archive arbitrário (rota B) (achado 2026-07-17: key==3 fica vazio,
 /// arr sentinela; os archives do boot vão pra key=1/2, arr HEAP — injetar no de maior count).
 /// `groups@depot+0x10` inline {ptr@+0x10,cap@+0x18,count@+0x1c}, stride 0x38; count@g+0x0c.
 pub(crate) unsafe fn find_pathb_content_group(depot: *mut u8) -> Option<*mut u8> {
@@ -1303,12 +1272,11 @@ pub(crate) unsafe fn find_pathb_content_group(depot: *mut u8) -> Option<*mut u8>
     Some(g)
 }
 
-/// Codeware `#16`/`#198` (`ResourceDepot.ArchiveExists`). Fonte real (`App/Depot/ResourceDepot.hpp`):
-/// varre `depot->groups`, filtra `scope==Mod`, compara `std::filesystem::path(archive.path).filename()`
+/// `ResourceDepot.ArchiveExists`: varre `depot->groups` e compara o nome de arquivo de `archive.path`
 /// contra o nome pedido. Layout de `ArchiveInfo` (name RedString@+0x10, stride 0x50) CONFIRMADO
 /// ao vivo em 2026-08-10 (`archivenamedump`, refutando a incerteza registrada em
 /// `notes/RE-archiveinfo-inject-2026-07-17.md` sobre a RE estática original) — paths reais lidos
-/// corretos (`basegame_1_engine.archive` etc.). **Divergência documentada**: em vez de filtrar por
+/// corretos (`basegame_1_engine.archive` etc.). **Escolha documentada**: em vez de filtrar por
 /// `scope==Mod` (campo de scope do GRUPO ainda não mapeado com certeza — `+0x30` do grupo é
 /// "key" 3=content/1=memoryresident por uma nota antiga, não confirmadamente "Mod"), varre TODOS
 /// os grupos — superset seguro (nunca dá falso-negativo pra archive de mod real; risco de
@@ -1391,7 +1359,7 @@ fn pasta_do_jogo(pasta_da_dylib: &str) -> Option<&str> {
     pasta_da_dylib.strip_suffix(bwms_primitives::PASTA_DO_RUNTIME)?.strip_suffix('/')
 }
 
-/// `axl-pathb-injection-arbitrary`: injeta um .archive REAL cujo nome NÃO casa o glob nativo
+/// Injeção de archive arbitrário (rota B): injeta um .archive REAL cujo nome NÃO casa o glob nativo
 /// (basegame_*/audio_*/lang_*) no grupo `g` do ResourceDepot via `LoadArchives` @0x10151b18c
 /// (abre+parseia+APENDA, BYPASSA o filtro do glob). `depot`/`g` já resolvidos pelo chamador
 /// (`find_pathb_content_group`); `abs_path` é o `.archive` a carregar (path absoluto real).
@@ -1741,7 +1709,7 @@ pub unsafe fn facade_register_archive(path: &str) -> bool {
     load_archive_into_group(depot as *mut u8, g, &abs)
 }
 
-/// `ArchiveXL.RegisterDir(path: String) -> Bool` — registra TODOS os `.archive` (não-recursivo)
+/// `RegisterDir(path: String) -> Bool` da fachada de recursos — registra TODOS os `.archive` (não-recursivo)
 /// de um diretório via `facade_register_archive` (mesma regra path absoluto/relativo-ao-jogo).
 /// Devolve `true` se o diretório foi lido e PELO MENOS 1 arquivo foi injetado com sucesso.
 pub unsafe fn facade_register_dir(path: &str) -> bool {
@@ -1783,19 +1751,19 @@ pub(crate) static CLASSE_DE_COMPONENTE_EXTERNO: AtomicPtr<c_void> = AtomicPtr::n
 
 pub(crate) static TIPO_DO_ARRAY_DE_HANDLES: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
-// ===== ArchiveXL `#17` 17d — `resource.patch` nas partes, pela tabela (2026-09-12) =====
+// ===== 17d — `resource.patch` nas partes, pela tabela (2026-09-12) =====
 // `bwms-resource-patch.txt` (gerado de `.xl` por `bwms_primitives::instalacao::tabelas_de_runtime::emit_resource_patch_table`) entra na carga das tabelas, na game thread: classes e
-// tipo da mescla guardados com os offsets conferidos, token de cada patch pedido ali e o hook do `ExtractPartComponents` instalado. No hook, a cada parte
-// alvo extraída pelo motor, a original é chamada de novo com o token do patch e os componentes entram pela mescla da 17c com `aPartMerge` falso: é o
-// `PatchPackageResults` da referência na extração de parte (`OnPartPackageExtract`), com o gate `Modifies("components")` (props vazio ou com
-// `components`). Patch ainda carregando fica de fora daquela extração (contado). Com `entity` (props vazio ou com `entity`), o `MergeEntity`
-// (`mesclar_entidade`) entra depois dos componentes, na ordem da referência.
+// tipo da mescla guardados com os offsets conferidos, token de cada patch pedido ali e o hook do `ExtractPartComponents` instalado. O que a extração de
+// uma parte alvo faz com os patches dela: `aplicar_patches_na_parte`.
+// Fatos usados ali: caminho da parte no token em `+0x48`, recurso em `+0x28`; `rootIndex` (i16) do `entEntityTemplate` em `+0x1d8`; a extração do
+// motor lê o `rootIndex` uma vez no começo e, com ele ≥ 0, apaga o bit desse objeto no bitset de objetos (`bic` em `0x1017d32f0`), então a raiz
+// não vem na extração.
 #[derive(Clone)]
 pub(crate) struct PatchDeRecurso {
     pub(crate) mod_id: String,
     pub(crate) patch: u64,
     pub(crate) alvo: u64,
-    /// Props do patch em bits (`A17_PROP_*`); props vazio liga todas, o `Modifies` da referência.
+    /// Props do patch em bits (`A17_PROP_*`); `u32::MAX` = props vazio no `.xl` (todas).
     pub(crate) props: u32,
     pub(crate) token: [u64; 2],
     /// Token da parte alvo, pedido na carga da tabela só com `components`/`entity`: o hook do job de garment casa pelo ponteiro do template (`+0x28` do
@@ -1885,7 +1853,7 @@ pub(crate) use bwms_primitives::{
 
 /// Linhas da tabela como estão no arquivo (`bwms_primitives::tabelas::ResourcePatch`; linha fora do formato fica de fora). O install já resolveu os mods
 /// entre si (`bwms_primitives::instalacao::tabelas_de_runtime::emit_resource_patch_table`: alvo que é patch sai, par repetido entra uma vez, props do último config
-/// do patch, como o `Configure` da referência). Props em máscara hex (`0x…`); `-` liga todas, o `Modifies` da referência; tabela posta à mão pode
+/// do patch). Props em máscara hex (`0x…`); `-` liga todas; tabela posta à mão pode
 /// trazer os nomes (`bwms_primitives::a17_props_mascara`).
 pub(crate) fn linhas_da_tabela_de_patches(texto: &str) -> Vec<bwms_primitives::tabelas::ResourcePatch<'_>> {
     bwms_primitives::tabelas::ler(texto, bwms_primitives::tabelas::ResourcePatch::ler).flatten().collect()
@@ -1935,7 +1903,7 @@ fn guardar_patches_fora_do_depot(fora: Vec<(String, String)>) {
 }
 
 /// Carrega `bwms-resource-patch.txt` na carga das tabelas (game thread): classes e tipo da mescla, token de cada patch e o hook. Devolve os patches ligados.
-/// Arquivo ausente ou carga que não monta deixa a tabela vazia, como o `s_patchTargets.clear()` do `Configure` da referência.
+/// Arquivo ausente ou carga que não monta deixa a tabela vazia: a mescla desliga em vez de ficar com a tabela da carga anterior.
 pub(crate) unsafe fn carregar_tabela_de_patches(arquivo: &str) -> usize {
     let Ok(texto) = std::fs::read_to_string(arquivo) else { return publicar_tabela_de_patches(Vec::new()) };
     let linhas = linhas_da_tabela_de_patches(&texto);
@@ -1945,7 +1913,7 @@ pub(crate) unsafe fn carregar_tabela_de_patches(arquivo: &str) -> usize {
         return publicar_tabela_de_patches(Vec::new());
     }
     let mut patches: Vec<PatchDeRecurso> = Vec::new();
-    // Classes dos recursos de patch conferidas nos hooks (o `IsInstanceOf<T>` do `GetPatchToken` da referência).
+    // Classes dos recursos de patch conferidas nos hooks (`recurso_do_patch_da_classe`): patch de outra classe fica de fora.
     CLASSE_ENTENTITYTEMPLATE.store(reg.class_by_name("entEntityTemplate"), Ordering::Relaxed);
     CLASSE_APPEARANCERESOURCE.store(reg.class_by_name("appearanceAppearanceResource"), Ordering::Relaxed);
     CLASSE_MORPHTARGETMESH.store(reg.class_by_name("MorphTargetMesh"), Ordering::Relaxed);
@@ -1979,7 +1947,7 @@ pub(crate) unsafe fn carregar_tabela_de_patches(arquivo: &str) -> usize {
             if GANCHO_DEPENDENCIAS_NO_AR.load(Ordering::Relaxed) { "instalado" } else { "FALHOU" }
         );
     }
-    // ArchiveXL 1.27.2: alvo `.inkanim` passa pelo mesmo hook do `OnDependenciesReady` (sequências por nome).
+    // Alvo `.inkanim` passa pelo mesmo hook do `OnDependenciesReady` (sequências por nome).
     if linhas.iter().any(|l| alvo_de(l, ".inkanim")) && crate::interface::guardar_offsets_do_inkanim(&reg) {
         crate::interface::MESCLA_DE_INKANIM_ATIVA.store(true, Ordering::Relaxed);
         install_dependencias_prontas_hook();
@@ -2029,7 +1997,7 @@ pub(crate) unsafe fn carregar_tabela_de_patches(arquivo: &str) -> usize {
     for bwms_primitives::tabelas::ResourcePatch { mod_id, patch, alvo, props } in linhas {
         let app = alvo.to_ascii_lowercase().ends_with(".app");
         let h = bwms_primitives::resource_path_hash(patch);
-        // Como o `Configure` da referência: patch que o depot não tem sai da tabela, com erro no log uma vez por caminho.
+        // Patch que o depot não tem sai da tabela, com erro no log uma vez por caminho.
         if !existe_no_depot(h) {
             let par = (mod_id.to_string(), patch.to_string());
             if !fora.contains(&par) {
@@ -2076,7 +2044,7 @@ pub(crate) unsafe fn carregar_tabela_de_patches(arquivo: &str) -> usize {
     MESCLA_NO_BUILDER_ATIVA.store(n > 0 && builder_51f, Ordering::Relaxed);
     if n > 0 {
         install_extract_part_components_hook();
-        // 17e v3 provada no boot 124 (`garment-ok=true`): roda com a tabela, como o `HookAfter` da referência; o marcador só liga o veredito do tick.
+        // 17e v3 provada no boot 124 (`garment-ok=true`): roda com a tabela; o marcador só liga o veredito do tick.
         install_garment_extract_job_hook();
         if builder_51f {
             MESCLA_DE_APARENCIA_ATIVA.store(app_51f2, Ordering::Relaxed);
@@ -2113,136 +2081,170 @@ pub(crate) unsafe fn carregar_tabela_de_patches(arquivo: &str) -> usize {
     n
 }
 
-/// 17d, no hook: mescla nos objetos extraídos da parte os componentes de cada patch da tabela pra ela. Só memória e chamadas do motor: o token do patch foi
-/// pedido na carga da tabela.
+/// `(token, props)` dos patches da tabela viva cujo alvo é `caminho` e cujas props cruzam `mascara`, na ordem da tabela. A cópia sai da trava antes
+/// de qualquer chamada ao motor: a recarga da tabela não espera um gancho de carga.
+fn patches_do_alvo(caminho: u64, mascara: u32) -> Vec<([u64; 2], u32)> {
+    if caminho == 0 || !PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) {
+        return Vec::new();
+    }
+    let Ok(t) = PATCHES_DE_RECURSO.read() else { return Vec::new() };
+    t.do_alvo(caminho).filter(|p| p.props & mascara != 0).map(|p| (p.token, p.props)).collect()
+}
+
+/// Os valores de 8 B de um `DynArray` em `obj + off` (`CName`, `ResourcePath`), ou `None` com a lista ilegível ou maior que 0x10000.
+unsafe fn lista_de_u64(obj: *const u8, off: usize) -> Option<Vec<u64>> {
+    let (b, n, _) = dynarray_no_campo(obj, off);
+    if n > 0x1_0000 || (n > 0 && (b.is_null() || !crate::memoria::is_readable(b as *const c_void, n * 8))) {
+        return None;
+    }
+    Some((0..n).map(|i| (b.add(i * 8) as *const u64).read_unaligned()).collect())
+}
+
+/// Anexa o handle `h` (já com o forte de quem o recebe) a um `DynArray<Handle<T>>`; cresce pelo reserve do motor com o mover de handles quando a lista
+/// tem elementos. `false` sem capacidade, sem mexer na lista.
+unsafe fn anexar_handle_no_array(arr: *mut u8, h: [u64; 2]) -> bool {
+    let (_, n, cap) = dynarray_no_campo(arr, 0);
+    if n + 1 > cap {
+        let mover = if n == 0 { std::ptr::null() } else { crate::rebase(crate::jogo::listas::MOVER_HANDLES_VM) as *const c_void };
+        crate::jogo::listas::reservar(arr as *mut c_void, (n + 1) as u32, 0x10, 8, mover);
+        if dynarray_no_campo(arr, 0).2 < n + 1 {
+            return false;
+        }
+    }
+    let b = dynarray_no_campo(arr, 0).0;
+    (b.add(n * 16) as *mut u64).write_unaligned(h[0]);
+    (b.add(n * 16 + 8) as *mut u64).write_unaligned(h[1]);
+    (arr.add(0x0c) as *mut u32).write_unaligned((n + 1) as u32);
+    true
+}
+
+/// Recurso do token (`+0x28`) já carregado e legível até `tam` B, sem espera; nulo nos outros casos.
+unsafe fn recurso_carregado(t: u64, tam: usize) -> *const u8 {
+    if t == 0 || !crate::memoria::is_readable(t as *const c_void, 0x60) || crate::register::status_do_token(t) != 1 {
+        return std::ptr::null();
+    }
+    let r = ((t + 0x28) as *const u64).read_unaligned() as *const u8;
+    if r.is_null() || !crate::memoria::is_readable(r as *const c_void, tam) {
+        return std::ptr::null();
+    }
+    r
+}
+
+/// `rootIndex` (i16) do `entEntityTemplate`.
+const TEMPLATE_ROOTINDEX_OFF: usize = 0x1d8;
+
+/// A#17 17d: chamado pelo gancho de extração de partes (`aparencia::extract_part_components_em`), com a `saida` já extraída pelo motor. Cada patch
+/// pronto da parte é extraído pela mesma rotina; os componentes entram pela mescla de componentes e, com `entity`, a raiz do resultado é trocada
+/// pela do patch, depois dos componentes. O que sobrar no array do patch é solto no fim.
 pub(crate) unsafe fn aplicar_patches_na_parte(orig: *mut c_void, token: *const [u64; 2], saida: *mut [u64; 2]) {
-    if token.is_null() || !crate::memoria::is_readable(token as *const c_void, 16) {
+    if token.is_null() || saida.is_null() || !crate::memoria::is_readable(token as *const c_void, 16) {
         return;
     }
-    let t = (*token)[0];
-    if t == 0 || !crate::memoria::is_readable((t + 0x48) as *const c_void, 8) {
+    let t = *token;
+    if t[0] == 0 || !crate::memoria::is_readable((t[0] + 0x48) as *const c_void, 8) {
         return;
     }
-    let alvo = ((t + 0x48) as *const u64).read_unaligned();
-    let patches: Vec<(u64, [u64; 2], bool, bool)> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g
-            .do_alvo(alvo)
-            .filter(|p| p.props & (A17_PROP_COMPONENTS | A17_PROP_ENTITY) != 0)
-            .map(|p| (p.patch, p.token, p.props & A17_PROP_COMPONENTS != 0, p.props & A17_PROP_ENTITY != 0))
-            .collect(),
-        Err(_) => return,
-    };
-    for (patch, pt, componentes, entidade) in patches {
-        if pt[0] == 0 || crate::register::status_do_token(pt[0]) != 1 {
-            A17_PATCHES_NAO_PRONTOS.fetch_add(1, Ordering::Relaxed);
+    let caminho = ((t[0] + 0x48) as *const u64).read_unaligned();
+    let patches = patches_do_alvo(caminho, A17_PROP_COMPONENTS | A17_PROP_ENTITY);
+    if patches.is_empty() {
+        return;
+    }
+    let classe = CLASSE_ENTENTITYTEMPLATE.load(Ordering::Relaxed);
+    for (pt, props) in patches {
+        if recurso_do_patch_da_classe(pt, TEMPLATE_ROOTINDEX_OFF + 2, classe).is_null() {
+            crate::diagnostico::A17_PATCHES_NAO_PRONTOS.fetch_add(1, Ordering::Relaxed);
             continue;
         }
-        let antes = ((*saida)[1] >> 32) as u32;
-        let mut p = [0u64; 2];
-        // Com `entity`, o patch sai com a raiz (o `ExtractPartComponents` a tira); sem, a extração é a mesma do motor.
-        let raiz_patch = if entidade {
-            extrair_com_raiz(orig, pt, &mut p)
-        } else {
-            extract_part_components_em(orig, &pt, &mut p);
-            None
-        };
-        // A ordem da referência: `MergeComponents`, depois `MergeEntity`.
-        let plano = if componentes { mesclar_componentes(saida as *mut u8, p.as_mut_ptr() as *mut u8, false) } else { Some(Vec::new()) };
-        let raiz = if entidade {
-            mesclar_entidade(saida as *mut u8, p.as_mut_ptr() as *mut u8, raiz_do_token(*token).unwrap_or(-1), raiz_patch.unwrap_or(-1))
-        } else {
-            None
-        };
-        soltar_dynarray_de_handles(p.as_mut_ptr() as *mut u8);
-        if crate::primeiras(&A17_PATCHES_APLICADOS, 16) {
-            let (s, x) = plano.as_ref().map_or((0, 0), |pl| {
-                (pl.iter().filter(|q| matches!(q, PassoDaMescla::Substitui(_))).count(), pl.iter().filter(|q| **q == PassoDaMescla::Anexa).count())
-            });
-            crate::veredito_dev!(
-                "[a17] patch {patch:#018x} na parte {alvo:#018x}: {antes} → {} objeto(s), {s} substituído(s), {x} anexado(s), raiz trocada {raiz:?}{}; {} extração(ões) com patch carregando",
-                ((*saida)[1] >> 32) as u32,
-                if plano.is_none() { ", recusado" } else { "" },
-                A17_PATCHES_NAO_PRONTOS.load(Ordering::Relaxed)
-            );
+        let mut extraidos = [0u64; 2];
+        let com_entidade = props & A17_PROP_ENTITY != 0;
+        let raiz_p = if com_entidade { extrair_com_raiz(orig, pt, &mut extraidos) } else { None };
+        if !com_entidade || raiz_p.is_none() {
+            extract_part_components_em(orig, &pt, &mut extraidos);
         }
+        let mut componentes = None;
+        if props & A17_PROP_COMPONENTS != 0 {
+            componentes = mesclar_componentes(saida as *mut u8, extraidos.as_mut_ptr() as *mut u8, false).map(|p| p.len());
+        }
+        let mut troca = None;
+        if let (true, Some(rp)) = (com_entidade, raiz_p) {
+            let raiz_r = raiz_do_token(t).unwrap_or(-1);
+            troca = mesclar_entidade(saida as *mut u8, extraidos.as_mut_ptr() as *mut u8, raiz_r, rp);
+        }
+        if extraidos[0] != 0 && !soltar_dynarray_de_handles(extraidos.as_mut_ptr() as *mut u8) {
+            crate::log_dev!("[a17] array extraído do patch sem o tipo pra soltar; fica retido");
+        }
+        crate::diagnostico::A17_PATCHES_APLICADOS.fetch_add(1, Ordering::Relaxed);
+        crate::log_dev!("[a17] parte {caminho:#018x}: patch com props {props:#x}, componentes {componentes:?}, troca da raiz {troca:?}");
     }
 }
 
 pub(crate) static CLASSE_ENTENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
-/// Núcleo puro do `MergeEntity`: `(índice no resultado, índice no patch)` se os dois índices são válidos e a raiz do patch é `Entity` derivada.
+/// A troca da raiz (`entity`): `Some((raiz do resultado, raiz do patch))` só com os dois índices dentro dos arrays e o objeto raiz do patch de
+/// classe derivada de `entEntity`.
 pub(crate) fn plano_de_mescla_da_entidade(raiz_r: i16, tam_r: usize, raiz_p: i16, tam_p: usize, patch_derivada: bool) -> Option<(usize, usize)> {
-    (raiz_r >= 0 && (raiz_r as usize) < tam_r && raiz_p >= 0 && (raiz_p as usize) < tam_p && patch_derivada).then(|| (raiz_r as usize, raiz_p as usize))
+    let dentro = |i: i16, tam: usize| i >= 0 && (i as usize) < tam;
+    (dentro(raiz_r, tam_r) && dentro(raiz_p, tam_p) && patch_derivada).then_some((raiz_r as usize, raiz_p as usize))
 }
 
-/// `rootIndex` do template de um token carregado (`+0x28` → `+0x1d8`, i16).
+/// `rootIndex` do `entEntityTemplate` do token carregado; `None` se não carregou ou é ilegível.
 pub(crate) unsafe fn raiz_do_token(t: [u64; 2]) -> Option<i16> {
-    if t[0] == 0 || crate::register::status_do_token(t[0]) != 1 || !crate::memoria::is_readable((t[0] + 0x28) as *const c_void, 8) {
-        return None;
-    }
-    let r = ((t[0] + 0x28) as *const u64).read_unaligned();
-    (r != 0 && crate::memoria::is_readable((r + 0x1d8) as *const c_void, 2)).then(|| ((r + 0x1d8) as *const i16).read_unaligned())
+    let r = recurso_carregado(t[0], TEMPLATE_ROOTINDEX_OFF + 2);
+    (!r.is_null()).then(|| (r.add(TEMPLATE_ROOTINDEX_OFF) as *const i16).read_unaligned())
 }
 
-/// Extração pelo `ExtractPartComponents` com a raiz incluída. O motor lê o `rootIndex` do template (`ldrsh` do `+0x1d8`) e, se não é -1, apaga o bit dele no
-/// bitset de objetos (`bic` em `0x1017d32f0`) antes de montar o extrator — é por isso que o objeto 0 das partes vem nulo. Aqui o índice vai a -1 só durante a
-/// chamada e volta em seguida; o motor lê o campo uma vez, no começo. Uma extração do mesmo template em outra thread no mesmo instante também sairia com a
-/// raiz. Devolve o `rootIndex` original.
+/// Extração do patch que inclui o objeto raiz: a extração do motor lê o `rootIndex` uma vez no começo e apaga do bitset o bit desse objeto, então o
+/// índice fica em -1 só durante a chamada e volta ao valor de antes. Devolve o `rootIndex` original; `None` com o template não carregado.
 pub(crate) unsafe fn extrair_com_raiz(orig: *mut c_void, t: [u64; 2], saida: *mut [u64; 2]) -> Option<i16> {
-    if t[0] == 0 || crate::register::status_do_token(t[0]) != 1 || !crate::memoria::is_readable((t[0] + 0x28) as *const c_void, 8) {
+    let r = recurso_carregado(t[0], TEMPLATE_ROOTINDEX_OFF + 2) as *mut u8;
+    if r.is_null() {
         return None;
     }
-    let recurso = ((t[0] + 0x28) as *const u64).read_unaligned();
-    if recurso == 0 || !crate::memoria::is_readable((recurso + 0x1d8) as *const c_void, 2) {
-        return None;
-    }
-    let campo = (recurso + 0x1d8) as *mut i16;
+    let campo = r.add(TEMPLATE_ROOTINDEX_OFF) as *mut i16;
     let raiz = campo.read_unaligned();
     if raiz >= 0 {
         campo.write_unaligned(-1);
     }
     extract_part_components_em(orig, &t, saida);
-    if raiz >= 0 {
-        campo.write_unaligned(raiz);
-    }
+    campo.write_unaligned(raiz);
     Some(raiz)
 }
 
-/// O objeto é `Entity` de classe derivada (não a própria `entEntity`).
+/// Objeto cuja classe herda de `entEntity` sem ser `entEntity`.
 pub(crate) unsafe fn entidade_derivada(obj: u64) -> bool {
-    let ent = CLASSE_ENTENTITY.load(Ordering::Relaxed);
-    if obj == 0 || ent.is_null() || !crate::memoria::is_readable(obj as *const c_void, 8) {
+    if obj == 0 || !crate::memoria::is_readable(obj as *const c_void, 8) {
         return false;
     }
+    let mut ent = CLASSE_ENTENTITY.load(Ordering::Relaxed);
+    if ent.is_null() {
+        ent = crate::rtti::Registry::obtain().map_or(std::ptr::null_mut(), |r| r.class_by_name("entEntity"));
+        if ent.is_null() {
+            return false;
+        }
+        CLASSE_ENTENTITY.store(ent, Ordering::Relaxed);
+    }
     let cls = crate::rtti::class_of(obj as *mut c_void);
-    cls != ent && class_is_kind_of(cls, ent)
+    cls != ent && crate::register::class_is_kind_of(cls, ent)
 }
 
-/// `MergeEntity` sobre dois `DynArray<Handle<ISerializable>>`: troca a raiz do resultado pela do patch quando o plano deixa. Devolve o par trocado.
+/// Troca a raiz do resultado pela do patch (`plano_de_mescla_da_entidade`): os dois handles trocam de lugar e o antigo sai com o array do patch.
 pub(crate) unsafe fn mesclar_entidade(resultado: *mut u8, patch: *mut u8, raiz_r: i16, raiz_p: i16) -> Option<(usize, usize)> {
-    let (r0, p0) = (handles_do_dynarray(resultado), handles_do_dynarray(patch));
-    let derivada = raiz_p >= 0 && (raiz_p as usize) < p0.len() && entidade_derivada(p0[raiz_p as usize][0]);
-    let (i, j) = plano_de_mescla_da_entidade(raiz_r, r0.len(), raiz_p, p0.len(), derivada)?;
-    let rv = (resultado as *const u64).read_unaligned() as *mut u64;
-    let pv = (patch as *const u64).read_unaligned() as *mut u64;
-    let (a, b) = (rv.add(i * 2), pv.add(j * 2));
-    let (a0, a1) = (a.read_unaligned(), a.add(1).read_unaligned());
-    a.write_unaligned(b.read_unaligned());
-    a.add(1).write_unaligned(b.add(1).read_unaligned());
-    b.write_unaligned(a0);
-    b.add(1).write_unaligned(a1);
+    let tam = |arr: *const u8| (arr.add(0x0c) as *const u32).read_unaligned() as usize;
+    let (r, p) = (handles_do_dynarray(resultado), handles_do_dynarray(patch));
+    if r.len() != tam(resultado) || p.len() != tam(patch) {
+        return None;
+    }
+    let derivada = raiz_p >= 0 && (raiz_p as usize) < p.len() && entidade_derivada(p[raiz_p as usize][0]);
+    let (i, j) = plano_de_mescla_da_entidade(raiz_r, r.len(), raiz_p, p.len(), derivada)?;
+    let (rb, pb) = ((resultado as *const u64).read_unaligned() as *mut [u64; 2], (patch as *const u64).read_unaligned() as *mut [u64; 2]);
+    rb.add(i).write_unaligned(p[j]);
+    pb.add(j).write_unaligned(r[i]);
     Some((i, j))
 }
 
-// ===== ArchiveXL `#51` 51a — `OnEntityTemplateLoad`: `appearances` e `resolvedDependencies` do template de patch (2026-09-12) =====
-// Hook do `PostLoad` do `EntityTemplate` (`0x1019c6380`, disparando ao vivo em 2026-08-15/17), instalado pela tabela `bwms-resource-patch.txt` quando algum
-// patch tem `appearances` ou `resolvedDependencies`, rodando antes da original como o `HookBefore` da referência. Pra cada patch cujo alvo é o caminho do
-// template (`+0x30`): `appearances` (`DynArray<TemplateAppearance>`, 0x18 B, `+0x50`) por `name` — mesmo nome copia a struct inteira do patch, nome novo vai
-// pro fim e entra na busca dos seguintes, como o `EmplaceBack`; `resolvedDependencies` (`DynArray<RaRef<CResource>>`, 8 B, `+0x270`) — caminho novo vai pro
-// fim; dependência que o depot não tem fica de fora, como na referência (`existe_no_depot_ou_conta`). Com `visualTags`, a 51b (`mesclar_tags_do_schema`) junta as
-// tags no schema do alvo e cria o schema quando falta. O array cresce pelo reserve do motor com mover nulo (realoca copiando, próprio pra elemento sem
-// dono). Offsets conferidos pelo RTTI na carga da tabela e pelo `FindAppearance` (`0x1019c5e2c` lê o tamanho em `+0x5c` e anda de 0x18 em 0x18 a partir de `[+0x50]`). Roda em thread de job: só memória e o
-// reserve. Patch ainda carregando quando o alvo termina fica de fora (contado e logado).
+// ===== A#51 51a/51b: `entEntityTemplate` =====
+// Layout (2.5, Mac, conferido pelo RTTI na carga da tabela e pelo `FindAppearance` `0x1019c5e2c`): caminho do recurso `+0x30`; `appearances`
+// `DynArray<entTemplateAppearance>` de 0x18 B em `+0x50` (tamanho em `+0x5c`); `resolvedDependencies` `DynArray` de 8 B em `+0x270`.
 pub(crate) const TEMPLATE_APPEARANCES_OFF: usize = 0x50;
 
 pub(crate) const TEMPLATE_DEPENDENCIES_OFF: usize = 0x270;
@@ -2258,65 +2260,93 @@ pub(crate) const SCHEMA_VISUALTAGS_OFF: usize = 0x30;
 
 pub(crate) static SCHEMA_OFFSETS_OK: AtomicBool = AtomicBool::new(false);
 
-/// Plano por nome: `Substitui(i)` pro 1º elemento com o mesmo nome, `Anexa` pro nome novo, que entra na busca dos seguintes.
+/// Para cada nome do patch, em ordem: `Substitui(i)` com a 1ª ocorrência do nome (nos existentes ou entre os anexados antes nesta chamada), senão
+/// `Anexa`, e o nome passa a existir no índice seguinte ao fim.
 pub(crate) fn plano_por_nome(existentes: &[u64], patch: &[u64]) -> Vec<PassoDaMescla> {
     let mut nomes = existentes.to_vec();
     patch
         .iter()
-        .map(|n| match nomes.iter().position(|e| e == n) {
+        .map(|&nome| match nomes.iter().position(|&n| n == nome) {
             Some(i) => PassoDaMescla::Substitui(i),
             None => {
-                nomes.push(*n);
+                nomes.push(nome);
                 PassoDaMescla::Anexa
             }
         })
         .collect()
 }
 
-/// Plano de dependências: `true` pro caminho que ainda não está no alvo nem foi anexado antes.
+/// `true` para o valor do patch que ainda não está nos existentes nem foi marcado antes nesta chamada.
 pub(crate) fn plano_de_novos(existentes: &[u64], patch: &[u64]) -> Vec<bool> {
     let mut vistos = existentes.to_vec();
     patch
         .iter()
-        .map(|c| {
-            let novo = !vistos.contains(c);
+        .map(|&v| {
+            let novo = !vistos.contains(&v);
             if novo {
-                vistos.push(*c);
+                vistos.push(v);
             }
             novo
         })
         .collect()
 }
 
-/// Aplica um plano num `DynArray` de elementos sem dono (`passo` B cada, cabeçalho em `alvo`): `Substitui` copia o elemento do patch, `Anexa` vai pro fim,
-/// `Pula` não faz nada. `false` sem efeito se o reserve não deu capacidade.
+/// Aplica `plano` num `DynArray` de elementos sem dono de `passo` B em `alvo`; `patch` tem um elemento por passo do plano. `Substitui(i)` copia o
+/// elemento do patch por cima do `i` (que pode ser um anexado antes neste plano), `Anexa` põe no fim, `Pula` não faz nada. Cresce pelo reserve do
+/// motor; sem capacidade devolve `false` com o alvo intacto.
 pub(crate) unsafe fn aplicar_plano_no_array(alvo: *mut u8, patch: *const u8, passo: usize, plano: &[PassoDaMescla]) -> bool {
     let (_, tam, cap) = dynarray_no_campo(alvo, 0);
-    let novo = tam + plano.iter().filter(|p| **p == PassoDaMescla::Anexa).count();
-    if novo > cap {
-        crate::jogo::listas::reservar(alvo as *mut c_void, novo as u32, passo as u32, 8, std::ptr::null());
-        if dynarray_no_campo(alvo, 0).2 < novo {
+    let anexas = plano.iter().filter(|p| matches!(p, PassoDaMescla::Anexa)).count();
+    let final_ = tam + anexas;
+    if final_ > cap {
+        crate::jogo::listas::reservar(alvo as *mut c_void, final_ as u32, passo as u32, 8, std::ptr::null());
+        if dynarray_no_campo(alvo, 0).2 < final_ {
             return false;
         }
     }
-    let dst = dynarray_no_campo(alvo, 0).0;
-    let mut fim = tam;
+    let b = dynarray_no_campo(alvo, 0).0;
+    let mut atual = tam;
     for (j, p) in plano.iter().enumerate() {
         let origem = patch.add(j * passo);
         match *p {
-            PassoDaMescla::Substitui(i) => std::ptr::copy_nonoverlapping(origem, dst.add(i * passo), passo),
+            PassoDaMescla::Substitui(i) if i < atual => std::ptr::copy(origem, b.add(i * passo), passo),
             PassoDaMescla::Anexa => {
-                std::ptr::copy_nonoverlapping(origem, dst.add(fim * passo), passo);
-                fim += 1;
+                std::ptr::copy(origem, b.add(atual * passo), passo);
+                atual += 1;
             }
-            PassoDaMescla::Pula => {}
+            _ => {}
         }
     }
-    (alvo.add(0x0C) as *mut u32).write_unaligned(fim as u32);
+    (alvo.add(0x0c) as *mut u32).write_unaligned(atual as u32);
     true
 }
 
-/// Offsets de `appearances`/`resolvedDependencies` do `entEntityTemplate` pelo RTTI, conferidos contra os do SDK (game thread, na carga da tabela).
+/// Resumo de uma lista mesclada para o log: `"<campo> <antes> → <depois> (ok|sem capacidade); "`.
+fn resumo_da_lista(campo: &str, antes: usize, depois: usize, ok: bool) -> String {
+    format!("{campo} {antes} → {depois} ({}); ", if ok { "ok" } else { "sem capacidade" })
+}
+
+/// Junta numa lista de 8 B do alvo (`alvo + off`) os valores da do patch (`patch + off`) que ela não tem; com `no_depot`, só os caminhos que o
+/// depot tem. Devolve `(antes, depois, ok)`, ou `None` com uma das listas ilegível.
+unsafe fn juntar_lista_de_u64(alvo: *mut u8, patch: *const u8, off: usize, no_depot: Option<&str>) -> Option<(usize, usize, bool)> {
+    let (existentes, novos) = (lista_de_u64(alvo, off)?, lista_de_u64(patch, off)?);
+    let plano: Vec<PassoDaMescla> = plano_de_novos(&existentes, &novos)
+        .into_iter()
+        .zip(&novos)
+        .map(|(novo, &v)| match (novo, no_depot) {
+            (true, Some(onde)) if !existe_no_depot_ou_conta(v, onde) => PassoDaMescla::Pula,
+            (true, _) => PassoDaMescla::Anexa,
+            (false, _) => PassoDaMescla::Pula,
+        })
+        .collect();
+    if !plano.iter().any(|p| matches!(p, PassoDaMescla::Anexa)) {
+        return Some((existentes.len(), existentes.len(), true));
+    }
+    let ok = aplicar_plano_no_array(alvo.add(off), novos.as_ptr() as *const u8, 8, &plano);
+    Some((existentes.len(), dynarray_no_campo(alvo, off).1, ok))
+}
+
+/// Offsets de `appearances`/`resolvedDependencies` do `entEntityTemplate` pelo RTTI, conferidos contra as constantes (game thread, na carga da tabela).
 pub(crate) unsafe fn guardar_offsets_do_template(reg: &crate::rtti::Registry) {
     let cls = reg.class_by_name("entEntityTemplate");
     let off = |campo: &str| if cls.is_null() { None } else { crate::rtti::resolve_prop_in_class(cls, campo).map(|(o, _, _)| o as usize) };
@@ -2341,139 +2371,114 @@ pub(crate) unsafe fn guardar_offsets_do_template(reg: &crate::rtti::Registry) {
     );
 }
 
-/// 51b: junta no schema do alvo as tags do schema do template de patch que ele ainda não tem, como o `TagList::Add`. Alvo sem schema ganha um schema
-/// novo antes da junção, como na referência.
+/// A#51 51b: as `visualTags` do schema do template de patch que o schema do alvo não tem entram nele. Alvo sem schema ganha um
+/// `entVisualTagsSchema` novo antes; patch sem schema ou sem tags não muda nada. Devolve o resumo pro log.
 pub(crate) unsafe fn mesclar_tags_do_schema(alvo: *mut u8, ptpl: *const u8) -> String {
-    let schema = |t: *const u8| (t.add(TEMPLATE_VISUALTAGSSCHEMA_OFF) as *const u64).read_unaligned() as *mut u8;
-    let legivel = |s: *mut u8| !s.is_null() && crate::memoria::is_readable(s as *const c_void, SCHEMA_VISUALTAGS_OFF + 0x10);
-    let (sa, sp) = (schema(alvo), schema(ptpl));
-    if !legivel(sp) {
-        return "visualTags: patch sem schema; ".to_string();
+    let schema_do = |tpl: *const u8| (tpl.add(TEMPLATE_VISUALTAGSSCHEMA_OFF) as *const u64).read_unaligned() as *mut u8;
+    let pschema = schema_do(ptpl);
+    if pschema.is_null() || !crate::memoria::is_readable(pschema as *const c_void, SCHEMA_VISUALTAGS_OFF + 0x10) {
+        return String::new();
     }
-    let (pb, pn, _) = dynarray_no_campo(sp, SCHEMA_VISUALTAGS_OFF);
-    if pn == 0 {
-        return "visualTags: patch sem tags; ".to_string();
+    let Some(tags) = lista_de_u64(pschema, SCHEMA_VISUALTAGS_OFF) else { return "visualTags do patch ilegíveis; ".into() };
+    if tags.is_empty() {
+        return String::new();
     }
-    if !legivel(sa) {
-        // 51b v2: a referência dá um schema ao alvo que não tem (a atribuição `= {}` dela deixaria o handle nulo e o acesso seguinte cairia; a intenção é o
-        // schema novo). Instância pelo `CreateInstance` e `Handle` pelo construtor do motor, como os clones da 51i-2.
+    let mut schema = schema_do(alvo);
+    if schema.is_null() {
         let cls = CLASSE_VISUALTAGSSCHEMA.load(Ordering::Relaxed);
-        let atual = (alvo.add(TEMPLATE_VISUALTAGSSCHEMA_OFF) as *const u64).read_unaligned();
-        let obj = if atual == 0 && !cls.is_null() { crate::rtti::create_instance(cls) } else { std::ptr::null_mut() };
+        let obj = crate::rtti::create_instance(cls);
         if obj.is_null() {
-            return "visualTags: alvo sem schema e sem como criar, fica de fora; ".to_string();
+            return "schema novo não criado; ".into();
         }
-        let mut h = [0u64; 2];
-        crate::rtti::make_handle(h.as_mut_ptr() as *mut c_void, obj);
-        if h[0] == 0 || h[1] == 0 {
-            return "visualTags: handle do schema novo nulo, fica de fora; ".to_string();
-        }
-        (alvo.add(TEMPLATE_VISUALTAGSSCHEMA_OFF) as *mut [u64; 2]).write_unaligned(h);
-        A51B_SCHEMAS_CRIADOS.fetch_add(1, Ordering::Relaxed);
-        if let Ok(mut g) = A51B_CRIADOS.try_lock() {
+        crate::rtti::make_handle(alvo.add(TEMPLATE_VISUALTAGSSCHEMA_OFF) as *mut c_void, obj);
+        schema = schema_do(alvo);
+        crate::diagnostico::A51B_SCHEMAS_CRIADOS.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut g) = crate::diagnostico::A51B_CRIADOS.try_lock() {
             if g.len() < 16 {
                 g.push(alvo as u64);
             }
         }
     }
-    let sa = schema(alvo);
-    if !legivel(sa) {
-        return "visualTags: schema do alvo ilegível; ".to_string();
+    if schema.is_null() || !crate::memoria::is_readable(schema as *const c_void, SCHEMA_VISUALTAGS_OFF + 0x10) {
+        return "schema do alvo ilegível; ".into();
     }
-    let (ab, an, _) = dynarray_no_campo(sa, SCHEMA_VISUALTAGS_OFF);
-    if !crate::memoria::is_readable(pb as *const c_void, pn * 8) || (an > 0 && !crate::memoria::is_readable(ab as *const c_void, an * 8)) {
-        return "visualTags ilegível; ".to_string();
+    match juntar_lista_de_u64(schema, pschema, SCHEMA_VISUALTAGS_OFF, None) {
+        Some((antes, depois, ok)) => resumo_da_lista("visualTags", antes, depois, ok),
+        None => "visualTags do alvo ilegíveis; ".into(),
     }
-    let chave = |b: *const u8, i: usize| (b.add(i * 8) as *const u64).read_unaligned();
-    let novos = plano_de_novos(&(0..an).map(|i| chave(ab, i)).collect::<Vec<_>>(), &(0..pn).map(|i| chave(pb, i)).collect::<Vec<_>>());
-    let plano: Vec<PassoDaMescla> = novos.iter().map(|n| if *n { PassoDaMescla::Anexa } else { PassoDaMescla::Pula }).collect();
-    let ok = aplicar_plano_no_array(sa.add(SCHEMA_VISUALTAGS_OFF), pb, 8, &plano);
-    format!("visualTags {an} → {} ({}); ", dynarray_no_campo(sa, SCHEMA_VISUALTAGS_OFF).1, if ok { "ok" } else { "sem capacidade" })
 }
 
-/// 51a, no `PostLoad` do template (thread de job): mescla `appearances` e `resolvedDependencies` de cada patch cujo alvo é este template.
+/// A#51 51a, no `PostLoad` do `entEntityTemplate` (thread de job), antes da original: `appearances` por nome (struct inteira), `resolvedDependencies`
+/// que o alvo não tem e que o depot tem, e as tags do schema (51b).
 pub(crate) unsafe fn mesclar_patches_no_template(tpl: *mut c_void) {
-    if tpl.is_null() || !PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) || !TEMPLATE_OFFSETS_OK.load(Ordering::Relaxed) {
+    if !TEMPLATE_OFFSETS_OK.load(Ordering::Relaxed) || tpl.is_null() {
         return;
     }
     let alvo = tpl as *mut u8;
-    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
-    let patches: Vec<(u64, [u64; 2], u32)> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g
-            .do_alvo(caminho)
-            .filter(|p| p.props & (A17_PROP_APPEARANCES | A17_PROP_DEPENDENCIES | A17_PROP_VISUALTAGS) != 0)
-            .map(|p| (p.patch, p.token, p.props))
-            .collect(),
-        Err(_) => return,
-    };
-    if patches.is_empty() || !crate::memoria::is_readable(tpl as *const c_void, TEMPLATE_DEPENDENCIES_OFF + 0x10) {
+    let fim = TEMPLATE_DEPENDENCIES_OFF + 0x10;
+    if !crate::memoria::is_readable(alvo as *const c_void, fim) {
         return;
     }
-    for (patch, pt, props) in patches {
-        let ptpl = recurso_do_patch_da_classe(pt, TEMPLATE_DEPENDENCIES_OFF + 0x10, CLASSE_ENTENTITYTEMPLATE.load(Ordering::Relaxed));
+    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
+    let patches = patches_do_alvo(caminho, A17_PROP_APPEARANCES | A17_PROP_DEPENDENCIES | A17_PROP_VISUALTAGS);
+    let classe = CLASSE_ENTENTITYTEMPLATE.load(Ordering::Relaxed);
+    for (pt, props) in patches {
+        let ptpl = recurso_do_patch_da_classe(pt, fim, classe);
         if ptpl.is_null() {
-            if crate::primeiras(&A51_NAO_PRONTOS, 8) {
-                crate::veredito_dev!("[a51] patch {patch:#018x} ainda carregando quando o template {caminho:#018x} terminou; fica de fora");
-            }
+            crate::diagnostico::A51_NAO_PRONTOS.fetch_add(1, Ordering::Relaxed);
             continue;
         }
-        let mut texto = String::new();
-        for (bit, off, passo, nome) in [
-            (A17_PROP_APPEARANCES, TEMPLATE_APPEARANCES_OFF, TEMPLATE_APPEARANCE_TAM, "appearances"),
-            (A17_PROP_DEPENDENCIES, TEMPLATE_DEPENDENCIES_OFF, 8, "resolvedDependencies"),
-        ] {
-            if props & bit == 0 {
-                continue;
-            }
-            let (ab, an, _) = dynarray_no_campo(alvo, off);
-            let (pb, pn, _) = dynarray_no_campo(ptpl, off);
-            if (an > 0 && !crate::memoria::is_readable(ab as *const c_void, an * passo)) || (pn > 0 && !crate::memoria::is_readable(pb as *const c_void, pn * passo)) {
-                texto += &format!("{nome} ilegível; ");
-                continue;
-            }
-            let chave = |buf: *const u8, i: usize| (buf.add(i * passo) as *const u64).read_unaligned();
-            let (chaves_a, chaves_p): (Vec<u64>, Vec<u64>) = ((0..an).map(|i| chave(ab, i)).collect(), (0..pn).map(|i| chave(pb, i)).collect());
-            let plano: Vec<PassoDaMescla> = if bit == A17_PROP_APPEARANCES {
-                plano_por_nome(&chaves_a, &chaves_p)
-            } else {
-                // Dependência que o depot não tem fica de fora, como na referência.
-                plano_de_novos(&chaves_a, &chaves_p)
-                    .into_iter()
-                    .zip(&chaves_p)
-                    .map(|(novo, h)| if novo && existe_no_depot_ou_conta(*h, "resolvedDependencies do template") { PassoDaMescla::Anexa } else { PassoDaMescla::Pula })
-                    .collect()
+        let mut resumo = String::new();
+        if props & A17_PROP_APPEARANCES != 0 {
+            let nomes_de = |obj: *const u8| -> Option<Vec<u64>> {
+                let (b, n, _) = dynarray_no_campo(obj, TEMPLATE_APPEARANCES_OFF);
+                if n > 0x1_0000 || (n > 0 && !crate::memoria::is_readable(b as *const c_void, n * TEMPLATE_APPEARANCE_TAM)) {
+                    return None;
+                }
+                Some((0..n).map(|i| (b.add(i * TEMPLATE_APPEARANCE_TAM) as *const u64).read_unaligned()).collect())
             };
-            let ok = aplicar_plano_no_array(alvo.add(off), pb, passo, &plano);
-            texto += &format!("{nome} {an} → {} ({}); ", dynarray_no_campo(alvo, off).1, if ok { "ok" } else { "sem capacidade" });
+            match (nomes_de(alvo), nomes_de(ptpl)) {
+                (Some(existentes), Some(novos)) if !novos.is_empty() => {
+                    let plano = plano_por_nome(&existentes, &novos);
+                    let pbuf = dynarray_no_campo(ptpl, TEMPLATE_APPEARANCES_OFF).0;
+                    let ok = aplicar_plano_no_array(alvo.add(TEMPLATE_APPEARANCES_OFF), pbuf, TEMPLATE_APPEARANCE_TAM, &plano);
+                    resumo += &resumo_da_lista("appearances", existentes.len(), dynarray_no_campo(alvo, TEMPLATE_APPEARANCES_OFF).1, ok);
+                }
+                (Some(_), Some(_)) => {}
+                _ => resumo += "appearances ilegíveis; ",
+            }
+        }
+        if props & A17_PROP_DEPENDENCIES != 0 {
+            match juntar_lista_de_u64(alvo, ptpl, TEMPLATE_DEPENDENCIES_OFF, Some("resolvedDependencies do template")) {
+                Some((antes, depois, ok)) => resumo += &resumo_da_lista("resolvedDependencies", antes, depois, ok),
+                None => resumo += "resolvedDependencies ilegíveis; ",
+            }
         }
         if props & A17_PROP_VISUALTAGS != 0 && SCHEMA_OFFSETS_OK.load(Ordering::Relaxed) {
-            texto += &mesclar_tags_do_schema(alvo, ptpl);
+            resumo += &mesclar_tags_do_schema(alvo, ptpl);
         }
-        if crate::primeiras(&A51_APLICADOS, 16) {
-            crate::veredito_dev!("[a51] patch {patch:#018x} no template {caminho:#018x}: {texto}");
-        }
+        crate::diagnostico::A51_APLICADOS.fetch_add(1, Ordering::Relaxed);
+        crate::log_dev!("[a51] template {caminho:#018x}: {resumo}");
     }
 }
 
-/// Recurso do token do patch pronto pra mescla (`+0x28`, legível até `tam` B). Com o token ainda carregando espera até 500 ms, como a referência, lendo só o
-/// status do token a cada 1 ms; nulo se falhou ou não terminou.
+/// Teto da espera por um patch que ainda carrega, dentro do gancho de carga do alvo. Nos boots 119-123 meio segundo bastou.
+const ESPERA_DO_PATCH_MS: u64 = 500;
+const PASSO_DA_ESPERA_MS: u64 = 5;
+
+/// Recurso do token do patch pronto (recurso em `token+0x28`, legível até `tam` B), ou nulo. Token carregando espera até `ESPERA_DO_PATCH_MS` e
+/// desiste; token que falhou dá nulo.
 pub(crate) unsafe fn recurso_do_patch_pronto(pt: [u64; 2], tam: usize) -> *const u8 {
-    if pt[0] == 0 {
+    let t = pt[0];
+    if t == 0 || !crate::memoria::is_readable(t as *const c_void, 0x60) {
         return std::ptr::null();
     }
-    let inicio = std::time::Instant::now();
-    while crate::register::status_do_token(pt[0]) == 0 && inicio.elapsed() < std::time::Duration::from_millis(500) {
-        std::thread::sleep(std::time::Duration::from_millis(1));
+    let mut esperado = 0;
+    while crate::register::status_do_token(t) == 0 && esperado < ESPERA_DO_PATCH_MS {
+        std::thread::sleep(std::time::Duration::from_millis(PASSO_DA_ESPERA_MS));
+        esperado += PASSO_DA_ESPERA_MS;
     }
-    if crate::register::status_do_token(pt[0]) != 1 || !crate::memoria::is_readable((pt[0] + 0x28) as *const c_void, 8) {
-        return std::ptr::null();
-    }
-    let r = ((pt[0] + 0x28) as *const u64).read_unaligned() as *const u8;
-    if r.is_null() || !crate::memoria::is_readable(r as *const c_void, tam) {
-        std::ptr::null()
-    } else {
-        r
-    }
+    recurso_carregado(t, tam)
 }
 
 pub(crate) static REFERENCIAS_FORA_DO_DEPOT: AtomicU64 = AtomicU64::new(0);
@@ -2486,7 +2491,7 @@ pub(crate) static CLASSE_APPEARANCERESOURCE: AtomicPtr<c_void> = AtomicPtr::new(
 
 pub(crate) static CLASSE_MORPHTARGETMESH: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
-/// O depot tem o caminho. Sem depot capturado conta como existente: a referência só tira o que sabe que falta.
+/// O depot tem o caminho (`CheckResource` do motor, `0x10151aa2c`). Sem depot capturado ou caminho 0 conta como existente.
 pub(crate) unsafe fn existe_no_depot(caminho: u64) -> bool {
     let depot = crate::arquivos_do_jogo::PATHB_DEPOT.load(Ordering::Relaxed);
     if depot.is_null() || caminho == 0 {
@@ -2505,17 +2510,19 @@ pub(crate) unsafe fn existe_no_depot_ou_conta(caminho: u64, onde: &str) -> bool 
     existe
 }
 
-/// `recurso_do_patch_pronto` que também exige a classe do recurso (herança pelo RTTI); recurso de outra classe fica de fora e é contado. Classe não resolvida
-/// não confere.
+/// `recurso_do_patch_pronto` que também exige a classe `cls` (herança pelo RTTI); `cls` nulo não confere. Classe errada dá nulo e é contada.
 pub(crate) unsafe fn recurso_do_patch_da_classe(pt: [u64; 2], tam: usize, cls: *mut c_void) -> *const u8 {
     let r = recurso_do_patch_pronto(pt, tam);
-    if r.is_null() || cls.is_null() || class_is_kind_of(crate::rtti::class_of(r as *mut c_void), cls) {
+    if r.is_null() || cls.is_null() {
         return r;
     }
-    if crate::primeiras(&RECURSOS_DE_CLASSE_ERRADA, 8) {
-        crate::veredito_dev!("[a51] patch de classe errada (token {:#x}, recurso {r:p}); fica de fora", pt[0]);
+    if !crate::register::class_is_kind_of(crate::rtti::class_of(r as *mut c_void), cls) {
+        if crate::primeiras(&RECURSOS_DE_CLASSE_ERRADA, 8) {
+            crate::veredito_dev!("[a51] recurso de patch {r:p} não é da classe esperada; fica de fora");
+        }
+        return std::ptr::null();
     }
-    std::ptr::null()
+    r
 }
 
 pub(crate) const APPRESOURCE_CENSORSHIPMAPPING_OFF: usize = 0xA8;
@@ -2537,22 +2544,23 @@ pub(crate) enum PassoDaDefinicao {
     Nova,
 }
 
-/// Plano das definições do patch contra as do alvo, por nome (`0` = `None`). `anexados` acumula os nomes anexados neste recurso entre patches; a definição
-/// anexada entra nas buscas seguintes.
+/// Plano das definições do patch sobre os nomes do alvo (`0` = nome `None`): `None` modifica todas (inclusive as anexadas antes nesta chamada);
+/// nome que um patch anterior do mesmo recurso anexou (`anexados`) não modifica nenhuma; nome existente modifica a 1ª ocorrência; nome novo é
+/// `Nova`, vai pro fim dos nomes e pra `anexados`.
 pub(crate) fn plano_das_definicoes(existentes: &[u64], patch: &[u64], anexados: &mut Vec<u64>) -> Vec<PassoDaDefinicao> {
     let mut nomes = existentes.to_vec();
     patch
         .iter()
-        .map(|&n| {
-            if n == 0 {
+        .map(|&nome| {
+            if nome == 0 {
                 return PassoDaDefinicao::Modifica((0..nomes.len()).collect());
             }
-            match nomes.iter().position(|e| *e == n) {
-                Some(_) if anexados.contains(&n) => PassoDaDefinicao::Modifica(Vec::new()),
+            match nomes.iter().position(|&n| n == nome) {
+                Some(_) if anexados.contains(&nome) => PassoDaDefinicao::Modifica(Vec::new()),
                 Some(i) => PassoDaDefinicao::Modifica(vec![i]),
                 None => {
-                    nomes.push(n);
-                    anexados.push(n);
+                    nomes.push(nome);
+                    anexados.push(nome);
                     PassoDaDefinicao::Nova
                 }
             }
@@ -2560,7 +2568,7 @@ pub(crate) fn plano_das_definicoes(existentes: &[u64], patch: &[u64], anexados: 
         .collect()
 }
 
-/// Offsets do `appearanceAppearanceResource` e da `appearanceAppearanceDefinition` pelo RTTI, conferidos contra os do SDK (game thread, na carga da tabela).
+/// Offsets do `appearanceAppearanceResource` e da `appearanceAppearanceDefinition` pelo RTTI, conferidos contra as constantes (game thread, na carga da tabela).
 pub(crate) unsafe fn guardar_offsets_do_app(reg: &crate::rtti::Registry) {
     let prop = |classe: &str, campo: &str| {
         let c = reg.class_by_name(classe);
@@ -2581,86 +2589,70 @@ pub(crate) unsafe fn guardar_offsets_do_app(reg: &crate::rtti::Registry) {
     crate::veredito_dev!("[a51c] offsets pelo RTTI: {}; mescla {}", texto.join(", "), if ok { "ligada" } else { "desligada" });
 }
 
-/// Junta numa definição do alvo (`d`) os `partsValues`, `resolvedDependencies` e `visualTags` que ela ainda não tem, vindos da definição do patch (`pd`),
-/// conforme as props. Devolve quantos de cada entraram.
+/// A#51 51c: uma definição do patch (`pd`) numa definição do alvo (`d`), conforme `props`; devolve quantos entraram de `partsValues`,
+/// `resolvedDependencies`, `visualTags` e `partsOverrides`.
 pub(crate) unsafe fn mesclar_definicao(d: *mut u8, pd: *const u8, props: u32) -> [usize; 4] {
-    let mut r = [0usize; 4];
+    let mut n = [0usize; 4];
     if d as *const u8 == pd {
-        return r;
+        return n;
     }
-    let campos = [
-        (A17_PROP_PARTSVALUES, APPDEF_PARTSVALUES_OFF),
-        (A17_PROP_DEPENDENCIES, APPDEF_DEPENDENCIES_OFF),
-        (A17_PROP_VISUALTAGS, APPDEF_VISUALTAGS_OFF),
-    ];
-    for (k, (bit, off)) in campos.into_iter().enumerate() {
-        let (ab, an, _) = dynarray_no_campo(d, off);
-        let (pb, pn, _) = dynarray_no_campo(pd, off);
-        if props & bit == 0 || pn == 0 || (an > 0 && !crate::memoria::is_readable(ab as *const c_void, an * 8)) || !crate::memoria::is_readable(pb as *const c_void, pn * 8) {
-            continue;
-        }
-        let chave = |buf: *const u8, i: usize| (buf.add(i * 8) as *const u64).read_unaligned();
-        let valores: Vec<u64> = (0..pn).map(|i| chave(pb, i)).collect();
-        let novos = plano_de_novos(&(0..an).map(|i| chave(ab, i)).collect::<Vec<_>>(), &valores);
-        // `partsValues` e `resolvedDependencies` que o depot não tem ficam de fora, como na referência (as tags não são caminho).
-        let plano: Vec<PassoDaMescla> = novos
-            .iter()
-            .zip(&valores)
-            .map(|(n, h)| if *n && (bit == A17_PROP_VISUALTAGS || existe_no_depot_ou_conta(*h, "partsValues/resolvedDependencies da definição")) { PassoDaMescla::Anexa } else { PassoDaMescla::Pula })
-            .collect();
-        if aplicar_plano_no_array(d.add(off), pb, 8, &plano) {
-            r[k] = plano.iter().filter(|p| **p == PassoDaMescla::Anexa).count();
-        }
+    let entraram = |r: Option<(usize, usize, bool)>| r.map_or(0, |(antes, depois, _)| depois.saturating_sub(antes));
+    if props & A17_PROP_PARTSVALUES != 0 {
+        n[0] = entraram(juntar_lista_de_u64(d, pd, APPDEF_PARTSVALUES_OFF, Some("partsValues da definição")));
+    }
+    if props & A17_PROP_DEPENDENCIES != 0 {
+        n[1] = entraram(juntar_lista_de_u64(d, pd, APPDEF_DEPENDENCIES_OFF, Some("resolvedDependencies da definição")));
+    }
+    if props & A17_PROP_VISUALTAGS != 0 {
+        n[2] = entraram(juntar_lista_de_u64(d, pd, APPDEF_VISUALTAGS_OFF, None));
     }
     if props & A17_PROP_PARTSOVERRIDES != 0 {
-        r[3] = copiar_parts_overrides(d, pd);
+        n[3] = copiar_parts_overrides(d, pd);
     }
-    r
+    n
 }
 
-/// 51c-4: anexa numa definição do alvo cópias fundas das `partsOverrides` da definição do patch, todas, como o `PushBack` da referência: cada elemento leva o
-/// `partResource` e um `DynArray<PartComponentOverrides>` novo, com buffer próprio pelo reserve do motor (0x50 B por item, alinhamento 0x10), copiado do
-/// patch. O array de fora cresce pelo reserve com mover nulo (a realocação move os bytes, sem destruir elementos). Devolve quantos entraram.
+/// `partsOverrides`: elemento de 0x18 B, `partResource` (8 B) e a lista interna de 0x50 B, alinhada a 0x10, em `+0x08`.
+const PARTSOVERRIDE_TAM: usize = 0x18;
+const COMPONENTOVERRIDE_TAM: usize = 0x50;
+
+/// A#51 51c-4: todas as `partsOverrides` da definição do patch anexadas à do alvo como cópias fundas (lista interna com buffer próprio). Item com
+/// lista interna ilegível é pulado. Devolve quantas entraram.
 pub(crate) unsafe fn copiar_parts_overrides(d: *mut u8, pd: *const u8) -> usize {
     let (pb, pn, _) = dynarray_no_campo(pd, APPDEF_PARTSOVERRIDES_OFF);
-    if pn == 0 || !crate::memoria::is_readable(pb as *const c_void, pn * 0x18) {
+    if pn == 0 || pn > 0x1_0000 || !crate::memoria::is_readable(pb as *const c_void, pn * PARTSOVERRIDE_TAM) {
         return 0;
     }
     let arr = d.add(APPDEF_PARTSOVERRIDES_OFF);
-    let (_, an, cap) = dynarray_no_campo(arr, 0);
-    if an + pn > cap {
-        crate::jogo::listas::reservar(arr as *mut c_void, (an + pn) as u32, 0x18, 8, std::ptr::null());
-        if dynarray_no_campo(arr, 0).2 < an + pn {
+    let (_, n, cap) = dynarray_no_campo(d, APPDEF_PARTSOVERRIDES_OFF);
+    if n + pn > cap {
+        crate::jogo::listas::reservar(arr as *mut c_void, (n + pn) as u32, PARTSOVERRIDE_TAM as u32, 8, std::ptr::null());
+        if dynarray_no_campo(d, APPDEF_PARTSOVERRIDES_OFF).2 < n + pn {
             return 0;
         }
     }
-    let mut n = 0usize;
+    let b = dynarray_no_campo(d, APPDEF_PARTSOVERRIDES_OFF).0;
+    let mut atual = n;
     for j in 0..pn {
-        let origem = pb.add(j * 0x18);
-        let (ib, inn, _) = dynarray_no_campo(origem, 8);
-        if inn > 0 && !crate::memoria::is_readable(ib as *const c_void, inn * 0x50) {
+        let (src, dst) = (pb.add(j * PARTSOVERRIDE_TAM), b.add(atual * PARTSOVERRIDE_TAM));
+        let (ib, inn, _) = dynarray_no_campo(src, 8);
+        if inn > 0x1_0000 || (inn > 0 && !crate::memoria::is_readable(ib as *const c_void, inn * COMPONENTOVERRIDE_TAM)) {
             continue;
         }
-        let destino = dynarray_no_campo(arr, 0).0.add((an + n) * 0x18);
-        (destino as *mut u64).write_unaligned((origem as *const u64).read_unaligned());
-        std::ptr::write_bytes(destino.add(8), 0, 0x10);
-        if inn > 0 {
-            crate::jogo::listas::reservar(destino.add(8) as *mut c_void, inn as u32, 0x50, 0x10, std::ptr::null());
-            let (nb, _, ncap) = dynarray_no_campo(destino, 8);
-            if nb.is_null() || ncap < inn {
-                std::ptr::write_bytes(destino.add(8), 0, 0x10);
-                continue;
-            }
-            std::ptr::copy_nonoverlapping(ib, nb, inn * 0x50);
-            (destino.add(8 + 0x0C) as *mut u32).write_unaligned(inn as u32);
-            if let Ok(mut amostra) = A51C4_AMOSTRA.try_lock() {
-                amostra.get_or_insert([d as u64, (an + n) as u64, nb as u64, pd as u64, j as u64]);
+        std::ptr::write_bytes(dst, 0, PARTSOVERRIDE_TAM);
+        (dst as *mut u64).write_unaligned((src as *const u64).read_unaligned());
+        if !copiar_dynarray(dst.add(8), src.add(8), COMPONENTOVERRIDE_TAM, 0x10) {
+            continue;
+        }
+        if atual == n {
+            if let Ok(mut a) = crate::diagnostico::A51C4_AMOSTRA.try_lock() {
+                *a = Some([d as u64, atual as u64, dynarray_no_campo(dst, 8).0 as u64, pd as u64, j as u64]);
             }
         }
-        n += 1;
+        atual += 1;
+        (arr.add(0x0c) as *mut u32).write_unaligned(atual as u32);
     }
-    (arr.add(0x0C) as *mut u32).write_unaligned((an + n) as u32);
-    n
+    atual - n
 }
 
 /// Handles de definições (`DynArray<Handle<AppearanceDefinition>>` em `recurso + 0x98`), com cada definição legível até as dependências; `None` se algo não é.
@@ -2673,102 +2665,97 @@ pub(crate) unsafe fn definicoes_do_app(recurso: *const u8) -> Option<Vec<[u64; 2
     hs.iter().all(|h| h[0] != 0 && h[1] != 0 && crate::memoria::is_readable(h[0] as *const c_void, APPDEF_DEPENDENCIES_OFF + 0x10)).then_some(hs)
 }
 
-/// Definições do patch no recurso alvo (51c). Devolve o resumo pro log.
+/// A#51 51c: definições (`appearances`) do recurso do patch no recurso alvo; devolve o resumo pro log.
 pub(crate) unsafe fn mesclar_definicoes(alvo: *mut u8, pres: *const u8, props: u32, anexados: &mut Vec<u64>) -> String {
-    let (Some(da), Some(dp)) = (definicoes_do_app(alvo), definicoes_do_app(pres)) else {
-        return "appearances ilegível; ".to_string();
-    };
-    let nome = |h: &[u64; 2]| ((h[0] as usize + APPDEF_NAME_OFF) as *const u64).read_unaligned();
-    let plano = plano_das_definicoes(&da.iter().map(nome).collect::<Vec<_>>(), &dp.iter().map(nome).collect::<Vec<_>>(), anexados);
-    let novas = plano.iter().filter(|p| **p == PassoDaDefinicao::Nova).count();
+    let (Some(mut defs), Some(pdefs)) = (definicoes_do_app(alvo), definicoes_do_app(pres)) else { return "definições ilegíveis; ".into() };
+    let nome = |h: &[u64; 2]| ((h[0] as *const u8).add(APPDEF_NAME_OFF) as *const u64).read_unaligned();
+    let existentes: Vec<u64> = defs.iter().map(nome).collect();
+    let novos: Vec<u64> = pdefs.iter().map(nome).collect();
+    let plano = plano_das_definicoes(&existentes, &novos, anexados);
     let arr = alvo.add(APPRESOURCE_APPEARANCES_OFF);
-    let (_, tam, cap) = dynarray_no_campo(arr, 0);
-    if tam + novas > cap {
-        let mover = if tam == 0 { std::ptr::null() } else { crate::rebase(MOVER_HANDLES_VM) as *const c_void };
-        crate::jogo::listas::reservar(arr as *mut c_void, (tam + novas) as u32, 0x10, 8, mover);
-        if dynarray_no_campo(arr, 0).2 < tam + novas {
-            return format!("appearances sem capacidade pra {novas} nova(s); ");
-        }
-    }
-    let mut partes = [0usize; 4];
-    for (j, passo) in plano.iter().enumerate() {
-        let pd = dp[j];
+    let (mut novas, mut sem_capacidade, mut modificadas, mut itens) = (0usize, 0usize, 0usize, [0usize; 4]);
+    for (passo, ph) in plano.iter().zip(&pdefs) {
         match passo {
             PassoDaDefinicao::Nova => {
-                let (b, n, _) = dynarray_no_campo(arr, 0);
-                (*(pd[1] as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
-                (b.add(n * 16) as *mut u64).write_unaligned(pd[0]);
-                (b.add(n * 16 + 8) as *mut u64).write_unaligned(pd[1]);
-                (arr.add(0x0C) as *mut u32).write_unaligned((n + 1) as u32);
+                // O alvo passa a dividir a definição do patch: o forte é do array do alvo.
+                crate::register::handle_strong_soma(ph, 1);
+                if anexar_handle_no_array(arr, *ph) {
+                    defs.push(*ph);
+                    novas += 1;
+                } else {
+                    crate::register::handle_strong_soma(ph, -1);
+                    sem_capacidade += 1;
+                }
             }
             PassoDaDefinicao::Modifica(indices) => {
                 for &i in indices {
-                    let d = (dynarray_no_campo(arr, 0).0.add(i * 16) as *const u64).read_unaligned() as *mut u8;
-                    let r = mesclar_definicao(d, pd[0] as *const u8, props);
-                    (0..4).for_each(|k| partes[k] += r[k]);
+                    let Some(d) = defs.get(i) else { continue };
+                    let n = mesclar_definicao(d[0] as *mut u8, ph[0] as *const u8, props);
+                    for k in 0..4 {
+                        itens[k] += n[k];
+                    }
+                    modificadas += 1;
                 }
             }
         }
     }
     format!(
-        "appearances {tam} → {} ({novas} nova(s)); partsValues +{}, resolvedDependencies +{}, visualTags +{}, partsOverrides +{}; ",
-        dynarray_no_campo(arr, 0).1,
-        partes[0],
-        partes[1],
-        partes[2],
-        partes[3]
+        "definições {} → {} ({novas} nova(s), {modificadas} mesclada(s), {sem_capacidade} sem capacidade; partsValues +{}, resolvedDependencies +{}, visualTags +{}, partsOverrides +{}); ",
+        existentes.len(),
+        defs.len(),
+        itens[0],
+        itens[1],
+        itens[2],
+        itens[3]
     )
 }
 
-/// 51c, no `PostLoad` do `AppearanceResource` (thread de job): definições e `censorshipMapping` de cada patch cujo alvo é este recurso.
+/// `censorshipMapping`: elemento de 0x18 B.
+const CENSORSHIPMAPPING_TAM: usize = 0x18;
+
+/// A#51 51c, no `PostLoad` do `appearanceAppearanceResource` (thread de job), antes da original. `anexados` é um por recurso alvo, dividido entre os
+/// patches dele.
 pub(crate) unsafe fn mesclar_patches_no_app(res: *mut c_void) {
-    if res.is_null() || !PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) || !APP_OFFSETS_OK.load(Ordering::Relaxed) {
+    if !APP_OFFSETS_OK.load(Ordering::Relaxed) || res.is_null() {
         return;
     }
     let alvo = res as *mut u8;
-    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
-    let patches: Vec<(u64, [u64; 2], u32)> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g
-            .do_alvo(caminho)
-            .filter(|p| p.props & (A17_PROP_APPEARANCES | A17_PROP_CENSORSHIP) != 0)
-            .map(|p| (p.patch, p.token, p.props))
-            .collect(),
-        Err(_) => return,
-    };
-    if patches.is_empty() || !crate::memoria::is_readable(res as *const c_void, APPRESOURCE_CENSORSHIPMAPPING_OFF + 0x10) {
+    let fim = (APPRESOURCE_APPEARANCES_OFF.max(APPRESOURCE_CENSORSHIPMAPPING_OFF)) + 0x10;
+    if !crate::memoria::is_readable(alvo as *const c_void, fim) {
         return;
     }
-    let mut anexados: Vec<u64> = Vec::new();
-    for (patch, pt, props) in patches {
-        let pres = recurso_do_patch_da_classe(pt, APPRESOURCE_CENSORSHIPMAPPING_OFF + 0x10, CLASSE_APPEARANCERESOURCE.load(Ordering::Relaxed));
+    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
+    let mascara = A17_PROP_APPEARANCES | A17_PROP_CENSORSHIP;
+    let patches = patches_do_alvo(caminho, mascara);
+    let classe = CLASSE_APPEARANCERESOURCE.load(Ordering::Relaxed);
+    let mut anexados = Vec::new();
+    for (pt, props) in patches {
+        let pres = recurso_do_patch_da_classe(pt, fim, classe);
         if pres.is_null() {
-            if crate::primeiras(&PATCHES_DE_APP_NAO_PRONTOS, 8) {
-                crate::veredito_dev!("[a51c] patch {patch:#018x} não carregou até o recurso {caminho:#018x} terminar; fica de fora");
-            }
+            PATCHES_DE_APP_NAO_PRONTOS.fetch_add(1, Ordering::Relaxed);
             continue;
         }
-        let mut texto = String::new();
+        let mut resumo = String::new();
         if props & A17_PROP_APPEARANCES != 0 {
-            texto += &mesclar_definicoes(alvo, pres, props, &mut anexados);
+            resumo += &mesclar_definicoes(alvo, pres, props, &mut anexados);
         }
         if props & A17_PROP_CENSORSHIP != 0 {
             let (pb, pn, _) = dynarray_no_campo(pres, APPRESOURCE_CENSORSHIPMAPPING_OFF);
-            let antes = dynarray_no_campo(alvo, APPRESOURCE_CENSORSHIPMAPPING_OFF).1;
-            let ok = pn == 0 || (crate::memoria::is_readable(pb as *const c_void, pn * 0x18) && aplicar_plano_no_array(alvo.add(APPRESOURCE_CENSORSHIPMAPPING_OFF), pb, 0x18, &vec![PassoDaMescla::Anexa; pn]));
-            texto += &format!("censorshipMapping {antes} → {} ({}); ", dynarray_no_campo(alvo, APPRESOURCE_CENSORSHIPMAPPING_OFF).1, if ok { "ok" } else { "falhou" });
+            if pn > 0 && pn <= 0x1_0000 && crate::memoria::is_readable(pb as *const c_void, pn * CENSORSHIPMAPPING_TAM) {
+                let antes = dynarray_no_campo(alvo, APPRESOURCE_CENSORSHIPMAPPING_OFF).1;
+                let plano = vec![PassoDaMescla::Anexa; pn];
+                let ok = aplicar_plano_no_array(alvo.add(APPRESOURCE_CENSORSHIPMAPPING_OFF), pb, CENSORSHIPMAPPING_TAM, &plano);
+                resumo += &resumo_da_lista("censorshipMapping", antes, dynarray_no_campo(alvo, APPRESOURCE_CENSORSHIPMAPPING_OFF).1, ok);
+            }
         }
-        if crate::primeiras(&PATCHES_DE_APP_APLICADOS, 16) {
-            crate::veredito_dev!("[a51c] patch {patch:#018x} no recurso {caminho:#018x}: {texto}");
-        }
+        PATCHES_DE_APP_APLICADOS.fetch_add(1, Ordering::Relaxed);
+        crate::log_dev!("[a51c] recurso {caminho:#018x}: {resumo}");
     }
 }
 
-// ===== ArchiveXL `#51` 51d — `OnMorphTargetResourceLoad`: `baseMeshAppearance`, `baseTextureParamName` e `boundingBox` (2026-09-12) =====
-// Hook do `PostLoad` do `MorphTargetMesh` (`0x1051ca1a4`, disparando ao vivo desde 2026-07-26), instalado pela tabela quando algum alvo `.morphtarget` tem
-// uma das 3 props, antes da original. Regra do `Modifies(prop, sobrescrever)` da referência: com props vazio (`-`) o campo só muda se o do patch não é vazio
-// (`baseMeshAppearance`/`baseTextureParamName` diferentes de `None`; `boundingBox` com `Max.X > Min.X`); com a prop escrita ele muda sempre, menos o
-// `boundingBox`, que também exige `Max.X > Min.X`. Os 3 campos não têm dono (CName, CName, `Box` de 0x20 B). Offsets pelo RTTI na carga da tabela (o layout do
-// Mac já desviou do SDK no `worldStreamingWorld`), guardados pro hook, que roda em thread de job e só lê e escreve memória.
+// ===== A#51 51d: `MorphTargetMesh` =====
+// `PostLoad` do `MorphTargetMesh` em `0x1051ca1a4`. Campos sem dono: `baseMeshAppearance` (CName), `baseTextureParamName` (CName), `boundingBox` (`Box`
+// 0x20 B: Min `+0x00`, Max `+0x10`). Offsets pelo RTTI na carga da tabela (`guardar_offsets_do_morph`).
 pub(crate) const PROPS_DO_MORPH: u32 = A17_PROP_BASEMESHAPP | A17_PROP_BASETEXTUREPARAM | A17_PROP_BOUNDINGBOX | PROPS_DO_MORPH_COM_DONO;
 
 pub(crate) const BOX_TAM: usize = 0x20;
@@ -2785,9 +2772,9 @@ pub(crate) static PATCHES_DE_MORPH_APLICADOS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static PATCHES_DE_MORPH_NAO_PRONTOS: AtomicU64 = AtomicU64::new(0);
 
-// 51d v2 (2026-09-12): `baseMesh` e `baseTexture` (`Ref` = `ResourceReference`: caminho `+0x00`, token `+0x08`, contador `+0x10`; a cópia sobe o strong do
-// token do patch e o token antigo do alvo fica retido, sem soltar) e `targets` por nome (`MorphTargetMeshEntry` 0x38 B: nomes e região `+0x00..+0x18`,
-// `boneNames` `DynArray<CName>` `+0x18`, `boneRigMatrices` `DynArray<Matrix>` `+0x28`, cópia funda pelo reserve do motor). O `blob` fica pro `CopyRenderBlob`.
+// 51d v2: `baseMesh` e `baseTexture` (`Ref` = `ResourceReference`: caminho `+0x00`, token `+0x08`, contador `+0x10`) e `targets`
+// (`MorphTargetMeshEntry` 0x38 B: nome `+0x00`, nomes e região até `+0x18`, `boneNames` `DynArray<CName>` `+0x18`, `boneRigMatrices` `DynArray<Matrix>`
+// de 0x40 B alinhada a 0x10 em `+0x28`).
 pub(crate) const PROPS_DO_MORPH_COM_DONO: u32 = A17_PROP_BASEMESH | A17_PROP_BASETEXTURE | A17_PROP_TARGETS | A17_PROP_BLOB;
 
 pub(crate) const MORPHTARGETMESHENTRY_TAM: usize = 0x38;
@@ -2802,12 +2789,13 @@ pub(crate) static MORPH_COM_DONO_OFFSETS_OK: AtomicBool = AtomicBool::new(false)
 
 pub(crate) static MORPH_COM_DONO_LOGADOS: AtomicU64 = AtomicU64::new(0);
 
-/// 51d v2: `(baseMesh, baseTexture, targets)` mudam ou não. `baseMesh` só com caminho no patch e a prop; `baseTexture` pelo `Modifies(p, sem caminho no
-/// patch)`; `targets` pela prop.
+/// 51d v2: `(baseMesh, baseTexture, targets)` mudam ou não.
 pub(crate) fn plano_do_morph_com_dono(props: u32, mesh_patch: u64, tex_patch: u64) -> (bool, bool, bool) {
     let todas = props == u32::MAX;
-    let tem = |bit: u32| todas || props & bit != 0;
-    (mesh_patch != 0 && tem(A17_PROP_BASEMESH), if todas { tex_patch != 0 } else { props & A17_PROP_BASETEXTURE != 0 }, tem(A17_PROP_TARGETS))
+    let ligada = |bit: u32| todas || props & bit != 0;
+    let malha = mesh_patch != 0 && ligada(A17_PROP_BASEMESH);
+    let textura = if todas { tex_patch != 0 } else { props & A17_PROP_BASETEXTURE != 0 };
+    (malha, textura, ligada(A17_PROP_TARGETS))
 }
 
 /// Copia o `Ref` do patch pro alvo subindo o strong do token; token morrendo (strong 0) vai nulo, só com o caminho.
@@ -2839,73 +2827,74 @@ pub(crate) unsafe fn copiar_dynarray(arr: *mut u8, origem: *const u8, elem: usiz
     true
 }
 
-/// `MorphTargetMeshEntry` do patch na entrada do alvo: nomes e região, `boneNames` e `boneRigMatrices` em listas próprias.
+/// `MorphTargetMeshEntry` do patch na entrada do alvo.
 pub(crate) unsafe fn copiar_morph_target_entry(dst: *mut u8, src: *const u8) -> bool {
     std::ptr::copy_nonoverlapping(src, dst, 0x18);
     copiar_dynarray(dst.add(0x18), src.add(0x18), 8, 8) && copiar_dynarray(dst.add(0x28), src.add(0x28), 0x40, 0x10)
 }
 
-/// `targets` do patch no alvo por nome (substitui a entrada de mesmo nome, anexa a nova): `(substituídas, anexadas, falhas)`.
+/// `targets` do patch no alvo, por nome (`plano_por_nome`): a entrada de mesmo nome é substituída, a nova é anexada zerada e preenchida. Lista com
+/// mais de 4096 entradas não é tocada. Devolve `(substituídas, anexadas, falhas)`.
 pub(crate) unsafe fn mesclar_targets_do_morph(alvo: *mut u8, pres: *const u8, off: usize) -> (usize, usize, usize) {
-    let arr = alvo.add(off);
-    let (pb, pn, _) = dynarray_no_campo(pres.add(off), 0);
-    let (tb, tn, _) = dynarray_no_campo(arr, 0);
-    if pn == 0
-        || pn > 4096
-        || tn > 4096
-        || !crate::memoria::is_readable(pb as *const c_void, pn * MORPHTARGETMESHENTRY_TAM)
-        || (tn > 0 && !crate::memoria::is_readable(tb as *const c_void, tn * MORPHTARGETMESHENTRY_TAM))
-    {
+    let (pb, pn, _) = dynarray_no_campo(pres, off);
+    let (_, n, cap) = dynarray_no_campo(alvo, off);
+    if pn == 0 || pn > 4096 || n > 4096 || !crate::memoria::is_readable(pb as *const c_void, pn * MORPHTARGETMESHENTRY_TAM) {
         return (0, 0, 0);
     }
-    let nome = |b: *const u8, i: usize| (b.add(i * MORPHTARGETMESHENTRY_TAM) as *const u64).read_unaligned();
-    let existentes: Vec<u64> = (0..tn).map(|i| nome(tb, i)).collect();
-    let do_patch: Vec<u64> = (0..pn).map(|j| nome(pb, j)).collect();
-    let (mut s, mut x, mut f) = (0usize, 0usize, 0usize);
-    for (j, passo) in plano_por_nome(&existentes, &do_patch).iter().enumerate() {
+    let nomes_de = |b: *const u8, n: usize| -> Vec<u64> { (0..n).map(|i| (b.add(i * MORPHTARGETMESHENTRY_TAM) as *const u64).read_unaligned()).collect() };
+    let ab = dynarray_no_campo(alvo, off).0;
+    if n > 0 && !crate::memoria::is_readable(ab as *const c_void, n * MORPHTARGETMESHENTRY_TAM) {
+        return (0, 0, 0);
+    }
+    let plano = plano_por_nome(&nomes_de(ab, n), &nomes_de(pb, pn));
+    let anexas = plano.iter().filter(|p| matches!(p, PassoDaMescla::Anexa)).count();
+    let arr = alvo.add(off);
+    if n + anexas > cap {
+        crate::jogo::listas::reservar(arr as *mut c_void, (n + anexas) as u32, MORPHTARGETMESHENTRY_TAM as u32, 8, std::ptr::null());
+        if dynarray_no_campo(alvo, off).2 < n + anexas {
+            return (0, 0, pn);
+        }
+    }
+    let b = dynarray_no_campo(alvo, off).0;
+    let (mut substituidas, mut anexadas, mut falhas, mut atual) = (0, 0, 0, n);
+    for (j, p) in plano.iter().enumerate() {
         let src = pb.add(j * MORPHTARGETMESHENTRY_TAM);
-        match *passo {
-            PassoDaMescla::Substitui(i) => {
-                let dst = dynarray_no_campo(arr, 0).0.add(i * MORPHTARGETMESHENTRY_TAM);
-                if copiar_morph_target_entry(dst, src) {
-                    s += 1
+        match *p {
+            PassoDaMescla::Substitui(i) if i < atual => {
+                if copiar_morph_target_entry(b.add(i * MORPHTARGETMESHENTRY_TAM), src) {
+                    substituidas += 1;
                 } else {
-                    f += 1
+                    falhas += 1;
                 }
             }
             PassoDaMescla::Anexa => {
-                let (_, n, cap) = dynarray_no_campo(arr, 0);
-                if n + 1 > cap {
-                    crate::jogo::listas::reservar(arr as *mut c_void, (n + 1) as u32, MORPHTARGETMESHENTRY_TAM as u32, 8, std::ptr::null());
-                    if dynarray_no_campo(arr, 0).2 < n + 1 {
-                        f += 1;
-                        continue;
-                    }
-                }
-                let dst = dynarray_no_campo(arr, 0).0.add(n * MORPHTARGETMESHENTRY_TAM);
+                let dst = b.add(atual * MORPHTARGETMESHENTRY_TAM);
                 std::ptr::write_bytes(dst, 0, MORPHTARGETMESHENTRY_TAM);
-                (arr.add(0x0c) as *mut u32).write_unaligned((n + 1) as u32);
                 if copiar_morph_target_entry(dst, src) {
-                    x += 1
+                    atual += 1;
+                    anexadas += 1;
+                    (arr.add(0x0c) as *mut u32).write_unaligned(atual as u32);
                 } else {
-                    f += 1
+                    falhas += 1;
                 }
             }
-            PassoDaMescla::Pula => {}
+            _ => falhas += 1,
         }
     }
-    (s, x, f)
+    (substituidas, anexadas, falhas)
 }
 
-/// Decide cada campo da 51d: `(appearance, param, box)` — muda ou não, pelas props e pelos valores do patch.
+/// 51d: `(baseMeshAppearance, baseTextureParamName, boundingBox)` mudam ou não. Props todas: muda o campo cujo valor no patch não é vazio (caixa com
+/// `max.x > min.x`). Props explícitas: os dois nomes mudam com a prop ligada, mesmo vazios; a caixa pede a prop e `max.x > min.x`.
 pub(crate) fn plano_do_morph(props: u32, app_patch: u64, param_patch: u64, box_min_x: f32, box_max_x: f32) -> (bool, bool, bool) {
-    let todas = props == u32::MAX;
-    let muda = |bit: u32, vazio: bool| if todas { !vazio } else { props & bit != 0 };
     let caixa_valida = box_max_x > box_min_x;
-    (muda(A17_PROP_BASEMESHAPP, app_patch == 0), muda(A17_PROP_BASETEXTUREPARAM, param_patch == 0), caixa_valida && (todas || props & A17_PROP_BOUNDINGBOX != 0))
+    if props == u32::MAX {
+        return (app_patch != 0, param_patch != 0, caixa_valida);
+    }
+    (props & A17_PROP_BASEMESHAPP != 0, props & A17_PROP_BASETEXTUREPARAM != 0, props & A17_PROP_BOUNDINGBOX != 0 && caixa_valida)
 }
 
-/// Offsets dos 3 campos do `MorphTargetMesh` pelo RTTI (game thread, na carga da tabela), comparados com o SDK só no log.
+/// Offsets dos 3 campos do `MorphTargetMesh` pelo RTTI (game thread, na carga da tabela).
 pub(crate) unsafe fn guardar_offsets_do_morph(reg: &crate::rtti::Registry) {
     let cls = reg.class_by_name("MorphTargetMesh");
     let off = |campo: &str| if cls.is_null() { None } else { crate::rtti::resolve_prop_in_class(cls, campo).map(|(o, _, _)| o as u64) };
@@ -2925,7 +2914,7 @@ pub(crate) unsafe fn guardar_offsets_do_morph(reg: &crate::rtti::Registry) {
         hex(caixa),
         if ok { "ligada" } else { "desligada" }
     );
-    // 51d v2: offsets dos 3 campos com dono e o tamanho do `MorphTargetMeshEntry` (`+0x68` da classe), conferido contra os 0x38 B do SDK.
+    // 51d v2: offsets dos 3 campos com dono e o tamanho do `MorphTargetMeshEntry` (`+0x68` da classe), conferido contra `MORPHTARGETMESHENTRY_TAM`.
     let (mesh, tex, tg) = (off("baseMesh"), off("baseTexture"), off("targets"));
     let entrada = reg.class_by_name("MorphTargetMeshEntry") as *const u8;
     let tam_entrada = if !entrada.is_null() && crate::memoria::is_readable(entrada as *const c_void, 0x78) { (entrada.add(0x68) as *const u32).read_unaligned() } else { 0 };
@@ -2979,130 +2968,114 @@ pub(crate) unsafe fn guardar_offsets_do_morph(reg: &crate::rtti::Registry) {
     );
 }
 
-/// 51d, no `PostLoad` do `MorphTargetMesh` (thread de job): os 3 campos de cada patch cujo alvo é este morph target.
+/// `MorphTargetMesh.blob` (`Handle<rendRenderMorphTargetMeshBlob>`).
+const MORPH_BLOB_OFF: usize = 0xa0;
+
+/// A#51 51d, no `PostLoad` do `MorphTargetMesh` (thread de job), antes da original: os 3 campos sem dono (`plano_do_morph`), o blob novo (v3) e os
+/// campos com dono (v2, `plano_do_morph_com_dono`).
 pub(crate) unsafe fn mesclar_patches_no_morph(res: *mut c_void) {
-    if res.is_null() || !PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) || !MORPH_OFFSETS_OK.load(Ordering::Relaxed) {
+    if !MORPH_OFFSETS_OK.load(Ordering::Relaxed) || res.is_null() {
         return;
+    }
+    let ld = |a: &AtomicU64| a.load(Ordering::Relaxed) as usize;
+    let (o_app, o_param, o_caixa) = (ld(&MORPH_BASEMESHAPPEARANCE_OFF), ld(&MORPH_BASETEXTUREPARAMNAME_OFF), ld(&MORPH_BOUNDINGBOX_OFF));
+    let com_dono = MORPH_COM_DONO_OFFSETS_OK.load(Ordering::Relaxed);
+    let (o_mesh, o_tex, o_tg) = (ld(&MORPH_BASEMESH_OFF), ld(&MORPH_BASETEXTURE_OFF), ld(&MORPH_TARGETS_OFF));
+    let mut fim = (o_app + 8).max(o_param + 8).max(o_caixa + BOX_TAM).max(MORPH_BLOB_OFF + 0x10);
+    if com_dono {
+        fim = fim.max(o_mesh + 0x18).max(o_tex + 0x18).max(o_tg + 0x10);
     }
     let alvo = res as *mut u8;
-    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
-    let patches: Vec<(u64, [u64; 2], u32)> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g.do_alvo(caminho).filter(|p| p.props & PROPS_DO_MORPH != 0).map(|p| (p.patch, p.token, p.props)).collect(),
-        Err(_) => return,
-    };
-    let (o_app, o_param, o_box) =
-        (MORPH_BASEMESHAPPEARANCE_OFF.load(Ordering::Relaxed) as usize, MORPH_BASETEXTUREPARAMNAME_OFF.load(Ordering::Relaxed) as usize, MORPH_BOUNDINGBOX_OFF.load(Ordering::Relaxed) as usize);
-    let fim = (o_app + 8).max(o_param + 8).max(o_box + BOX_TAM);
-    if patches.is_empty() || !crate::memoria::is_readable(res as *const c_void, fim) {
+    if !crate::memoria::is_readable(alvo as *const c_void, fim) {
         return;
     }
-    for (patch, pt, props) in patches {
-        let pres = recurso_do_patch_da_classe(pt, fim, CLASSE_MORPHTARGETMESH.load(Ordering::Relaxed));
+    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
+    let patches = patches_do_alvo(caminho, PROPS_DO_MORPH);
+    let classe = CLASSE_MORPHTARGETMESH.load(Ordering::Relaxed);
+    for (pt, props) in patches {
+        let pres = recurso_do_patch_da_classe(pt, fim, classe);
         if pres.is_null() {
-            if crate::primeiras(&PATCHES_DE_MORPH_NAO_PRONTOS, 8) {
-                crate::veredito_dev!("[a51d] patch {patch:#018x} não carregou até o morph target {caminho:#018x} terminar; fica de fora");
-            }
+            PATCHES_DE_MORPH_NAO_PRONTOS.fetch_add(1, Ordering::Relaxed);
             continue;
         }
-        let app_p = (pres.add(o_app) as *const u64).read_unaligned();
-        let param_p = (pres.add(o_param) as *const u64).read_unaligned();
-        let (min_x, max_x) = ((pres.add(o_box) as *const f32).read_unaligned(), (pres.add(o_box + 0x10) as *const f32).read_unaligned());
-        let (muda_app, muda_param, muda_box) = plano_do_morph(props, app_p, param_p, min_x, max_x);
-        if muda_app {
-            (alvo.add(o_app) as *mut u64).write_unaligned(app_p);
+        let rd = |p: *const u8, o: usize| (p.add(o) as *const u64).read_unaligned();
+        let rf = |p: *const u8, o: usize| (p.add(o) as *const f32).read_unaligned();
+        let (app, param, caixa) = plano_do_morph(props, rd(pres, o_app), rd(pres, o_param), rf(pres, o_caixa), rf(pres, o_caixa + 0x10));
+        if app {
+            std::ptr::copy_nonoverlapping(pres.add(o_app), alvo.add(o_app), 8);
         }
-        if muda_param {
-            (alvo.add(o_param) as *mut u64).write_unaligned(param_p);
+        if param {
+            std::ptr::copy_nonoverlapping(pres.add(o_param), alvo.add(o_param), 8);
         }
-        if muda_box {
-            std::ptr::copy_nonoverlapping(pres.add(o_box), alvo.add(o_box), BOX_TAM);
+        if caixa {
+            std::ptr::copy_nonoverlapping(pres.add(o_caixa), alvo.add(o_caixa), BOX_TAM);
         }
-        let (o_mesh, o_tex, o_tg) =
-            (MORPH_BASEMESH_OFF.load(Ordering::Relaxed) as usize, MORPH_BASETEXTURE_OFF.load(Ordering::Relaxed) as usize, MORPH_TARGETS_OFF.load(Ordering::Relaxed) as usize);
-        let fim2 = (o_mesh + 0x18).max(o_tex + 0x18).max(o_tg + 0x10);
-        // 51d v3: blob do morph (o `CopyRenderBlob` da referência), com o blob do patch sendo `rendRenderMorphTargetMeshBlob`.
-        if MORPH_BLOB_OFFSETS_OK.load(Ordering::Relaxed) && crate::memoria::is_readable(pres.add(0xa0) as *const c_void, 0x10) && crate::memoria::is_readable(alvo.add(0xa0) as *const c_void, 0x10) {
-            let pblob = (pres.add(0xa0) as *const u64).read_unaligned();
-            let alvo_tem = (alvo.add(0xa0) as *const u64).read_unaligned() != 0;
-            if morph_blob_muda(props, pblob != 0, alvo_tem)
-                && crate::memoria::is_readable(pblob as *const c_void, 0x168)
-                && class_is_kind_of(crate::rtti::class_of(pblob as *mut c_void), CLASSE_RENDERMORPHTARGETMESHBLOB.load(Ordering::Relaxed))
-            {
-                match novo_morph_blob(pblob as *const u8) {
-                    Some(h) => {
-                        let slot = alvo.add(0xa0) as *mut [u64; 2];
-                        let mut velho = slot.read_unaligned();
-                        slot.write_unaligned(h);
-                        if velho[0] != 0 {
-                            crate::jogo::objetos::soltar_handle(&mut velho);
-                        }
-                        A51D3_COPIADOS.fetch_add(1, Ordering::Relaxed);
-                        // Conferência na hora da cópia (o motor pode soltar os buffers do alvo depois do `PostLoad`, como no boot 122).
-                        let conferida = a51d3_buffers_iguais(h[0] as *const u8, pblob as *const u8);
-                        (if conferida { &A51D3_CONFERIDAS } else { &A51D3_DIVERGENTES }).fetch_add(1, Ordering::Relaxed);
-                        if let Ok(mut g) = A51D3_AMOSTRAS.try_lock() {
+        let mut blob = "sem troca".to_string();
+        if MORPH_BLOB_OFFSETS_OK.load(Ordering::Relaxed) {
+            let (pb, ab) = (rd(pres, MORPH_BLOB_OFF), rd(alvo, MORPH_BLOB_OFF));
+            let da_classe = pb != 0
+                && crate::memoria::is_readable(pb as *const c_void, 8)
+                && crate::register::class_is_kind_of(crate::rtti::class_of(pb as *mut c_void), CLASSE_RENDERMORPHTARGETMESHBLOB.load(Ordering::Relaxed));
+            if morph_blob_muda(props, pb != 0, ab != 0) && da_classe {
+                match novo_morph_blob(pb as *const u8) {
+                    Some(novo) => {
+                        let slot = alvo.add(MORPH_BLOB_OFF) as *mut [u64; 2];
+                        let mut antigo = slot.read_unaligned();
+                        slot.write_unaligned(novo);
+                        crate::jogo::objetos::soltar_handle(&mut antigo);
+                        crate::diagnostico::A51D3_COPIADOS.fetch_add(1, Ordering::Relaxed);
+                        if let Ok(mut g) = crate::diagnostico::A51D3_AMOSTRAS.try_lock() {
                             if g.len() < 16 {
-                                g.push([alvo as u64, pres as u64, h[0], pblob]);
+                                g.push([res as u64, novo[0], pb, caminho]);
                             }
                         }
-                        crate::veredito_dev!(
-                            "[a51d] v3 patch {patch:#018x} no morph target {caminho:#018x}: blob novo {:#x} (do patch {pblob:#x}), alvo tinha blob {alvo_tem}, DataBuffer conferidos na cópia {conferida}",
-                            h[0]
-                        );
+                        blob = format!("blob novo {:#x} do patch {pb:#x}", novo[0]);
                     }
                     None => {
-                        A51D3_FALHAS.fetch_add(1, Ordering::Relaxed);
-                        crate::veredito_dev!("[a51d] v3 patch {patch:#018x} no morph target {caminho:#018x}: cópia do blob falhou, alvo intacto");
+                        crate::diagnostico::A51D3_FALHAS.fetch_add(1, Ordering::Relaxed);
+                        blob = "cópia do blob falhou; alvo intacto".into();
                     }
                 }
             }
         }
-        if MORPH_COM_DONO_OFFSETS_OK.load(Ordering::Relaxed) && crate::memoria::is_readable(pres as *const c_void, fim2) && crate::memoria::is_readable(res as *const c_void, fim2) {
-            let caminho_em = |r: *const u8, o: usize| (r.add(o) as *const u64).read_unaligned();
-            let (mesh_a, mesh_p, tex_a, tex_p) = (caminho_em(alvo, o_mesh), caminho_em(pres, o_mesh), caminho_em(alvo, o_tex), caminho_em(pres, o_tex));
-            let (muda_mesh, muda_tex, muda_tg) = plano_do_morph_com_dono(props, mesh_p, tex_p);
-            if muda_mesh {
+        let mut v2 = String::new();
+        if com_dono {
+            let (pmesh, ptex) = (rd(pres, o_mesh), rd(pres, o_tex));
+            let (amesh, atex) = (rd(alvo, o_mesh), rd(alvo, o_tex));
+            let (malha, textura, alvos) = plano_do_morph_com_dono(props, pmesh, ptex);
+            // O token do `Ref` antigo do alvo não é solto: a soltura de `SharedPtr<ResourceToken>` pelo motor não está medida; fica 1 forte
+            // retido por troca.
+            if malha {
                 copiar_ref(alvo.add(o_mesh), pres.add(o_mesh));
             }
-            if muda_tex {
+            if textura {
                 copiar_ref(alvo.add(o_tex), pres.add(o_tex));
             }
-            let n_antes = dynarray_no_campo(alvo.add(o_tg), 0).1;
-            let (s, x, f) = if muda_tg { mesclar_targets_do_morph(alvo, pres, o_tg) } else { (0, 0, 0) };
-            let n_depois = dynarray_no_campo(alvo.add(o_tg), 0).1;
-            if muda_mesh || muda_tex || muda_tg {
-                if let Ok(mut g) = A51D2_AMOSTRAS.try_lock() {
-                    if g.len() < 16 {
-                        g.push(A51d2Amostra {
-                            alvo: alvo as u64,
-                            patch: pres as u64,
-                            mesh: (mesh_a, mesh_p, muda_mesh),
-                            tex: (tex_a, tex_p, muda_tex),
-                            targets: (n_antes, n_depois, s, x, f, muda_tg),
-                        });
-                    }
-                }
-                if crate::primeiras(&MORPH_COM_DONO_LOGADOS, 16) {
-                    crate::veredito_dev!(
-                        "[a51d] v2 patch {patch:#018x} no morph target {caminho:#018x}: baseMesh {muda_mesh} ({mesh_a:#018x} → {mesh_p:#018x}), baseTexture {muda_tex} ({tex_a:#018x} → {tex_p:#018x}), targets {muda_tg}: {n_antes} → {n_depois}, {s} substituído(s), {x} anexado(s), {f} falha(s)"
-                    );
+            let antes = dynarray_no_campo(alvo, o_tg).1;
+            let (s, a, f) = if alvos { mesclar_targets_do_morph(alvo, pres, o_tg) } else { (0, 0, 0) };
+            let depois = dynarray_no_campo(alvo, o_tg).1;
+            if let Ok(mut g) = crate::diagnostico::A51D2_AMOSTRAS.try_lock() {
+                if g.len() < 16 {
+                    g.push(crate::diagnostico::A51d2Amostra {
+                        alvo: res as u64,
+                        patch: pres as u64,
+                        mesh: (amesh, pmesh, malha),
+                        tex: (atex, ptex, textura),
+                        targets: (antes, depois, s, a, f, alvos),
+                    });
                 }
             }
+            v2 = format!("; baseMesh {malha}, baseTexture {textura}, targets {antes} → {depois} ({s} substituída(s), {a} anexada(s), {f} falha(s))");
         }
-        if crate::primeiras(&PATCHES_DE_MORPH_APLICADOS, 16) {
-            crate::veredito_dev!(
-                "[a51d] patch {patch:#018x} no morph target {caminho:#018x}: baseMeshAppearance {muda_app} ({app_p:#x}), baseTextureParamName {muda_param} ({param_p:#x}), boundingBox {muda_box} (Min.X {min_x}, Max.X {max_x})"
-            );
-        }
+        PATCHES_DE_MORPH_APLICADOS.fetch_add(1, Ordering::Relaxed);
+        crate::log_dev!("[a51d] morph {caminho:#018x}: baseMeshAppearance {app}, baseTextureParamName {param}, boundingBox {caixa}; {blob}{v2}");
     }
 }
 
-// ===== ArchiveXL `#51` 51e — `OnStreamingWorldLoad`: `streaming.blocks` anexados ao streaming world (2026-09-12) =====
-// Na referência cada `streaming.blocks` do `.xl` vira patch do `03_night_city.streamingworld` e, quando o mundo termina de desserializar, entra no fim do
-// `blockRefs` com o caminho e o token do patch. Aqui o hook fica no `PostLoad` do `worldStreamingWorld` (`0x101c09aa8`, resolvido pelo `postloadprobe` no
-// boot 102), antes da original: desmontado, ele anda o `blockRefs` (array de 0x18 B em `+0x60` no Mac: caminho `+0x00`, `SharedPtr` do token `+0x08`/`+0x10`),
-// resolve cada ref, confere a classe `worldStreamingBlock` e anexa o handle no array de 0x10 B logo depois (`+0x70`). A ref do patch entra com strong +1 no
-// token; quem resolve é o motor. Offset do `blockRefs` pelo RTTI na carga da tabela.
+// ===== A#51 51e: `worldStreamingWorld` =====
+// `PostLoad` do `worldStreamingWorld` em `0x101c09aa8` (resolvido pelo `postloadprobe`, boot 102). Desmontado, ele anda o `blockRefs` (array de 0x18 B em
+// `+0x60` no Mac: caminho `+0x00`, `SharedPtr` do token `+0x08`/`+0x10`), resolve cada ref, confere a classe `worldStreamingBlock` e anexa o handle no
+// array de 0x10 B logo depois (`+0x70`). Offset do `blockRefs` pelo RTTI na carga da tabela (`guardar_offsets_do_mundo`).
 pub(crate) const WORLD_POSTLOAD_VM: u64 = 0x1_01c0_9aa8;
 
 pub(crate) static ORIG_WORLD_POSTLOAD: AtomicU64 = AtomicU64::new(0);
@@ -3123,61 +3096,70 @@ pub(crate) unsafe fn guardar_offsets_do_mundo(reg: &crate::rtti::Registry) {
     );
 }
 
-/// 51e, no `PostLoad` do `worldStreamingWorld` (thread de job): anexa ao `blockRefs` a ref de cada block da tabela cujo alvo é este mundo.
+/// `blockRefs`: elemento de 0x18 B (caminho, token, contador do `SharedPtr`).
+const BLOCKREF_TAM: usize = 0x18;
+
+/// A#51 51e, no `PostLoad` do `worldStreamingWorld` (thread de job), antes da original: cada bloco de `streaming.blocks` (patch do mundo com
+/// `blocks`) que o `blockRefs` ainda não tem entra nele, com o forte do token +1. Quem resolve a ref é o resto do `PostLoad`.
 pub(crate) unsafe fn mesclar_blocos_no_mundo(mundo: *mut c_void) {
-    if mundo.is_null() || !PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) || !WORLD_OFFSETS_OK.load(Ordering::Relaxed) {
+    if !WORLD_OFFSETS_OK.load(Ordering::Relaxed) || mundo.is_null() {
         return;
     }
-    let alvo = mundo as *mut u8;
-    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
-    let patches: Vec<(u64, [u64; 2])> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g.do_alvo(caminho).filter(|p| p.props & A17_PROP_BLOCKS != 0).map(|p| (p.patch, p.token)).collect(),
-        Err(_) => return,
-    };
     let off = WORLD_BLOCKREFS_OFF.load(Ordering::Relaxed) as usize;
-    if patches.is_empty() || !crate::memoria::is_readable(mundo as *const c_void, off + 0x10) {
+    let m = mundo as *mut u8;
+    if !crate::memoria::is_readable(m as *const c_void, off + 0x10) {
         return;
     }
-    for (patch, pt) in patches {
-        if pt[0] == 0 || pt[1] == 0 {
-            crate::veredito_dev!("[a51e] block {patch:#018x} sem token; fica de fora do mundo {caminho:#018x}");
+    let caminho = (m.add(0x30) as *const u64).read_unaligned();
+    let blocos: Vec<([u64; 2], u64)> = {
+        if caminho == 0 || !PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) {
+            return;
+        }
+        let Ok(t) = PATCHES_DE_RECURSO.read() else { return };
+        t.do_alvo(caminho).filter(|p| p.props & A17_PROP_BLOCKS != 0).map(|p| (p.token, p.patch)).collect()
+    };
+    if blocos.is_empty() {
+        return;
+    }
+    let (mut anexados, mut presentes, mut sem_token) = (0usize, 0usize, 0usize);
+    for (token, bloco) in blocos {
+        if token[0] == 0 || token[1] == 0 {
+            sem_token += 1;
             continue;
         }
-        let pronto = !recurso_do_patch_pronto(pt, 0x38).is_null();
-        let (b, n, cap) = dynarray_no_campo(alvo, off);
-        if n > 0 && !crate::memoria::is_readable(b as *const c_void, n * 0x18) {
+        let (b, n, cap) = dynarray_no_campo(m, off);
+        if n > 0x1_0000 || (n > 0 && !crate::memoria::is_readable(b as *const c_void, n * BLOCKREF_TAM)) {
+            return;
+        }
+        if (0..n).any(|i| (b.add(i * BLOCKREF_TAM) as *const u64).read_unaligned() == bloco) {
+            presentes += 1;
             continue;
         }
-        if (0..n).any(|i| (b.add(i * 0x18) as *const u64).read_unaligned() == patch) {
-            crate::veredito_dev!("[a51e] block {patch:#018x} já está no blockRefs do mundo {caminho:#018x}");
-            continue;
-        }
+        let arr = m.add(off);
         if n + 1 > cap {
-            crate::jogo::listas::reservar(alvo.add(off) as *mut c_void, (n + 1) as u32, 0x18, 8, std::ptr::null());
-            if dynarray_no_campo(alvo, off).2 < n + 1 {
-                crate::veredito_dev!("[a51e] blockRefs do mundo {caminho:#018x} sem capacidade pro block {patch:#018x}");
-                continue;
+            crate::jogo::listas::reservar(arr as *mut c_void, (n + 1) as u32, BLOCKREF_TAM as u32, 8, std::ptr::null());
+            if dynarray_no_campo(m, off).2 < n + 1 {
+                crate::log_dev!("[a51e] blockRefs sem capacidade; bloco {bloco:#018x} fora");
+                return;
             }
         }
-        let dst = dynarray_no_campo(alvo, off).0;
-        (*(pt[1] as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
-        let e = dst.add(n * 0x18);
-        (e as *mut u64).write_unaligned(patch);
-        (e.add(8) as *mut u64).write_unaligned(pt[0]);
-        (e.add(0x10) as *mut u64).write_unaligned(pt[1]);
-        (alvo.add(off + 0x0C) as *mut u32).write_unaligned((n + 1) as u32);
-        if crate::primeiras(&BLOCOS_APLICADOS, 16) {
-            crate::veredito_dev!("[a51e] block {patch:#018x} anexado ao mundo {caminho:#018x}: blockRefs {n} → {}; patch pronto {pronto}", n + 1);
-        }
+        crate::register::handle_strong_soma(&token, 1);
+        let e = dynarray_no_campo(m, off).0.add(n * BLOCKREF_TAM) as *mut u64;
+        e.write_unaligned(bloco);
+        e.add(1).write_unaligned(token[0]);
+        e.add(2).write_unaligned(token[1]);
+        (arr.add(0x0c) as *mut u32).write_unaligned((n + 1) as u32);
+        anexados += 1;
     }
+    crate::log_dev!("[a51e] mundo {caminho:#018x}: {anexados} bloco(s) anexado(s), {presentes} já presente(s), {sem_token} sem token");
 }
 
+/// Gancho do `PostLoad` do `worldStreamingWorld` (`WORLD_POSTLOAD_VM`): guarda o mundo pra 51j (o último visto), mescla os blocos e chama a original.
 pub(crate) unsafe extern "C" fn world_postload_replacement(this: *mut c_void, a1: u64, a2: u64) {
-    // 51j-a: o último streaming world visto, pra sonda do `SetPersistentStateData` achar o `persistentStateData` dele.
-    A51J_MUNDO.store(this as u64, Ordering::Relaxed);
+    crate::diagnostico::A51J_MUNDO.store(this as u64, Ordering::Relaxed);
     mesclar_blocos_no_mundo(this);
-    let f: PostLoadFn = std::mem::transmute(original_publicado(&ORIG_WORLD_POSTLOAD));
-    f(this, a1, a2);
+    let orig: unsafe extern "C" fn(*mut c_void, u64, u64) = std::mem::transmute(original_publicado(&ORIG_WORLD_POSTLOAD));
+    orig(this, a1, a2);
 }
 
 /// Pares `(instância nova no resultado, instância trocada que foi pro patch)` dos substituídos do plano, sobre os dois arrays já mesclados.
@@ -3250,165 +3232,171 @@ pub(crate) unsafe fn guardar_offsets_do_device_resource(reg: &crate::rtti::Regis
     ok
 }
 
-/// 51i-1, no `PostLoad` do `CMesh` (thread de job, antes da original): nomes de material mapeados pelo fix do caminho do mesh. Só memória.
+/// A#51 51i-1, no `PostLoad` do `CMesh`: nomes de material do `resource.fix` (`aparencia::FIXES_DE_NOME_DO_MESH`).
 pub(crate) unsafe fn aplicar_fix_de_nomes(mesh: *mut c_void) {
-    if !CMESH_OFFSETS_OK.load(Ordering::Relaxed) || mesh.is_null() || !crate::memoria::is_readable(mesh as *const c_void, 0x1f0) {
+    if !CMESH_OFFSETS_OK.load(Ordering::Relaxed) || mesh.is_null() {
         return;
     }
-    let caminho = ((mesh as *const u8).add(0x30) as *const u64).read_unaligned();
-    let pares: Vec<(u64, u64)> = match FIXES_DE_NOME_DO_MESH.try_read() {
-        Ok(g) => match g.as_ref().and_then(|m| m.get(&caminho)) {
-            Some(p) => p.clone(),
-            None => return,
+    let m = mesh as *mut u8;
+    if !crate::memoria::is_readable(m as *const c_void, CMESH_APPEARANCES_OFF + 0x10) {
+        return;
+    }
+    let caminho = (m.add(CMESH_CAMINHO_OFF) as *const u64).read_unaligned();
+    let pares = match FIXES_DE_NOME_DO_MESH.read() {
+        Ok(g) => match g.as_ref().and_then(|t| t.get(&caminho)) {
+            Some(p) if !p.is_empty() => p.clone(),
+            _ => return,
         },
         Err(_) => return,
     };
-    let mapear = |p: *mut u64| -> bool {
-        let v = p.read_unaligned();
-        match pares.iter().find(|(a, _)| *a == v) {
-            Some((_, n)) => {
-                p.write_unaligned(*n);
-                true
-            }
-            None => false,
-        }
-    };
-    let (mut chunks, mut entradas) = (0usize, 0usize);
-    let (ab, an, _) = dynarray_no_campo(mesh as *const u8, 0x1e0);
+    let novo_de = |nome: u64| pares.iter().find(|(antigo, _)| *antigo == nome).map(|&(_, novo)| novo);
+    let mut trocados = 0u64;
+    let (ab, an, _) = dynarray_no_campo(m, CMESH_APPEARANCES_OFF);
     if an <= 4096 && (an == 0 || crate::memoria::is_readable(ab as *const c_void, an * 16)) {
         for i in 0..an {
-            let inst = (ab.add(i * 16) as *const u64).read_unaligned();
-            if inst == 0 || !crate::memoria::is_readable(inst as *const c_void, 0x48) {
+            let ap = (ab.add(i * 16) as *const u64).read_unaligned() as *mut u8;
+            if ap.is_null() || !crate::memoria::is_readable(ap as *const c_void, MESHAPPEARANCE_CHUNKMATERIALS_OFF + 0x10) {
                 continue;
             }
-            let (cb, cn, _) = dynarray_no_campo(inst as *const u8, 0x38);
-            if cn <= 4096 && (cn == 0 || crate::memoria::is_readable(cb as *const c_void, cn * 8)) {
-                for k in 0..cn {
-                    chunks += mapear(cb.add(k * 8) as *mut u64) as usize;
+            let (cb, cn, _) = dynarray_no_campo(ap, MESHAPPEARANCE_CHUNKMATERIALS_OFF);
+            if cn > 0x1_0000 || (cn > 0 && !crate::memoria::is_readable(cb as *const c_void, cn * 8)) {
+                continue;
+            }
+            for k in 0..cn {
+                let slot = cb.add(k * 8) as *mut u64;
+                if let Some(novo) = novo_de(slot.read_unaligned()) {
+                    slot.write_unaligned(novo);
+                    trocados += 1;
                 }
             }
         }
     }
-    let (eb, en, _) = dynarray_no_campo(mesh as *const u8, 0xe0);
-    if en <= 4096 && (en == 0 || crate::memoria::is_readable(eb as *const c_void, en * 0x30)) {
+    let (eb, en, _) = dynarray_no_campo(m, CMESH_MATERIALENTRIES_OFF);
+    if en <= 0x1_0000 && (en == 0 || crate::memoria::is_readable(eb as *const c_void, en * CMESHMATERIALENTRY_TAMANHO)) {
         for k in 0..en {
-            entradas += mapear(eb.add(k * 0x30 + 0x20) as *mut u64) as usize;
+            let slot = eb.add(k * CMESHMATERIALENTRY_TAMANHO + 0x20) as *mut u64;
+            if let Some(novo) = novo_de(slot.read_unaligned()) {
+                slot.write_unaligned(novo);
+                trocados += 1;
+            }
         }
     }
-    A51I_MESHES.fetch_add(1, Ordering::Relaxed);
-    A51I_NOMES.fetch_add((chunks + entradas) as u64, Ordering::Relaxed);
-    if crate::primeiras(&A51I_LOGADOS, 16) {
-        crate::veredito_dev!(
-            "[a51i] fix no mesh {caminho:#018x} ({mesh:p}): {an} aparência(s), {chunks} chunkMaterials e {entradas}/{en} materialEntries remapeados por {} par(es)",
-            pares.len()
-        );
+    crate::diagnostico::A51I_MESHES.fetch_add(1, Ordering::Relaxed);
+    crate::diagnostico::A51I_NOMES.fetch_add(trocados, Ordering::Relaxed);
+    if crate::primeiras(&crate::diagnostico::A51I_LOGADOS, 8) {
+        crate::veredito_dev!("[a51i] fix de nomes no mesh {caminho:#018x}: {trocados} nome(s) trocado(s)");
     }
 }
 
-// ===== ArchiveXL `#51` 51i-2 — `appearances` do `OnMeshResourceLoad` (2026-09-12) =====
-// A referência, pra cada patch do mesh com `appearances` (e aparências no patch): clona cada `meshMeshAppearance` do patch (nome e `chunkMaterials`) com as
-// tags `[ResourcePatch, expansão, origem]` — expansão = a única tag da aparência do patch quando ela tem uma (o valor fica pras seguintes), origem = o
-// `RegisterMeshPatch` da extensão Mesh —; mesmo nome troca a aparência do alvo quando ela não tem `chunkMaterials` ou o clone tem; nome novo anexa; no fim
-// `forceLoadAllAppearances` = falso. A origem sai do `RegisterMeshPatch` do 48d-1 (`None` com o 48a desligado ou patch sem `materialEntries`, como na
-// referência); o clone sai do `CClass::CreateInstance` e do construtor de `Handle` do motor, na thread de job do `PostLoad`, como o desserializador faz.
+// ===== A#51 51i-2: `appearances` do `CMesh` =====
+// Layout do `CMesh` (2.5, Mac): caminho `+0x30`; `appearances` `DynArray<Handle<meshMeshAppearance>>` em `+0x1e0`; `forceLoadAllAppearances` (u8) `+0x6d`;
+// `materialEntries` (0x30 B, nome em `+0x20`) em `+0xe0`; `renderResourceBlob` (`Handle`) em `+0x1f8`. `meshMeshAppearance`: nome `+0x30`,
+// `chunkMaterials` `DynArray<CName>` `+0x38`, `tags` `DynArray<CName>` `+0x58`.
 pub(crate) static MESCLA_DE_APARENCIA_DO_MESH_ATIVA: AtomicBool = AtomicBool::new(false);
 
 pub(crate) static CLASSE_CMESH: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
-/// 51i-2, no `PostLoad` do `CMesh` (thread de job, depois do fix de nomes e antes da original): aparências de cada patch da tabela cujo alvo é este mesh.
+/// A#51 51i-2, no `PostLoad` do `CMesh` (thread de job).
 pub(crate) unsafe fn mesclar_aparencias_no_mesh(mesh: *mut c_void) {
-    if !MESCLA_DE_APARENCIA_DO_MESH_ATIVA.load(Ordering::Relaxed) || mesh.is_null() || !crate::memoria::is_readable(mesh as *const c_void, 0x230) {
+    if !MESCLA_DE_APARENCIA_DO_MESH_ATIVA.load(Ordering::Relaxed) || mesh.is_null() {
         return;
     }
     let alvo = mesh as *mut u8;
-    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
-    let patches: Vec<(u64, [u64; 2])> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g.do_alvo(caminho).filter(|p| p.props & A17_PROP_APPEARANCES != 0).map(|p| (p.patch, p.token)).collect(),
-        Err(_) => return,
+    let fim = CMESH_LEGIVEL;
+    if !crate::memoria::is_readable(alvo as *const c_void, fim) {
+        return;
+    }
+    let caminho = (alvo.add(CMESH_CAMINHO_OFF) as *const u64).read_unaligned();
+    let patches = patches_do_alvo(caminho, A17_PROP_APPEARANCES);
+    let classe = CLASSE_CMESH.load(Ordering::Relaxed);
+    let nome_de = |ap: u64| -> Option<u64> {
+        (ap != 0 && crate::memoria::is_readable(ap as *const c_void, 0x68)).then(|| ((ap + 0x30) as *const u64).read_unaligned())
     };
-    for (patch, pt) in patches {
-        let pres = recurso_do_patch_da_classe(pt, 0x230, CLASSE_CMESH.load(Ordering::Relaxed));
+    for (pt, _) in patches {
+        let pres = recurso_do_patch_da_classe(pt, fim, classe) as *mut u8;
         if pres.is_null() {
-            if crate::primeiras(&A51I2_NAO_PRONTOS, 8) {
-                crate::veredito_dev!("[a51i] patch {patch:#018x} do mesh {caminho:#018x} não ficou pronto; aparências de fora");
-            }
+            crate::diagnostico::A51I2_NAO_PRONTOS.fetch_add(1, Ordering::Relaxed);
             continue;
         }
-        let (pb, pn, _) = dynarray_no_campo(pres, 0x1e0);
-        if pn == 0 || pn > 4096 || !crate::memoria::is_readable(pb as *const c_void, pn * 16) {
+        let paps = handles_do_dynarray(pres.add(CMESH_APPEARANCES_OFF));
+        if paps.is_empty() {
             continue;
         }
-        let (origem, mut expansao) = (registrar_patch_de_mesh(alvo, pres as *mut u8), 0u64);
-        let (mut trocadas, mut anexadas, mut falhas) = (0usize, 0usize, 0usize);
-        for j in 0..pn {
-            let pinst = (pb.add(j * 16) as *const u64).read_unaligned() as *const u8;
-            if pinst.is_null() || !crate::memoria::is_readable(pinst as *const c_void, 0x68) {
+        let origem = registrar_patch_de_mesh(alvo, pres);
+        let mut expansao = 0u64;
+        let (mut trocadas, mut anexadas, mut falhas) = (0u64, 0u64, 0u64);
+        for ph in &paps {
+            let pinst = ph[0] as *const u8;
+            if nome_de(ph[0]).is_none() {
                 falhas += 1;
                 continue;
             }
-            let nome = (pinst.add(0x30) as *const u64).read_unaligned();
-            let (ptb, ptn, _) = dynarray_no_campo(pinst, 0x58);
-            if ptn == 1 && crate::memoria::is_readable(ptb as *const c_void, 8) {
-                expansao = (ptb as *const u64).read_unaligned();
+            // A tag única de uma aparência do patch passa a ser a expansão dela e das seguintes.
+            if let Some(tags) = lista_de_u64(pinst, 0x58) {
+                if tags.len() == 1 {
+                    expansao = tags[0];
+                }
             }
             let Some(mut clone) = clonar_aparencia_do_mesh(pinst, expansao, origem) else {
                 falhas += 1;
                 continue;
             };
-            let clone_com_chunks = dynarray_no_campo(clone[0] as *const u8, 0x38).1 > 0;
-            let arr = alvo.add(0x1e0);
-            let (ab, an, _) = dynarray_no_campo(arr, 0);
-            let existente = (0..an).find(|&i| {
-                let ei = (ab.add(i * 16) as *const u64).read_unaligned();
-                ei != 0 && crate::memoria::is_readable(ei as *const c_void, 0x48) && ((ei + 0x30) as *const u64).read_unaligned() == nome
-            });
-            match existente {
+            let Some(nome) = nome_de(clone[0]) else {
+                crate::jogo::objetos::soltar_handle(&mut clone);
+                falhas += 1;
+                continue;
+            };
+            let arr = alvo.add(CMESH_APPEARANCES_OFF);
+            let atuais = handles_do_dynarray(arr);
+            if dynarray_no_campo(alvo, CMESH_APPEARANCES_OFF).1 != atuais.len() {
+                crate::jogo::objetos::soltar_handle(&mut clone);
+                falhas += 1;
+                continue;
+            }
+            let tem_chunks = |ap: u64| lista_de_u64(ap as *const u8, MESHAPPEARANCE_CHUNKMATERIALS_OFF).is_some_and(|c| !c.is_empty());
+            match atuais.iter().position(|h| nome_de(h[0]) == Some(nome)) {
                 Some(i) => {
-                    let slot = ab.add(i * 16) as *mut [u64; 2];
-                    let ei = (*slot)[0] as *const u8;
-                    if dynarray_no_campo(ei, 0x38).1 == 0 || clone_com_chunks {
-                        let mut velho = slot.read_unaligned();
+                    if !tem_chunks(atuais[i][0]) || tem_chunks(clone[0]) {
+                        let slot = (dynarray_no_campo(alvo, CMESH_APPEARANCES_OFF).0 as *mut [u64; 2]).add(i);
+                        let mut antigo = slot.read_unaligned();
                         slot.write_unaligned(clone);
-                        crate::jogo::objetos::soltar_handle(&mut velho);
+                        crate::jogo::objetos::soltar_handle(&mut antigo);
                         trocadas += 1;
                     } else {
                         crate::jogo::objetos::soltar_handle(&mut clone);
-                        continue;
                     }
                 }
                 None => {
-                    if an + 1 > dynarray_no_campo(arr, 0).2 {
-                        let mover = if an == 0 { std::ptr::null() } else { crate::rebase(MOVER_HANDLES_VM) as *const c_void };
-                        crate::jogo::listas::reservar(arr as *mut c_void, (an + 1) as u32, 0x10, 8, mover);
-                        if dynarray_no_campo(arr, 0).2 < an + 1 {
-                            crate::jogo::objetos::soltar_handle(&mut clone);
-                            falhas += 1;
-                            continue;
-                        }
+                    if anexar_handle_no_array(arr, clone) {
+                        anexadas += 1;
+                    } else {
+                        crate::jogo::objetos::soltar_handle(&mut clone);
+                        falhas += 1;
+                        continue;
                     }
-                    (dynarray_no_campo(arr, 0).0.add(an * 16) as *mut [u64; 2]).write_unaligned(clone);
-                    (arr.add(0x0c) as *mut u32).write_unaligned((an + 1) as u32);
-                    anexadas += 1;
                 }
             }
-            if let Ok(mut g) = A51I2_AMOSTRAS.try_lock() {
+            if let Ok(mut g) = crate::diagnostico::A51I2_AMOSTRAS.try_lock() {
                 if g.len() < 32 {
-                    g.push([caminho, patch, nome, clone[0]]);
+                    g.push([caminho, nome, clone[0], ph[0]]);
                 }
             }
         }
-        (alvo.add(0x6d) as *mut u8).write(0);
-        A51I2_TROCADAS.fetch_add(trocadas as u64, Ordering::Relaxed);
-        A51I2_ANEXADAS.fetch_add(anexadas as u64, Ordering::Relaxed);
-        A51I2_FALHAS.fetch_add(falhas as u64, Ordering::Relaxed);
-        if crate::primeiras(&A51I2_LOGADOS, 16) {
-            crate::veredito_dev!(
-                "[a51i] patch {patch:#018x} no mesh {caminho:#018x} ({mesh:p}): {pn} aparência(s) no patch, {trocadas} trocada(s), {anexadas} anexada(s), {falhas} falha(s); aparências do alvo agora {}",
-                dynarray_no_campo(alvo, 0x1e0).1
-            );
+        // `forceLoadAllAppearances` desligado: com as aparências do patch, o mesh carrega só a pedida.
+        alvo.add(0x6d).write(0);
+        crate::diagnostico::A51I2_TROCADAS.fetch_add(trocadas, Ordering::Relaxed);
+        crate::diagnostico::A51I2_ANEXADAS.fetch_add(anexadas, Ordering::Relaxed);
+        crate::diagnostico::A51I2_FALHAS.fetch_add(falhas, Ordering::Relaxed);
+        if crate::primeiras(&crate::diagnostico::A51I2_LOGADOS, 8) {
+            crate::veredito_dev!("[a51i] mesh {caminho:#018x}: {} aparência(s) do patch, {trocadas} trocada(s), {anexadas} anexada(s), {falhas} falha(s)", paps.len());
         }
     }
 }
+
+/// `CMesh` legível até aqui (o último campo usado pelas mesclas é o `MaterialLock` em `+0x218`).
+const CMESH_LEGIVEL: usize = 0x230;
+/// `CMesh.renderResourceBlob` (`Handle<rendRenderMeshBlob>`).
+const CMESH_RENDERBLOB_OFF: usize = 0x1f8;
 
 pub(crate) static CLASSE_RENDERMESHBLOB: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -3432,17 +3420,41 @@ pub(crate) unsafe fn copiar_lista_aninhada(dst: *mut u8, src: *const u8, elem: u
     true
 }
 
-/// `rendRenderMeshBlobHeader` do patch no blob novo, com cópia funda das listas.
+/// `rendRenderMeshBlobHeader` (0xE0 B, em `blob+0x30`) do patch no blob novo, com cópia funda das listas.
 pub(crate) unsafe fn copiar_header_do_blob(dst: *mut u8, src: *const u8) -> bool {
-    std::ptr::copy_nonoverlapping(src, dst, 0x08);
-    std::ptr::copy_nonoverlapping(src.add(0xA8), dst.add(0xA8), 0x38);
-    let simples: [(usize, usize, u32); 8] = [(0x08, 0x10, 0x10), (0x18, 4, 4), (0x28, 1, 1), (0x48, 1, 1), (0x58, 1, 1), (0x68, 1, 1), (0x78, 1, 1), (0x88, 1, 1)];
-    for (off, e, alin) in simples {
-        if !copiar_dynarray(dst.add(off), src.add(off), e, alin) {
-            return false;
+    let tipo = tipo_do_header_do_render_blob();
+    !tipo.is_null() && crate::rtti::type_assign(tipo, dst as *mut c_void, src as *const c_void)
+}
+
+/// `rendRenderMeshBlob.header` em `+0x30`.
+const RENDERBLOB_HEADER_OFF: usize = 0x30;
+/// `rendRenderMeshBlob.renderBuffer` (`DataBuffer`) em `+0x110`; o blob é legível até 0x140.
+const RENDERBLOB_BUFFER_OFF: usize = 0x110;
+const RENDERBLOB_LEGIVEL: usize = 0x140;
+
+static TIPO_RENDER_BLOB_HEADER: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+/// Tipo do `header` do `rendRenderMeshBlob` pelo RTTI, conferido no offset. A cópia do header vai pelo `Assign` do próprio tipo, que copia cada
+/// lista (inclusive as aninhadas) em memória do motor: o layout das listas não precisa ser repetido aqui.
+unsafe fn tipo_do_header_do_render_blob() -> *mut c_void {
+    let t = TIPO_RENDER_BLOB_HEADER.load(Ordering::Relaxed);
+    if !t.is_null() {
+        return t;
+    }
+    let cls = CLASSE_RENDERMESHBLOB.load(Ordering::Relaxed);
+    if cls.is_null() {
+        return std::ptr::null_mut();
+    }
+    match crate::rtti::resolve_prop_in_class(cls, "header") {
+        Some((off, tipo, _)) if off as usize == RENDERBLOB_HEADER_OFF && crate::rtti::sane(tipo) => {
+            TIPO_RENDER_BLOB_HEADER.store(tipo, Ordering::Relaxed);
+            tipo
+        }
+        lido => {
+            crate::log_dev!("[a51i] header do rendRenderMeshBlob pelo RTTI fora do esperado: {:?}", lido.map(|(o, _, _)| o));
+            std::ptr::null_mut()
         }
     }
-    copiar_lista_aninhada(dst.add(0x38), src.add(0x38), 0xF8, &[(0xD8, 8, 8)]) && copiar_lista_aninhada(dst.add(0x98), src.add(0x98), 0x28, &[(0x08, 1, 1), (0x18, 1, 1)])
 }
 
 /// `DataBuffer` do patch no destino: alocador copiado, dados alocados por ele com o tamanho e o alinhamento do patch e copiados. Patch sem dados não muda nada.
@@ -3467,67 +3479,74 @@ pub(crate) unsafe fn copiar_databuffer(dst: *mut u8, src: *const u8) -> bool {
     true
 }
 
-/// Os 16 campos do mesh que a referência copia junto com o blob.
+/// Campos de topo do `CMesh` que acompanham o blob na 51i-3.
 pub(crate) unsafe fn copiar_campos_do_mesh(dst: *mut u8, src: *const u8) -> bool {
-    std::ptr::copy_nonoverlapping(src.add(0x40), dst.add(0x40), 0x2c);
-    for off in [0x6c, 0x6e, 0x6f, 0x208, 0x209, 0x20a, 0x20b, 0x219] {
-        dst.add(off).write(src.add(off).read());
+    // As listas primeiro: só elas podem falhar (reserve sem capacidade), e aí o mesh fica com os escalares de antes.
+    for &(off, elem, alin) in CMESH_LISTAS_DO_BLOB {
+        if !copiar_dynarray(dst.add(off), src.add(off), elem, alin) {
+            return false;
+        }
     }
-    [(0x80, 8, 8), (0x90, 0x40, 0x10), (0xa0, 4, 4), (0xb0, 1, 1), (0xc0, 8, 8), (0xd0, 4, 4)]
-        .into_iter()
-        .all(|(off, e, alin)| copiar_dynarray(dst.add(off), src.add(off), e, alin))
+    for &(off, tam) in CMESH_BYTES_DO_BLOB {
+        std::ptr::copy_nonoverlapping(src.add(off), dst.add(off), tam);
+    }
+    true
 }
 
-/// 51i-3, no `PostLoad` do `CMesh` (thread de job, depois das aparências e antes da original): blob e campos de cada patch com `renderResourceBlob`.
+/// Campos de topo do `CMesh` que descrevem a geometria do blob: limites e área (bloco de 0x2c B em `+0x40`), bytes de configuração em `+0x6c`,
+/// `+0x6e..+0x6f`, `+0x208..+0x20b` e `+0x219`, `(offset, tamanho)`. O `forceLoadAllAppearances` (`+0x6d`) fica de fora: é das aparências, e a
+/// mescla delas (51i-2) o deixa em 0.
+const CMESH_BYTES_DO_BLOB: &[(usize, usize)] = &[(0x40, 0x2c), (0x6c, 1), (0x6e, 2), (0x208, 4), (0x219, 1)];
+/// Listas do `CMesh` que o blob indexa (ossos, matrizes de rig, epsilons, máscaras e LODs), `(offset, elemento, alinhamento)`.
+const CMESH_LISTAS_DO_BLOB: &[(usize, usize, u32)] = &[(0x80, 8, 8), (0x90, 0x40, 0x10), (0xa0, 4, 4), (0xb0, 1, 1), (0xc0, 8, 8), (0xd0, 4, 4)];
+
+/// A#51 51i-3, no `PostLoad` do `CMesh` (thread de job), antes da original: o alvo recebe um `rendRenderMeshBlob` NOVO com o conteúdo do blob do
+/// patch e os campos de topo que o acompanham; o handle antigo é solto. Cópia que falha deixa o alvo intacto.
 pub(crate) unsafe fn mesclar_blob_no_mesh(mesh: *mut c_void) {
-    if !MESCLA_DE_RENDER_BLOB_ATIVA.load(Ordering::Relaxed) || mesh.is_null() || !crate::memoria::is_readable(mesh as *const c_void, 0x230) {
+    if !MESCLA_DE_RENDER_BLOB_ATIVA.load(Ordering::Relaxed) || mesh.is_null() {
         return;
     }
     let alvo = mesh as *mut u8;
-    let caminho = (alvo.add(0x30) as *const u64).read_unaligned();
-    let patches: Vec<(u64, [u64; 2], u32)> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g.do_alvo(caminho).filter(|p| p.props & A17_PROP_RENDERBLOB != 0).map(|p| (p.patch, p.token, p.props)).collect(),
-        Err(_) => return,
-    };
-    for (patch, pt, props) in patches {
-        let pres = recurso_do_patch_da_classe(pt, 0x230, CLASSE_CMESH.load(Ordering::Relaxed));
+    if !crate::memoria::is_readable(alvo as *const c_void, CMESH_LEGIVEL) {
+        return;
+    }
+    let caminho = (alvo.add(CMESH_CAMINHO_OFF) as *const u64).read_unaligned();
+    let patches = patches_do_alvo(caminho, A17_PROP_RENDERBLOB);
+    let (classe, classe_blob) = (CLASSE_CMESH.load(Ordering::Relaxed), CLASSE_RENDERMESHBLOB.load(Ordering::Relaxed));
+    for (pt, props) in patches {
+        let pres = recurso_do_patch_da_classe(pt, CMESH_LEGIVEL, classe);
         if pres.is_null() {
             continue;
         }
-        let pblob = (pres.add(0x1f8) as *const u64).read_unaligned();
-        let alvo_tem = (alvo.add(0x1f8) as *const u64).read_unaligned() != 0;
-        let cls = CLASSE_RENDERMESHBLOB.load(Ordering::Relaxed);
-        if !render_blob_muda(props, pblob != 0, alvo_tem) || !crate::memoria::is_readable(pblob as *const c_void, 0x140) || !class_is_kind_of(crate::rtti::class_of(pblob as *mut c_void), cls) {
+        let pb = (pres.add(CMESH_RENDERBLOB_OFF) as *const u64).read_unaligned();
+        let ab = (alvo.add(CMESH_RENDERBLOB_OFF) as *const u64).read_unaligned();
+        let da_classe = pb != 0
+            && crate::memoria::is_readable(pb as *const c_void, RENDERBLOB_LEGIVEL)
+            && crate::register::class_is_kind_of(crate::rtti::class_of(pb as *mut c_void), classe_blob);
+        if !render_blob_muda(props, pb != 0, ab != 0) || !da_classe {
             continue;
         }
-        let pb = pblob as *const u8;
-        let Some(h) = novo_render_mesh_blob(pb) else {
-            A51I3_FALHAS.fetch_add(1, Ordering::Relaxed);
-            crate::veredito_dev!("[a51i] blob do patch {patch:#018x} no mesh {caminho:#018x}: cópia falhou, alvo intacto");
+        let Some(mut novo) = novo_render_mesh_blob(pb as *const u8) else {
+            crate::diagnostico::A51I3_FALHAS.fetch_add(1, Ordering::Relaxed);
             continue;
         };
-        let slot = alvo.add(0x1f8) as *mut [u64; 2];
-        let mut velho = slot.read_unaligned();
-        slot.write_unaligned(h);
-        if velho[0] != 0 {
-            crate::jogo::objetos::soltar_handle(&mut velho);
+        if !copiar_campos_do_mesh(alvo, pres) {
+            crate::jogo::objetos::soltar_handle(&mut novo);
+            crate::diagnostico::A51I3_FALHAS.fetch_add(1, Ordering::Relaxed);
+            continue;
         }
-        let campos = copiar_campos_do_mesh(alvo, pres);
-        A51I3_COPIADOS.fetch_add(1, Ordering::Relaxed);
-        // Conferência na hora da cópia: o motor pode soltar o `renderBuffer` do alvo depois do `PostLoad` (boot 122: 1177908 B na cópia, 0 B no tick).
-        let conferida = a51_databuffer_igual((h[0] as *const u8).add(0x110), pb.add(0x110));
-        (if conferida { &A51I3_CONFERIDAS } else { &A51I3_DIVERGENTES }).fetch_add(1, Ordering::Relaxed);
-        if let Ok(mut g) = A51I3_AMOSTRAS.try_lock() {
+        let slot = alvo.add(CMESH_RENDERBLOB_OFF) as *mut [u64; 2];
+        let mut antigo = slot.read_unaligned();
+        slot.write_unaligned(novo);
+        crate::jogo::objetos::soltar_handle(&mut antigo);
+        crate::diagnostico::A51I3_COPIADOS.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut g) = crate::diagnostico::A51I3_AMOSTRAS.try_lock() {
             if g.len() < 16 {
-                g.push([caminho, patch, h[0], pblob]);
+                g.push([caminho, novo[0], pb, ab]);
             }
         }
-        if crate::primeiras(&A51I3_LOGADOS, 16) {
-            crate::veredito_dev!(
-                "[a51i] blob do patch {patch:#018x} no mesh {caminho:#018x}: blob novo {:#x} (do patch {pblob:#x}), renderBuffer {} B conferido na cópia {conferida}, alvo tinha blob {alvo_tem}, campos do mesh copiados {campos}",
-                h[0],
-                ((pb.add(0x118)) as *const u32).read_unaligned()
-            );
+        if crate::primeiras(&crate::diagnostico::A51I3_LOGADOS, 8) {
+            crate::veredito_dev!("[a51i] blob do patch no mesh {caminho:#018x}: blob novo {:#x} (do patch {pb:#x}), alvo tinha blob {}", novo[0], ab != 0);
         }
     }
 }
@@ -3538,66 +3557,83 @@ pub(crate) static TIPO_MORPH_BLOB_HEADER: AtomicPtr<c_void> = AtomicPtr::new(std
 
 pub(crate) static TIPO_DEFERREDDATABUFFER: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
-/// `rendRenderMeshBlob` novo com o header e o `renderBuffer` do blob `pb` (o `CopyRenderBlob` do mesh), num `Handle` do motor.
+/// `rendRenderMeshBlob` novo, num `Handle` do motor, com o conteúdo do blob `pb` do patch.
 pub(crate) unsafe fn novo_render_mesh_blob(pb: *const u8) -> Option<[u64; 2]> {
-    let obj = crate::rtti::create_instance(CLASSE_RENDERMESHBLOB.load(Ordering::Relaxed));
-    if obj.is_null() {
-        return None;
-    }
-    let mut h = [0u64; 2];
-    crate::rtti::make_handle(h.as_mut_ptr() as *mut c_void, obj);
-    if h[0] == 0 {
-        return None;
-    }
+    let mut h = novo_objeto_com_handle(CLASSE_RENDERMESHBLOB.load(Ordering::Relaxed))?;
     let novo = h[0] as *mut u8;
-    if copiar_header_do_blob(novo.add(0x30), pb.add(0x30)) && copiar_databuffer(novo.add(0x110), pb.add(0x110)) {
-        Some(h)
-    } else {
+    if !copiar_header_do_blob(novo.add(RENDERBLOB_HEADER_OFF), pb.add(RENDERBLOB_HEADER_OFF))
+        || !copiar_databuffer(novo.add(RENDERBLOB_BUFFER_OFF), pb.add(RENDERBLOB_BUFFER_OFF))
+    {
         crate::jogo::objetos::soltar_handle(&mut h);
-        None
-    }
-}
-
-/// `rendRenderMorphTargetMeshBlob` novo a partir do blob `pb` do patch, como o `CopyRenderBlob` do morph.
-pub(crate) unsafe fn novo_morph_blob(pb: *const u8) -> Option<[u64; 2]> {
-    let obj = crate::rtti::create_instance(CLASSE_RENDERMORPHTARGETMESHBLOB.load(Ordering::Relaxed));
-    if obj.is_null() {
         return None;
-    }
-    let mut h = [0u64; 2];
-    crate::rtti::make_handle(h.as_mut_ptr() as *mut c_void, obj);
-    if h[0] == 0 {
-        return None;
-    }
-    let novo = h[0] as *mut u8;
-    let base = (pb.add(0x30) as *const u64).read_unaligned();
-    let base_e_mesh = base != 0 && crate::memoria::is_readable(base as *const c_void, 0x140) && class_is_kind_of(crate::rtti::class_of(base as *mut c_void), CLASSE_RENDERMESHBLOB.load(Ordering::Relaxed));
-    if base_e_mesh {
-        let ok = crate::rtti::type_assign(TIPO_MORPH_BLOB_HEADER.load(Ordering::Relaxed), novo.add(0x40) as *mut c_void, pb.add(0x40) as *const c_void)
-            && match novo_render_mesh_blob(base as *const u8) {
-                Some(hb) => {
-                    (novo.add(0x30) as *mut [u64; 2]).write_unaligned(hb);
-                    true
-                }
-                None => false,
-            }
-            && copiar_databuffer(novo.add(0xc0), pb.add(0xc0))
-            && copiar_databuffer(novo.add(0xe8), pb.add(0xe8))
-            && crate::rtti::type_assign(TIPO_DEFERREDDATABUFFER.load(Ordering::Relaxed), novo.add(0x110) as *mut c_void, pb.add(0x110) as *const c_void);
-        if !ok {
-            crate::jogo::objetos::soltar_handle(&mut h);
-            return None;
-        }
     }
     Some(h)
 }
 
-// ===== ArchiveXL `#51` 51b v2 — schema de tags criado no template alvo que não tem (2026-09-12) =====
+/// Instância nova da classe pelo `CreateInstance` do motor, num `Handle` com o forte de quem chama; `None` com classe nula ou criação falha.
+unsafe fn novo_objeto_com_handle(cls: *mut c_void) -> Option<[u64; 2]> {
+    if cls.is_null() {
+        return None;
+    }
+    let obj = crate::rtti::create_instance(cls);
+    if obj.is_null() {
+        return None;
+    }
+    let mut h = [0u64; 2];
+    crate::rtti::make_handle(h.as_mut_ptr() as *mut c_void, obj);
+    (h[0] != 0 && h[1] != 0).then_some(h)
+}
+
+/// `rendRenderMorphTargetMeshBlob`: `baseBlob` `+0x30`, `header` `+0x40`, `diffsBuffer` `+0xc0`, `mappingBuffer` `+0xe8`, `textureDiffsBuffer`
+/// `+0x110`; legível até 0x168.
+const MORPHBLOB_BASE_OFF: usize = 0x30;
+const MORPHBLOB_HEADER_OFF: usize = 0x40;
+const MORPHBLOB_DIFFS_OFF: usize = 0xc0;
+const MORPHBLOB_MAPPING_OFF: usize = 0xe8;
+const MORPHBLOB_TEXDIFFS_OFF: usize = 0x110;
+const MORPHBLOB_LEGIVEL: usize = 0x168;
+
+/// `rendRenderMorphTargetMeshBlob` novo, num `Handle` do motor, com o conteúdo do blob `pb` do patch: com o `baseBlob` do patch sendo
+/// `rendRenderMeshBlob`, o novo recebe o header, um `baseBlob` novo, os dois `DataBuffer` e o `textureDiffsBuffer`. Passo que falha solta o novo.
+pub(crate) unsafe fn novo_morph_blob(pb: *const u8) -> Option<[u64; 2]> {
+    if !crate::memoria::is_readable(pb as *const c_void, MORPHBLOB_LEGIVEL) {
+        return None;
+    }
+    let mut h = novo_objeto_com_handle(CLASSE_RENDERMORPHTARGETMESHBLOB.load(Ordering::Relaxed))?;
+    let novo = h[0] as *mut u8;
+    let base = (pb.add(MORPHBLOB_BASE_OFF) as *const u64).read_unaligned();
+    let base_ok = base != 0
+        && crate::memoria::is_readable(base as *const c_void, RENDERBLOB_LEGIVEL)
+        && crate::register::class_is_kind_of(crate::rtti::class_of(base as *mut c_void), CLASSE_RENDERMESHBLOB.load(Ordering::Relaxed));
+    if !base_ok {
+        return Some(h);
+    }
+    let copiou = (|| {
+        if !crate::rtti::type_assign(TIPO_MORPH_BLOB_HEADER.load(Ordering::Relaxed), novo.add(MORPHBLOB_HEADER_OFF) as *mut c_void, pb.add(MORPHBLOB_HEADER_OFF) as *const c_void) {
+            return false;
+        }
+        let Some(nb) = novo_render_mesh_blob(base as *const u8) else { return false };
+        (novo.add(MORPHBLOB_BASE_OFF) as *mut [u64; 2]).write_unaligned(nb);
+        copiar_databuffer(novo.add(MORPHBLOB_DIFFS_OFF), pb.add(MORPHBLOB_DIFFS_OFF))
+            && copiar_databuffer(novo.add(MORPHBLOB_MAPPING_OFF), pb.add(MORPHBLOB_MAPPING_OFF))
+            && crate::rtti::type_assign(
+                TIPO_DEFERREDDATABUFFER.load(Ordering::Relaxed),
+                novo.add(MORPHBLOB_TEXDIFFS_OFF) as *mut c_void,
+                pb.add(MORPHBLOB_TEXDIFFS_OFF) as *const c_void,
+            )
+    })();
+    if !copiou {
+        crate::jogo::objetos::soltar_handle(&mut h);
+        return None;
+    }
+    Some(h)
+}
+
+/// Classe `entVisualTagsSchema` (resolvida em `guardar_offsets_do_template`).
 pub(crate) static CLASSE_VISUALTAGSSCHEMA: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
-// ===== ArchiveXL `#51` 51k — o alvo espera o patch na desserialização (2026-09-12) =====
-// Referência: antes do `ResourceSerializer::Deserialize`, pra cada patch do caminho da request, `LoadAsync` do patch e `aJob.Join(patchToken->job)` — o
-// `PostLoad` do alvo só roda com o patch pronto. No Mac (desmonte, 2026-09-12): `Deserialize` = `0x10120aff4` (8 argumentos; `x3` = `JobHandle&` recém-criado
+// ===== A#51 51k: o alvo espera o patch na desserialização =====
+// Mac (desmonte, 2026-09-12): `Deserialize` = `0x10120aff4` (8 argumentos; `x3` = `JobHandle&` recém-criado
 // pelo chamador, que depois espera nele antes do `WaitForDependencies`; `x4` = request, com 2 `ResourcePath` em `+0x28` e `+0x30`); `JobHandle::Join` =
 // `0x104ddf868` (`x0` = handle que espera, `x1` = handle esperado; `[job+0x18]` zero = nada a esperar). Os tokens dos patches já ficam retidos pela tabela;
 // o job do token fica em `+0x50`.
@@ -3614,50 +3650,52 @@ pub(crate) static ESPERAS_DE_PATCH: std::sync::RwLock<Option<std::collections::H
 
 pub(crate) type DeserializeFn = unsafe extern "C" fn(u64, u64, u64, *mut u64, *const u8, u64, u64, u64) -> u64;
 
-/// Pares `(alvo, patch)` que podem esperar: sai o que fecha ciclo (o patch, pelos patches dele, chegaria ao próprio alvo), que travaria os jobs um no outro.
+/// Pares `(alvo, patch)` que podem esperar.
 pub(crate) fn esperas_sem_ciclo(pares: &[(u64, u64)]) -> Vec<(u64, u64)> {
-    let mut grafo: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
-    for (a, p) in pares {
-        grafo.entry(*a).or_default().push(*p);
-    }
+    // Um par fica só se o patch não alcança o alvo pelas arestas alvo → patch: senão a espera fecharia um ciclo (o patch de si mesmo inclusive) e
+    // os jobs se esperariam para sempre.
     let alcanca = |de: u64, ate: u64| -> bool {
-        let (mut pilha, mut vistos) = (vec![de], std::collections::HashSet::new());
-        while let Some(n) = pilha.pop() {
+        let (mut fila, mut vistos) = (vec![de], vec![de]);
+        while let Some(n) = fila.pop() {
             if n == ate {
                 return true;
             }
-            if vistos.insert(n) {
-                pilha.extend(grafo.get(&n).into_iter().flatten().copied());
+            for &(a, p) in pares {
+                if a == n && !vistos.contains(&p) {
+                    vistos.push(p);
+                    fila.push(p);
+                }
             }
         }
         false
     };
-    let mut saida: Vec<(u64, u64)> = Vec::new();
-    for &(a, p) in pares {
-        if !alcanca(p, a) && !saida.contains(&(a, p)) {
-            saida.push((a, p));
+    let mut mantidos: Vec<(u64, u64)> = Vec::new();
+    for &(alvo, patch) in pares {
+        if !mantidos.contains(&(alvo, patch)) && !alcanca(patch, alvo) {
+            mantidos.push((alvo, patch));
         }
     }
-    saida
+    mantidos
 }
 
-/// Na carga da tabela: alvo → tokens dos patches com token, sem ciclo; e quantos pares ficaram fora.
+/// Na carga da tabela: alvo → instâncias dos tokens dos patches que ele espera (só patch com token, sem ciclo, sem repetir), e quantos pares
+/// distintos ficaram fora.
 pub(crate) fn esperas_da_tabela(patches: &[PatchDeRecurso]) -> (std::collections::HashMap<u64, Vec<u64>>, usize) {
-    let pares: Vec<(u64, u64)> = patches.iter().filter(|p| p.token[0] != 0).map(|p| (p.alvo, p.patch)).collect();
-    let validos = esperas_sem_ciclo(&pares);
-    let mut unicos = pares.clone();
-    unicos.sort_unstable();
-    unicos.dedup();
-    let mut mapa: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
-    for (a, p) in &validos {
-        if let Some(t) = patches.iter().find(|x| x.patch == *p && x.token[0] != 0).map(|x| x.token[0]) {
-            let v = mapa.entry(*a).or_default();
-            if !v.contains(&t) {
-                v.push(t);
-            }
+    let mut pares: Vec<(u64, u64)> = Vec::new();
+    for p in patches.iter().filter(|p| p.token[0] != 0) {
+        if !pares.contains(&(p.alvo, p.patch)) {
+            pares.push((p.alvo, p.patch));
         }
     }
-    (mapa, unicos.len() - validos.len())
+    let mantidos = esperas_sem_ciclo(&pares);
+    let mut mapa: std::collections::HashMap<u64, Vec<u64>> = std::collections::HashMap::new();
+    for p in patches.iter().filter(|p| p.token[0] != 0 && mantidos.contains(&(p.alvo, p.patch))) {
+        let tokens = mapa.entry(p.alvo).or_default();
+        if !tokens.contains(&p.token[0]) {
+            tokens.push(p.token[0]);
+        }
+    }
+    (mapa, pares.len() - mantidos.len())
 }
 
 /// Job do token (`+0x50`) e se ainda tem pendência (`[job+0x18]`, o que o `Join` confere); `None` sem job legível.
@@ -3672,56 +3710,52 @@ pub(crate) unsafe fn job_do_token(token: u64) -> Option<(u64, bool)> {
     Some((j, ((j + 0x18) as *const u32).read_unaligned() != 0))
 }
 
-/// O job do alvo (`JobHandle&` do `Deserialize`) espera o job do token do patch pelo `Join` do motor; patch sem pendência não entra.
+/// O job do alvo espera o job do token do patch.
 pub(crate) unsafe fn juntar_job_do_patch(job: *mut u64, token: u64, caminho: u64, off: u64) {
-    if token == 0 || job.is_null() || (job as *const u64).read_unaligned() == 0 {
-        return;
-    }
-    let estado = job_do_token(token);
-    let n = match estado {
-        Some((_, true)) => {
-            let join: unsafe extern "C" fn(*mut u64, *const u64) = std::mem::transmute(crate::rebase(JOB_JOIN_VM));
-            join(job, (token + 0x50) as *const u64);
-            A51K_JUNCOES.fetch_add(1, Ordering::Relaxed)
+    match job_do_token(token) {
+        Some((_, true)) if !job.is_null() && !crate::rebase(JOB_JOIN_VM).is_null() => {
+            let juntar: unsafe extern "C" fn(*mut u64, *const u64) = std::mem::transmute(crate::rebase(JOB_JOIN_VM));
+            juntar(job, (token + 0x50) as *const u64);
+            let n = crate::diagnostico::A51K_JUNCOES.fetch_add(1, Ordering::Relaxed);
+            if n < 8 {
+                crate::veredito_dev!("[a51k] alvo {caminho:#018x} (request+{off:#x}) espera o job do patch (token {token:#x})");
+            }
         }
-        _ => A51K_JA_PRONTOS.fetch_add(1, Ordering::Relaxed),
-    };
-    if n < 8 {
-        crate::veredito_dev!(
-            "[a51k] Deserialize de {caminho:#018x} (request +{off:#x}): patch com token {token:#x}, {}{}",
-            a51k_job_texto(estado),
-            if matches!(estado, Some((_, true))) { "; alvo espera pelo Join" } else { "" }
-        );
+        _ => {
+            crate::diagnostico::A51K_JA_PRONTOS.fetch_add(1, Ordering::Relaxed);
+        }
     }
 }
 
+/// Gancho do `Deserialize` (`DESERIALIZE_VM`); a original sai de `original_publicado(&ORIG_DESERIALIZE)`. Com a espera ativa e o 1º caminho da
+/// request (`+0x28`) alvo do mapa, o job novo do chamador (`x3`) passa a esperar o job de cada patch dele. O 2º caminho (`+0x30`) só é contado:
+/// casar por ele prendeu outra desserialização em espera mútua (boot 123). A original recebe os 8 argumentos como chegaram.
 pub(crate) unsafe extern "C" fn deserialize_hook(a0: u64, a1: u64, a2: u64, job: *mut u64, req: *const u8, a5: u64, a6: u64, a7: u64) -> u64 {
-    let f: DeserializeFn = std::mem::transmute(original_publicado(&ORIG_DESERIALIZE));
-    // Caminho quente (toda desserialização): sem syscall até casar um alvo.
-    if ESPERA_DE_PATCH_ATIVA.load(Ordering::Relaxed) && !job.is_null() && !req.is_null() {
-        A51K_CHAMADAS.fetch_add(1, Ordering::Relaxed);
+    let orig: DeserializeFn = std::mem::transmute(original_publicado(&ORIG_DESERIALIZE));
+    if ESPERA_DE_PATCH_ATIVA.load(Ordering::Relaxed) && !req.is_null() {
+        crate::diagnostico::A51K_CHAMADAS.fetch_add(1, Ordering::Relaxed);
         let (c28, c30) = ((req.add(0x28) as *const u64).read_unaligned(), (req.add(0x30) as *const u64).read_unaligned());
-        // Só o caminho da request (`+0x28`, o `path` do SDK) espera: no boot 123 o `+0x30` casou o alvo numa outra desserialização, e esperar ali poderia prender
-        // uma dependência do alvo que o patch também importa (um esperando o outro). O `+0x30` só é contado.
-        let casado = ESPERAS_DE_PATCH.try_read().ok().and_then(|g| {
-            let m = g.as_ref()?;
-            if c30 != 0 && m.contains_key(&c30) {
-                A51K_CASADOS_30.fetch_add(1, Ordering::Relaxed);
+        let tokens = match ESPERAS_DE_PATCH.read() {
+            Ok(g) => {
+                let mapa = g.as_ref();
+                if mapa.is_some_and(|m| c30 != c28 && m.contains_key(&c30)) {
+                    crate::diagnostico::A51K_CASADOS_30.fetch_add(1, Ordering::Relaxed);
+                }
+                mapa.and_then(|m| m.get(&c28)).cloned()
             }
-            if c28 == 0 { None } else { m.get(&c28).cloned() }
-        });
-        if let Some(tokens) = casado {
-            A51K_CASADOS_28.fetch_add(1, Ordering::Relaxed);
+            Err(_) => None,
+        };
+        if let Some(tokens) = tokens {
+            crate::diagnostico::A51K_CASADOS_28.fetch_add(1, Ordering::Relaxed);
             for t in tokens {
                 juntar_job_do_patch(job, t, c28, 0x28);
             }
         }
     }
-    f(a0, a1, a2, job, req, a5, a6, a7)
+    orig(a0, a1, a2, job, req, a5, a6, a7)
 }
 
-/// As esperas saem com a tabela que as gerou, como os alvos de `s_patchTargets` no `Configure` da referência. O hook fica e passa reto
-/// pelo `ESPERA_DE_PATCH_ATIVA`.
+/// As esperas saem com a tabela que as gerou; o gancho, se já subiu, fica e passa reto.
 fn limpar_esperas() {
     if let Ok(mut g) = ESPERAS_DE_PATCH.write() {
         *g = None;
@@ -3729,7 +3763,7 @@ fn limpar_esperas() {
     ESPERA_DE_PATCH_ATIVA.store(false, Ordering::Relaxed);
 }
 
-/// Na carga da tabela (game thread): mapa de esperas e hook do `Deserialize` com alvo na tabela ou com o teste.
+/// Na carga da tabela (game thread): mapa de esperas e gancho do `Deserialize`. Sem espera e sem o teste (`a51k-teste`), limpa.
 pub(crate) unsafe fn preparar_esperas(esperas: std::collections::HashMap<u64, Vec<u64>>, fora: usize) {
     let teste = marcador_individual("a51k-teste");
     if esperas.is_empty() && !teste {
@@ -3741,14 +3775,15 @@ pub(crate) unsafe fn preparar_esperas(esperas: std::collections::HashMap<u64, Ve
         *g = Some(esperas);
     }
     install_deserialize_hook();
-    let ok = ORIG_DESERIALIZE.load(Ordering::Relaxed) != 0;
-    ESPERA_DE_PATCH_ATIVA.store(ok, Ordering::Relaxed);
+    let no_ar = ORIG_DESERIALIZE.load(Ordering::Relaxed) != 0;
+    ESPERA_DE_PATCH_ATIVA.store(no_ar, Ordering::Relaxed);
     if teste {
         install_cmesh_postload_hook();
     }
     crate::veredito_dev!(
-        "[a51k] espera do patch no Deserialize: {alvos} alvo(s), {fora} par(es) fora por ciclo, teste {teste}; hook {}",
-        if ok { "instalado" } else { "FALHOU" }
+        "[a51k] {alvos} alvo(s) esperam patch no Deserialize, {fora} par(es) fora por ciclo; gancho {}{}",
+        if no_ar { "no ar" } else { "AUSENTE" },
+        if teste { " (teste)" } else { "" }
     );
 }
 
@@ -3761,8 +3796,11 @@ pub(crate) type EstadosDosMeshes = std::collections::HashMap<u64, std::sync::Arc
 
 pub(crate) static ESTADOS_DOS_MESHES: std::sync::RwLock<Option<EstadosDosMeshes>> = std::sync::RwLock::new(None);
 
-/// `AcquireMeshState`: o estado do mesh pelo caminho, criado com as entradas quando falta (malha dinâmica ou não).
+/// Estado do mesh pelo caminho (`ESTADOS_DOS_MESHES`), criado quando falta.
 pub(crate) unsafe fn adquirir_estado_do_mesh(mesh: *const u8) -> Option<std::sync::Arc<std::sync::Mutex<EstadoDoMesh>>> {
+    if mesh.is_null() {
+        return None;
+    }
     let caminho = (mesh.add(CMESH_CAMINHO_OFF) as *const u64).read_unaligned();
     if caminho == 0 {
         return None;
@@ -3770,17 +3808,27 @@ pub(crate) unsafe fn adquirir_estado_do_mesh(mesh: *const u8) -> Option<std::syn
     if let Some(e) = estado_do_mesh(caminho) {
         return Some(e);
     }
+    // Preenchido fora da trava: ler os materiais é memória do mesh. Com corrida, o primeiro a gravar fica e o outro estado é descartado.
+    let mut novo = EstadoDoMesh::default();
+    novo.preencher_materiais(mesh);
+    let novo = std::sync::Arc::new(std::sync::Mutex::new(novo));
     let mut g = ESTADOS_DOS_MESHES.write().ok()?;
-    let e = g.get_or_insert_with(std::collections::HashMap::new).entry(caminho).or_insert_with(|| {
-        let mut estado = EstadoDoMesh::default();
-        estado.preencher_materiais(mesh);
-        A48_ESTADOS_CRIADOS.fetch_add(1, Ordering::Relaxed);
-        std::sync::Arc::new(std::sync::Mutex::new(estado))
-    });
-    Some(e.clone())
+    let mapa = g.get_or_insert_with(std::collections::HashMap::new);
+    let mut criado = false;
+    let e = mapa
+        .entry(caminho)
+        .or_insert_with(|| {
+            criado = true;
+            novo
+        })
+        .clone();
+    if criado {
+        crate::diagnostico::A48_ESTADOS_CRIADOS.fetch_add(1, Ordering::Relaxed);
+    }
+    Some(e)
 }
 
-// ArchiveXL `#51` (ResourcePatchExtension): `PostLoad` de `entEntityTemplate` e `appearanceAppearanceResource`, lidos do vtable+0x30
+// `resource.patch`: `PostLoad` de `entEntityTemplate` e `appearanceAppearanceResource`, lidos do vtable+0x30
 // por `probe_postload_addresses()` ao vivo (2026-08-12). Hooks em `entitytemplate_postload_replacement`/`appearanceresource_postload_replacement`.
 pub(crate) const ENTITYTEMPLATE_POSTLOAD_VM: u64 = 0x1_019c_6380; // entEntityTemplate::PostLoad
 
@@ -3794,103 +3842,65 @@ pub(crate) static ORIG_ENTITYTEMPLATE_POSTLOAD:     AtomicU64 = AtomicU64::new(0
 
 pub(crate) static ORIG_APPEARANCERESOURCE_POSTLOAD: AtomicU64 = AtomicU64::new(0);
 
+/// Gancho do `PostLoad` do `CMesh`; a original sai de `original_publicado(&ORIG_CMESH_POSTLOAD)`.
 pub(crate) unsafe extern "C" fn cmesh_postload_replacement(this: *mut c_void, a1: u64, a2: u64) {
-    #[cfg(feature = "devlog")]
-    let n = POSTLOAD_CNT_CMESH.fetch_add(1, Ordering::Relaxed);
-    // 51k (teste): estado do patch quando o alvo e o controle chegam no `PostLoad`.
     #[cfg(feature = "devtools")]
-    a51k_observar_postload(this);
-    // ArchiveXL `#51` 51i-1: nomes de material do `resource.fix` antes da original, como o `OnMeshResourceLoad` da referência.
-    aplicar_fix_de_nomes(this);
-    // 51i-2: aparências dos patches do mesh, depois do fix e antes da original.
-    mesclar_aparencias_no_mesh(this);
-    // 51i-3: blob de render e campos do mesh dos patches, depois das aparências (a ordem da referência) e antes da original.
-    mesclar_blob_no_mesh(this);
-    // ArchiveXL `#48` 48a: estado do mesh dinâmico depois dos patches, como o `PrepareMeshState` no fim do `OnMeshResourceLoad` da referência.
-    preparar_estado_do_mesh(this);
-    // S12: o `context` do `resource.fix` no estado de mesh dinâmico nativo da 2.5, como o `PrepareMeshState(mesh, fix.GetContext())` da referência.
-    crate::aparencia::injetar_contexto_do_mesh(this);
-    // Original só depois das mesclas acima, que escrevem no mesh antes do `PostLoad` do motor.
-    let f: PostLoadFn = std::mem::transmute(original_publicado(&ORIG_CMESH_POSTLOAD));
-    f(this, a1, a2);
-    // 51i-3 (teste): renderBuffer do alvo e do controle logo depois da original.
-    #[cfg(feature = "devtools")]
-    a51i3_apos_original(this);
-
-    // Probe first 8 meshes. O contador vem antes do is_readable: a checagem é uma syscall e este hook roda em toda carga de mesh.
+    crate::diagnostico::a51k_observar_postload(this);
     #[cfg(feature = "devlog")]
-    if n < 8 && crate::memoria::is_readable(this, 0x200) {
-        let rf64 = |off: usize| (this.cast::<u8>().add(off) as *const u64).read_unaligned();
-        let rf32 = |off: usize| (this.cast::<u8>().add(off) as *const u32).read_unaligned();
-        let path_hash = rf64(0x30);
-        let app_cap = rf32(0x1e8);
-        let app_sz  = rf32(0x1ec);
-        crate::log_dev!(
-            "[axl-patch] CMesh#{n} path={path_hash:#018x} app_sz={app_sz} app_cap={app_cap}"
-        );
+    if !this.is_null() && crate::primeiras(&crate::diagnostico::POSTLOAD_CNT_CMESH, 8) {
+        let m = this as *const u8;
+        let (_, n, cap) = dynarray_no_campo(m, CMESH_APPEARANCES_OFF);
+        crate::log(&format!("[postload] CMesh {:#018x}: appearances {n}/{cap}", (m.add(CMESH_CAMINHO_OFF) as *const u64).read_unaligned()));
     }
+    // Tudo antes da original: o `PostLoad` do motor monta o estado do mesh a partir dos nomes, aparências e blob que estão nele.
+    aplicar_fix_de_nomes(this);
+    mesclar_aparencias_no_mesh(this);
+    mesclar_blob_no_mesh(this);
+    preparar_estado_do_mesh(this);
+    injetar_contexto_do_mesh(this);
+    let orig: unsafe extern "C" fn(*mut c_void, u64, u64) = std::mem::transmute(original_publicado(&ORIG_CMESH_POSTLOAD));
+    orig(this, a1, a2);
+    #[cfg(feature = "devtools")]
+    crate::diagnostico::a51i3_apos_original(this);
 }
 
+/// As 8 primeiras chamadas de um `PostLoad`, com as palavras `+0x08..fim` do recurso, pro log de dev.
+#[cfg(feature = "devlog")]
+unsafe fn logar_postload(rotulo: &str, contador: &AtomicU64, this: *mut c_void, fim: usize) {
+    if this.is_null() || !crate::primeiras(contador, 8) || !crate::memoria::is_readable(this as *const c_void, fim) {
+        return;
+    }
+    let palavras: Vec<String> = (0x08..fim).step_by(8).map(|o| format!("{:#x}", ((this as *const u8).add(o) as *const u64).read_unaligned())).collect();
+    crate::log(&format!("[postload] {rotulo} {this:p}: [{}]", palavras.join(" ")));
+}
+
+/// Gancho do `PostLoad` do `MorphTargetMesh`; a original sai de `original_publicado(&ORIG_MORPHTGT_POSTLOAD)`.
 pub(crate) unsafe extern "C" fn morphtgt_postload_replacement(this: *mut c_void, a1: u64, a2: u64) {
     #[cfg(feature = "devlog")]
-    let n = POSTLOAD_CNT_MORPHTGT.fetch_add(1, Ordering::Relaxed);
-    #[cfg(feature = "devlog")]
-    if n < 8 && crate::memoria::is_readable(this, 0xa0) {
-        let f = |off: usize| (this.cast::<u8>().add(off) as *const u64).read_unaligned();
-        crate::log_dev!(
-            "[axl-patch-probe] MorphTargetMesh#{n} this={this:p} +08={:#018x} +10={:#018x} +18={:#018x} +20={:#018x} +28={:#018x} +30={:#018x} +38={:#018x}",
-            f(0x08), f(0x10), f(0x18), f(0x20), f(0x28), f(0x30), f(0x38)
-        );
-        crate::log_dev!(
-            "[axl-patch-probe] MorphTargetMesh#{n} +40={:#018x} +48={:#018x} +50={:#018x} +58={:#018x} +60={:#018x} +68={:#018x} +70={:#018x}",
-            f(0x40), f(0x48), f(0x50), f(0x58), f(0x60), f(0x68), f(0x70)
-        );
-    }
-    // ArchiveXL `#51` 51d: mescla antes da original (a referência envolve a original e a chama no fim).
+    logar_postload("MorphTargetMesh", &crate::diagnostico::POSTLOAD_CNT_MORPHTGT, this, 0x70);
     mesclar_patches_no_morph(this);
-    let f: PostLoadFn = std::mem::transmute(original_publicado(&ORIG_MORPHTGT_POSTLOAD));
-    f(this, a1, a2);
-    // 51d v3 (teste): buffers do alvo e do controle logo depois da original.
+    let orig: unsafe extern "C" fn(*mut c_void, u64, u64) = std::mem::transmute(original_publicado(&ORIG_MORPHTGT_POSTLOAD));
+    orig(this, a1, a2);
     #[cfg(feature = "devtools")]
-    a51d3_apos_original(this);
+    crate::diagnostico::a51d3_apos_original(this);
 }
 
-// ===== ArchiveXL `#51`: EntityTemplate::PostLoad (51a) / AppearanceResource::PostLoad (51c) =====
-// Os dois escrevem no recurso ANTES da original: `mesclar_patches_no_template`/`mesclar_patches_no_app` mesclam os patches de `bwms-resource-patch.txt`.
-// Instalados pela tabela (`install_template_postload_hook`/`install_app_postload_hook`) ou pelo marcador do probe no dev. O dump dos campos sai só
-// nas 8 primeiras chamadas.
+/// Gancho do `PostLoad` do `entEntityTemplate` (`ENTITYTEMPLATE_POSTLOAD_VM`): mescla (51a) e a original.
 pub(crate) unsafe extern "C" fn entitytemplate_postload_replacement(this: *mut c_void, a1: u64, a2: u64) {
     #[cfg(feature = "devlog")]
-    let n = POSTLOAD_CNT_ENTITYTEMPLATE.fetch_add(1, Ordering::Relaxed);
-    #[cfg(feature = "devlog")]
-    if n < 8 && crate::memoria::is_readable(this, 0xa0) {
-        let f = |off: usize| (this.cast::<u8>().add(off) as *const u64).read_unaligned();
-        crate::log_dev!(
-            "[axl-resource-patch] EntityTemplate::PostLoad#{n} this={this:p} +08={:#018x} +10={:#018x} +18={:#018x} +20={:#018x} +28={:#018x} +30={:#018x} +38={:#018x} +40={:#018x}",
-            f(0x08), f(0x10), f(0x18), f(0x20), f(0x28), f(0x30), f(0x38), f(0x40)
-        );
-    }
-    // ArchiveXL `#51` 51a: mescla antes da original, como o `HookBefore` da referência.
+    logar_postload("entEntityTemplate", &crate::diagnostico::POSTLOAD_CNT_ENTITYTEMPLATE, this, 0x40);
     mesclar_patches_no_template(this);
-    let f: PostLoadFn = std::mem::transmute(original_publicado(&ORIG_ENTITYTEMPLATE_POSTLOAD));
-    f(this, a1, a2);
+    let orig: unsafe extern "C" fn(*mut c_void, u64, u64) = std::mem::transmute(original_publicado(&ORIG_ENTITYTEMPLATE_POSTLOAD));
+    orig(this, a1, a2);
 }
 
+/// Gancho do `PostLoad` do `appearanceAppearanceResource` (`APPEARANCERESOURCE_POSTLOAD_VM`): mescla (51c) e a original.
 pub(crate) unsafe extern "C" fn appearanceresource_postload_replacement(this: *mut c_void, a1: u64, a2: u64) {
     #[cfg(feature = "devlog")]
-    let n = POSTLOAD_CNT_APPEARANCERESOURCE.fetch_add(1, Ordering::Relaxed);
-    #[cfg(feature = "devlog")]
-    if n < 8 && crate::memoria::is_readable(this, 0xa0) {
-        let f = |off: usize| (this.cast::<u8>().add(off) as *const u64).read_unaligned();
-        crate::log_dev!(
-            "[axl-resource-patch] AppearanceResource::PostLoad#{n} this={this:p} +08={:#018x} +10={:#018x} +18={:#018x} +20={:#018x} +28={:#018x} +30={:#018x} +38={:#018x} +40={:#018x}",
-            f(0x08), f(0x10), f(0x18), f(0x20), f(0x28), f(0x30), f(0x38), f(0x40)
-        );
-    }
-    // ArchiveXL `#51` 51c: mescla antes da original, como o `HookBefore` da referência.
+    logar_postload("appearanceAppearanceResource", &crate::diagnostico::POSTLOAD_CNT_APPEARANCERESOURCE, this, 0x40);
     mesclar_patches_no_app(this);
-    let f: PostLoadFn = std::mem::transmute(original_publicado(&ORIG_APPEARANCERESOURCE_POSTLOAD));
-    f(this, a1, a2);
+    let orig: unsafe extern "C" fn(*mut c_void, u64, u64) = std::mem::transmute(original_publicado(&ORIG_APPEARANCERESOURCE_POSTLOAD));
+    orig(this, a1, a2);
 }
 
 /// `ResourceAsyncReference::LoadAsync` do motor (2026-09-11, `0x1010f0d34`): `x0` = referência (o hash do path em `+0`),
@@ -3961,7 +3971,7 @@ pub(crate) unsafe fn install_deserialize_hook() {
 
 /// O hook do `OnDependenciesReady` do serializer pela tabela de `resource.patch` (51g, alvos `.curveset`).
 pub(crate) unsafe fn install_dependencias_prontas_hook() {
-    // A tabela roda no tick (qualquer thread) e no `ArchiveXL.Reload`; o `RegisterCallback` de `Resource/Load` e o `desativar_hooks_de_recurso`
+    // A tabela roda no tick (qualquer thread) e no `Reload` da fachada de recursos; o `RegisterCallback` de `Resource/Load` e o `desativar_hooks_de_recurso`
     // instalam e tiram o mesmo hook sob esta trava. Sem ela, checar-e-instalar concorrente empilha 2 hooks e a relocação da segunda copia o
     // salto da primeira: o trampolim salta para o próprio hook.
     let _grupo = crate::tipos_do_motor::HOOKS_DE_EVENTO.lock();
@@ -4090,7 +4100,7 @@ impl TabelaDeRedirecionamento {
         aceitos
     }
 
-    /// Troca os pares todos pelos `pares` (a recarga do `ArchiveXL.Reload`; lista vazia esvazia) e devolve quantos foram aceitos. A tabela nova é
+    /// Troca os pares todos pelos `pares` (a recarga do `Reload` da fachada de recursos; lista vazia esvazia) e devolve quantos foram aceitos. A tabela nova é
     /// montada fora da trava e entra com a contagem numa seção só sob ela: o shim nunca vê a tabela vazia ou pela metade.
     pub(crate) fn substituir(&self, pares: &[(u64, u64)]) -> usize {
         let (novos, aceitos) = self.preparar(pares);
@@ -4142,7 +4152,7 @@ pub(crate) static ORIG_RESLINK: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) const RESLINK_VM: u64 = 0x1_010e_fcec;
 
-/// `cw-controller-misc` (2026-07-19): hash observado por `watchres <path>` + flag "visto" — o
+/// Controller de recurso (2026-07-19): hash observado por `watchres <path>` + flag "visto" — o
 /// `reslink_lookup` (o shim do gancho, em TODA construção real de `ResourcePath`, o chama para o
 /// hash com o bit ligado no filtro; o `watchres` grava o par h → h, que liga o bit do observado)
 /// marca `WATCH_RES_SEEN` quando o hash observado bate. O
@@ -4278,12 +4288,11 @@ pub(crate) fn reslink_path(src: &str, tgt: &str) {
 }
 
 /// Carrega N pares de um arquivo (linhas de `bwms_primitives::tabelas::Reslink`, `#`=comentário). É o que um mod
-/// ArchiveXL real usa: o mod-manager gera esse arquivo do `.xl` (resource.link/copy) e o runtime
+/// com `.xl` usa: o mod-manager gera esse arquivo do `.xl` (resource.link/copy) e o runtime
 /// popula a tabela. Caminho default = `<red4ext>/bwms-reslink.txt`.
 ///
-/// Com `substituir` (o `ArchiveXL.Reload`), as tabelas do `resource.link` e do `resource.copy` viram as do arquivo, e o arquivo ausente as esvazia (o
-/// `bwms install` o apaga quando nenhum mod gera par): saem o par da carga anterior e o de `RegisterLink`, como no `Configure` da referência
-/// (`ResourceLink/Extension.cpp:38-40`). Sem `substituir` (a carga do boot e o console), os pares entram por cima dos que já estão, porque o
+/// Com `substituir` (o `Reload` da fachada de recursos), as tabelas do `resource.link` e do `resource.copy` viram as do arquivo, e o arquivo ausente as esvazia (o
+/// `bwms install` o apaga quando nenhum mod gera par): saem o par da carga anterior e o de `RegisterLink`. Sem `substituir` (a carga do boot e o console), os pares entram por cima dos que já estão, porque o
 /// `RegisterLink` do `OnLoad` dos `ScriptableService` e os pares de teste do `on_load` são gravados antes da carga do boot.
 pub(crate) fn reslink_file(path: &str, substituir: bool) {
     let content = match std::fs::read_to_string(path) {
@@ -4318,9 +4327,9 @@ fn reslink_texto(content: &str, substituir: bool) -> usize {
     }
 }
 
-/// ArchiveXL `#27` (`GetAliases(path) -> Set<ResourcePath>`, `PENDENCIAS-UNIFICADAS.md`): os caminhos que são o mesmo recurso que `path`, nos dois
+/// `GetAliases(path) -> Set<ResourcePath>` (`PENDENCIAS-UNIFICADAS.md`): os caminhos que são o mesmo recurso que `path`, nos dois
 /// sentidos, pelos links (`RESLINK_MAP`, que `resource.link` e `RegisterLink` escrevem) e pelas cópias (`depot`), em ordem crescente e sem repetição. É
-/// a varredura do `GetAliases` da referência sobre `s_mappings`, cópias ∪ links (`ResourceLink/Extension.cpp:251-271`): o link `a → b` dá `b` para `a`
+/// a varredura sobre cópias ∪ links: o link `a → b` dá `b` para `a`
 /// e `a` para `b`; a cópia `c` de `b` dá `b` para `c` e `c` para `b`; a chave que está nas duas tabelas responde só pelo link. Leitura das tabelas em
 /// memória, sem I/O nem chamada nativa.
 pub(crate) fn reslink_aliases_of(path: u64) -> Vec<u64> {
@@ -4374,211 +4383,159 @@ pub(crate) unsafe fn garantir_gancho_de_dependencias() -> bool {
     ok
 }
 
+/// Gancho do "dependências prontas" do recurso (`jogo::recursos::DEPENDENCIAS_PRONTAS_VM`, contexto com `serializables` em `+0x230`); a original sai
+/// de `ORIG_DEPENDENCIAS`. Antes da original: o `Resource/Load` dos `CResource` do contexto (com ouvinte) e as mesclas que pedem o recurso já com as
+/// dependências (curvas, devices, inkanim), cada uma só com objeto da classe exata dela.
 pub(crate) unsafe extern "C" fn dependencias_prontas_hook(ctx: *mut c_void) {
-    let orig = loop {
-        let o = ORIG_DEPENDENCIAS.load(Ordering::Relaxed);
-        if o != 0 {
-            break o as *mut c_void;
-        }
-        std::thread::yield_now();
-    };
-    if RESOURCE_LOAD_ATIVO.load(Ordering::Relaxed) && !ctx.is_null() && crate::memoria::is_readable(ctx as *const c_void, 0x240) && crate::tipos_do_motor::tem_ouvinte("Resource/Load") {
-        despachar_resource_load_dos_serializables(ctx as *const u8);
+    let orig: DependenciasProntasFn = std::mem::transmute(original_publicado(&ORIG_DEPENDENCIAS));
+    let c = ctx as *const u8;
+    let legivel = !ctx.is_null() && crate::memoria::is_readable(ctx as *const c_void, 0x240);
+    if legivel && RESOURCE_LOAD_ATIVO.load(Ordering::Relaxed) && crate::tipos_do_motor::tem_ouvinte("Resource/Load") {
+        despachar_resource_load_dos_serializables(c);
     }
-    let (ativo_g, ativo_h) = (A51G_ATIVO.load(Ordering::Relaxed), MESCLA_DE_DEVICES_ATIVA.load(Ordering::Relaxed));
-    let ativo_ink = crate::interface::MESCLA_DE_INKANIM_ATIVA.load(Ordering::Relaxed);
-    if (ativo_g || ativo_h || ativo_ink) && !ctx.is_null() && crate::memoria::is_readable(ctx as *const c_void, 0x240) {
-        A51G_CONTEXTOS.fetch_add(1, Ordering::Relaxed);
-        let curva = if ativo_g { A51G_CLASSE_CURVESET.load(Ordering::Relaxed) } else { std::ptr::null_mut() };
-        let device = if ativo_h { CLASSE_GAMEDEVICERESOURCE.load(Ordering::Relaxed) } else { std::ptr::null_mut() };
-        let inkanim = if ativo_ink { crate::interface::CLASSE_INKANIM_BIBLIOTECA.load(Ordering::Relaxed) } else { std::ptr::null_mut() };
-        let (b, n, _) = dynarray_no_campo(ctx as *const u8, 0x230);
-        if (!curva.is_null() || !device.is_null() || !inkanim.is_null()) && n > 0 && n <= 4096 && crate::memoria::is_readable(b as *const c_void, n * 16) {
+    let (curvas, devices, inkanim) = (
+        A51G_ATIVO.load(Ordering::Relaxed),
+        MESCLA_DE_DEVICES_ATIVA.load(Ordering::Relaxed),
+        crate::interface::MESCLA_DE_INKANIM_ATIVA.load(Ordering::Relaxed),
+    );
+    if legivel && (curvas || devices || inkanim) {
+        let (b, n, _) = dynarray_no_campo(c, 0x230);
+        if n > 0 && n <= 4096 && crate::memoria::is_readable(b as *const c_void, n * 16) {
+            let (cls_curvas, cls_devices, cls_inkanim) = (
+                A51G_CLASSE_CURVESET.load(Ordering::Relaxed),
+                CLASSE_GAMEDEVICERESOURCE.load(Ordering::Relaxed),
+                crate::interface::CLASSE_INKANIM_BIBLIOTECA.load(Ordering::Relaxed),
+            );
             for i in 0..n {
                 let obj = (b.add(i * 16) as *const u64).read_unaligned();
-                if obj == 0 || !crate::memoria::is_readable(obj as *const c_void, 0x50) {
+                if obj == 0 || !crate::memoria::is_readable(obj as *const c_void, 8) {
                     continue;
                 }
-                let c = crate::rtti::class_of(obj as *mut c_void);
-                if !curva.is_null() && c == curva {
-                    a51g_mesclar_curvas(obj);
-                } else if !device.is_null() && c == device {
-                    mesclar_devices(obj);
-                } else if !inkanim.is_null() && c == inkanim {
+                let cls = crate::rtti::class_of(obj as *mut c_void);
+                if cls.is_null() {
+                    continue;
+                }
+                if curvas && cls == cls_curvas {
+                    crate::curvas::a51g_mesclar_curvas(obj);
+                } else if devices && cls == cls_devices {
+                    crate::mundo::mesclar_devices(obj);
+                } else if inkanim && cls == cls_inkanim {
                     crate::interface::mesclar_inkanim(obj);
                 }
             }
         }
     }
-    let f: DependenciasProntasFn = std::mem::transmute(orig);
-    f(ctx);
+    orig(ctx);
 }
 
 
 use crate::ganchos::install_hook_probe;
 
-// ===== ArchiveXL `#51` 51j-a — sonda do `SetPersistentStateData` (2026-09-12) =====
-// Referência: `HookAfter` do `PersistencySystem::SetPersistentStateData(a1, DataBuffer& aData, a3, u32 a4)`; depois da original, pra cada patch do
-// `persistentStateData` do streaming world, chama a original de novo com o `buffer` do `gamePersistentStateDataResource` do patch. Sem símbolo no Mac:
-// candidata offline `0x102d0d090` — guarda `x0`..`x3` e usa `w3` como `u32`, lê dados e tamanho do `x1` pelos acessores de `DataBuffer`
-// (`0x101212ea4`/`0x101212ebc`) e põe o buffer num leitor (`0x101074b44`, o "set buffer" da 51f-2); chamada pelo carregador `PSData` do save
-// (`0x102d0cd8c`) e por `0x102d12650`. A sonda chama a original e conta as chamadas cujo `DataBuffer` é o do `persistentStateData` do último streaming
-// world visto no `PostLoad` (hook da 51e).
+// ===== A#51 51j: `persistentStateData` do streaming world =====
+// Candidata offline ao `SetPersistentStateData(a1, DataBuffer& dados, a3, u32 a4)` do sistema de persistência: `0x102d0d090` — guarda `x0`..`x3` e usa
+// `w3` como `u32`, lê dados e tamanho do `x1` pelos acessores de `DataBuffer` (`0x101212ea4`/`0x101212ebc`) e põe o buffer num leitor (`0x101074b44`);
+// chamada pelo carregador `PSData` do save (`0x102d0cd8c`) e por `0x102d12650`. Campos pelo RTTI: `worldStreamingWorld.persistentStateData` (`Ref`:
+// caminho `+0x00`, token `+0x08`) e `gamePersistentStateDataResource.buffer` (`DataBuffer`).
 const SET_PERSISTENT_STATE_DATA_VM: u64 = 0x1_02d0_d090;
 static ORIG_SET_PERSISTENT_STATE_DATA: AtomicU64 = AtomicU64::new(0);
-static PSD_HOOK_ATIVO: AtomicBool = AtomicBool::new(false);
-static WORLD_PERSISTENTSTATEDATA_OFF: AtomicU64 = AtomicU64::new(0);
-static PSD_BUFFER_OFF: AtomicU64 = AtomicU64::new(0);
-static PSD_CHAMADAS: AtomicU64 = AtomicU64::new(0);
-static PSD_CHAMADAS_DO_MUNDO: AtomicU64 = AtomicU64::new(0);
 type SetPersistentStateDataFn = unsafe extern "C" fn(u64, *mut u8, u64, u32) -> u64;
 
-/// `DataBuffer` do `persistentStateData` do último streaming world (recurso pelo token do `Ref`); 0 sem mundo, token ou offsets.
-unsafe fn buffer_psd_do_mundo() -> u64 {
-    let (mundo, off_psd, off_buf) = (A51J_MUNDO.load(Ordering::Relaxed), WORLD_PERSISTENTSTATEDATA_OFF.load(Ordering::Relaxed), PSD_BUFFER_OFF.load(Ordering::Relaxed));
-    if mundo == 0 || off_psd == 0 || off_buf == 0 || !crate::memoria::is_readable((mundo + off_psd) as *const c_void, 0x18) {
-        return 0;
+/// Offset do `persistentStateData` no `worldStreamingWorld` e do `buffer` no `gamePersistentStateDataResource`, pelo RTTI; 0 = não lido.
+static MUNDO_PSD_OFF: AtomicU64 = AtomicU64::new(0);
+static PSD_BUFFER_DO_RECURSO_OFF: AtomicU64 = AtomicU64::new(0);
+static CLASSE_DO_RECURSO_DE_PSD: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+/// Com o marcador `a51j-teste`, o buffer do próprio mundo entra como patch dele.
+static PSD_TESTE: AtomicBool = AtomicBool::new(false);
+static PSD_REAPLICADOS: AtomicU64 = AtomicU64::new(0);
+
+/// `(caminho do Ref, buffer)` do `persistentStateData` do último mundo visto (`A51J_MUNDO`): `Ref` em `mundo+off` → token `+0x08` → recurso
+/// `token+0x28` → `+buffer`. `None` sem mundo, sem offsets ou com algo ilegível.
+unsafe fn psd_do_mundo() -> Option<(u64, *mut u8)> {
+    let (mundo, off, buf) = (
+        crate::diagnostico::A51J_MUNDO.load(Ordering::Relaxed),
+        MUNDO_PSD_OFF.load(Ordering::Relaxed) as usize,
+        PSD_BUFFER_DO_RECURSO_OFF.load(Ordering::Relaxed) as usize,
+    );
+    if mundo == 0 || off == 0 || buf == 0 || !crate::memoria::is_readable((mundo as usize + off) as *const c_void, 0x18) {
+        return None;
     }
-    let token = ((mundo + off_psd + 8) as *const u64).read_unaligned();
-    if token == 0 || !crate::memoria::is_readable((token + 0x28) as *const c_void, 8) {
-        return 0;
-    }
-    let res = ((token + 0x28) as *const u64).read_unaligned();
-    if res == 0 || !crate::memoria::is_readable((res + off_buf) as *const c_void, 0x10) {
-        return 0;
-    }
-    res + off_buf
+    let r = (mundo as usize + off) as *const u64;
+    let (caminho, token) = (r.read_unaligned(), r.add(1).read_unaligned());
+    let recurso = recurso_carregado(token, buf + 0x10);
+    (!recurso.is_null()).then(|| (caminho, recurso.add(buf) as *mut u8))
 }
 
+/// Gancho da candidata ao `SetPersistentStateData`; a original sai de `original_publicado(&ORIG_SET_PERSISTENT_STATE_DATA)`. A original roda
+/// primeiro; quando os `dados` são o buffer do `persistentStateData` do último mundo visto, ela roda de novo com o buffer de cada patch pronto
+/// daquele `Ref`. Devolve o retorno da 1ª chamada.
 unsafe extern "C" fn set_persistent_state_data_hook(a1: u64, dados: *mut u8, a3: u64, a4: u32) -> u64 {
-    let f: SetPersistentStateDataFn = std::mem::transmute(original_publicado(&ORIG_SET_PERSISTENT_STATE_DATA));
-    let r = f(a1, dados, a3, a4);
-    if PSD_HOOK_ATIVO.load(Ordering::Relaxed) {
-        let n = PSD_CHAMADAS.fetch_add(1, Ordering::Relaxed);
-        let buffer_mundo = buffer_psd_do_mundo();
-        let do_mundo = !dados.is_null() && dados as u64 == buffer_mundo;
-        if do_mundo {
-            PSD_CHAMADAS_DO_MUNDO.fetch_add(1, Ordering::Relaxed);
-            // 51j-b: depois da original, cada patch do `persistentStateData` do mundo entra de novo pela original com o `buffer` dele (o `HookAfter` da
-            // referência).
-            reaplicar_patches_de_psd(f, a1, a3, a4);
-        }
-        if n < 16 {
-            let (d, tam) = if !dados.is_null() && crate::memoria::is_readable(dados as *const c_void, 0x10) {
-                ((dados as *const u64).read_unaligned(), (dados.add(8) as *const u32).read_unaligned())
-            } else {
-                (0, 0)
-            };
-            crate::veredito_dev!(
-                "[a51j] chamada #{n}: this {a1:#x}, DataBuffer {dados:p} (dados {d:#x}, {tam} B), a3 {a3:#x}, a4 {a4}, retorno {r:#x}; buffer do persistentStateData do mundo {buffer_mundo:#x}, é ele={do_mundo}"
-            );
+    let orig: SetPersistentStateDataFn = std::mem::transmute(original_publicado(&ORIG_SET_PERSISTENT_STATE_DATA));
+    let r = orig(a1, dados, a3, a4);
+    let Some((caminho, buffer)) = psd_do_mundo() else { return r };
+    if dados != buffer {
+        return r;
+    }
+    let buf = PSD_BUFFER_DO_RECURSO_OFF.load(Ordering::Relaxed) as usize;
+    let classe = CLASSE_DO_RECURSO_DE_PSD.load(Ordering::Relaxed);
+    let mut buffers: Vec<*mut u8> = patches_do_alvo(caminho, u32::MAX)
+        .into_iter()
+        .filter_map(|(pt, _)| {
+            let p = recurso_do_patch_da_classe(pt, buf + 0x10, classe);
+            (!p.is_null()).then(|| p.add(buf) as *mut u8)
+        })
+        .collect();
+    if PSD_TESTE.load(Ordering::Relaxed) {
+        buffers.push(buffer);
+    }
+    for b in &buffers {
+        orig(a1, *b, a3, a4);
+    }
+    if !buffers.is_empty() {
+        let n = PSD_REAPLICADOS.fetch_add(buffers.len() as u64, Ordering::Relaxed);
+        if n < 8 {
+            crate::veredito_dev!("[a51j] persistentStateData {caminho:#018x}: {} buffer(s) de patch reaplicado(s) depois do do mundo", buffers.len());
         }
     }
     r
 }
 
-/// Na carga das tabelas (game thread), quando a tabela tem patch (produto) ou com os marcadores `a51j-sonda`/`a51j-teste` (dev): offsets pelo
-/// RTTI, hook do `PostLoad` do mundo (captura) e do `SetPersistentStateData`.
+/// Na carga das tabelas (game thread, `mods_do_usuario::pipeline`): só com a tabela de patches ativa ou com os marcadores `a51j-sonda`/`a51j-teste`.
+/// Lê os offsets pelo RTTI e instala o gancho do `PostLoad` do mundo (que guarda o último mundo) e o da candidata ao `SetPersistentStateData`.
 pub(crate) unsafe fn preparar_hook_de_psd() {
-    // 51j-b: com linha na tabela (patch de `persistentStateData` pode estar nela) ou com o teste, os hooks ligam como na sonda.
-    if !(marcador_individual("a51j-sonda") || marcador_individual("a51j-teste") || PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed)) {
+    let teste = marcador_individual("a51j-teste");
+    if !PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) && !teste && !marcador_individual("a51j-sonda") {
+        return;
+    }
+    // Sem a imagem do jogo (build sem tradução de endereço) não há o que ganchar nem RTTI a ler.
+    if crate::rebase(SET_PERSISTENT_STATE_DATA_VM).is_null() {
         return;
     }
     let Some(reg) = crate::rtti::Registry::obtain() else { return };
-    let off = |classe: &str, campo: &str| {
+    let prop = |classe: &str, campo: &str| {
         let c = reg.class_by_name(classe);
         if c.is_null() { None } else { crate::rtti::resolve_prop_in_class(c, campo).map(|(o, _, _)| o as u64) }
     };
-    let (psd, buf) = (off("worldStreamingWorld", "persistentStateData"), off("gamePersistentStateDataResource", "buffer"));
-    WORLD_PERSISTENTSTATEDATA_OFF.store(psd.unwrap_or(0), Ordering::Relaxed);
-    PSD_BUFFER_OFF.store(buf.unwrap_or(0), Ordering::Relaxed);
-    PSD_HOOK_ATIVO.store(true, Ordering::Relaxed);
-    PSD_TESTE.store(marcador_individual("a51j-teste"), Ordering::Relaxed);
-    CLASSE_PERSISTENTSTATEDATARESOURCE.store(reg.class_by_name("gamePersistentStateDataResource"), Ordering::Relaxed);
+    let (psd, buffer) = (prop("worldStreamingWorld", "persistentStateData"), prop("gamePersistentStateDataResource", "buffer"));
+    let classe = reg.class_by_name("gamePersistentStateDataResource");
+    let (Some(psd), Some(buffer)) = (psd, buffer) else {
+        crate::veredito_dev!("[a51j] offsets pelo RTTI: persistentStateData {psd:?}, buffer {buffer:?}; gancho fora");
+        return;
+    };
+    MUNDO_PSD_OFF.store(psd, Ordering::Relaxed);
+    PSD_BUFFER_DO_RECURSO_OFF.store(buffer, Ordering::Relaxed);
+    CLASSE_DO_RECURSO_DE_PSD.store(classe, Ordering::Relaxed);
+    PSD_TESTE.store(teste, Ordering::Relaxed);
     install_world_postload_hook();
     install_set_persistent_state_data_hook();
     crate::veredito_dev!(
-        "[a51j] sonda do SetPersistentStateData: persistentStateData {:?} (SDK 0xa8), buffer do recurso {:?} (SDK 0x40); hook da candidata {}",
-        psd.map(|o| format!("{o:#x}")),
-        buf.map(|o| format!("{o:#x}")),
-        if ORIG_SET_PERSISTENT_STATE_DATA.load(Ordering::Relaxed) == 0 { "FALHOU" } else { "instalado" }
+        "[a51j] persistentStateData {psd:#x}, buffer {buffer:#x}; gancho do PostLoad do mundo {}, do SetPersistentStateData {}{}",
+        if ORIG_WORLD_POSTLOAD.load(Ordering::Relaxed) == 0 { "AUSENTE" } else { "no ar" },
+        if ORIG_SET_PERSISTENT_STATE_DATA.load(Ordering::Relaxed) == 0 { "AUSENTE" } else { "no ar" },
+        if teste { " (teste)" } else { "" }
     );
 }
 
-static PSD_TESTE: AtomicBool = AtomicBool::new(false);
-static PSD_REAPLICADOS: AtomicU64 = AtomicU64::new(0);
-static CLASSE_PERSISTENTSTATEDATARESOURCE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
-
-/// 51j-b: patches da tabela cujo alvo é o caminho do `persistentStateData` do mundo (o `Ref` guarda o caminho em `+0x00`), cada um passado de novo pela
-/// original com o `buffer` do `gamePersistentStateDataResource` dele; no teste (`~/.bwms-hook-a51j-teste`), o recurso do próprio mundo entra como patch.
-unsafe fn reaplicar_patches_de_psd(f: SetPersistentStateDataFn, a1: u64, a3: u64, a4: u32) {
-    let (mundo, off_psd, off_buf) = (A51J_MUNDO.load(Ordering::Relaxed), WORLD_PERSISTENTSTATEDATA_OFF.load(Ordering::Relaxed), PSD_BUFFER_OFF.load(Ordering::Relaxed));
-    if mundo == 0 || off_psd == 0 || off_buf == 0 || !crate::memoria::is_readable((mundo + off_psd) as *const c_void, 0x18) {
-        return;
-    }
-    let caminho = ((mundo + off_psd) as *const u64).read_unaligned();
-    let cls = CLASSE_PERSISTENTSTATEDATARESOURCE.load(Ordering::Relaxed);
-    let mut buffers: Vec<(u64, u64)> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g
-            .do_alvo(caminho)
-            .filter(|_| caminho != 0)
-            .filter_map(|p| {
-                let r = recurso_do_patch_da_classe(p.token, (off_buf + 0x28) as usize, cls);
-                (!r.is_null()).then(|| (p.patch, r as u64 + off_buf))
-            })
-            .collect(),
-        Err(_) => return,
-    };
-    if PSD_TESTE.load(Ordering::Relaxed) {
-        let b = buffer_psd_do_mundo();
-        if b != 0 {
-            buffers.push((caminho, b));
-        }
-    }
-    for (patch, b) in buffers {
-        f(a1, b as *mut u8, a3, a4);
-        if crate::primeiras(&PSD_REAPLICADOS, 8) {
-            crate::veredito_dev!("[a51j] persistentStateData {caminho:#018x}: buffer {b:#x} do patch {patch:#018x} reaplicado pela original");
-        }
-    }
-}
-
-/// 51j-b, com `~/.bwms-hook-a51j-teste`, em gameplay: a original foi chamada com o buffer do mundo e o patch (no teste, o próprio recurso) foi reaplicado.
-#[cfg(feature = "devtools")]
-pub(crate) fn psd_teste_tick() {
-    static VOLTAS: AtomicU64 = AtomicU64::new(0);
-    static FEITO: AtomicBool = AtomicBool::new(false);
-    if FEITO.load(Ordering::Relaxed) || !crate::tempo::a_cada(VOLTAS.fetch_add(1, Ordering::Relaxed), 120) || !marcador_individual("a51j-teste") || !crate::inicio::boot::gameplay_real() {
-        return;
-    }
-    FEITO.store(true, Ordering::Relaxed);
-    let (chamadas, do_mundo, reaplicados) =
-        (PSD_CHAMADAS.load(Ordering::Relaxed), PSD_CHAMADAS_DO_MUNDO.load(Ordering::Relaxed), PSD_REAPLICADOS.load(Ordering::Relaxed));
-    crate::veredito_dev!(
-        "[a51j] VEREDITO-51J {chamadas} chamada(s) do SetPersistentStateData, {do_mundo} com o buffer do persistentStateData do mundo, {reaplicados} reaplicação(ões) de patch pela original; psd-ok={}",
-        do_mundo > 0 && reaplicados >= do_mundo
-    );
-}
-
-/// Resumo da sonda, com `~/.bwms-hook-a51j-sonda`, em gameplay.
-#[cfg(feature = "devtools")]
-pub(crate) fn psd_sonda_tick() {
-    static VOLTAS: AtomicU64 = AtomicU64::new(0);
-    static FEITO: AtomicBool = AtomicBool::new(false);
-    if FEITO.load(Ordering::Relaxed) || !crate::tempo::a_cada(VOLTAS.fetch_add(1, Ordering::Relaxed), 120) || !marcador_individual("a51j-sonda") || !crate::inicio::boot::gameplay_real() {
-        return;
-    }
-    FEITO.store(true, Ordering::Relaxed);
-    let (chamadas, do_mundo) = (PSD_CHAMADAS.load(Ordering::Relaxed), PSD_CHAMADAS_DO_MUNDO.load(Ordering::Relaxed));
-    let buffer = unsafe { buffer_psd_do_mundo() };
-    crate::veredito_dev!(
-        "[a51j] VEREDITO-51J-SONDA {chamadas} chamada(s) da candidata 0x102d0d090, {do_mundo} com o buffer do persistentStateData do streaming world; mundo {:#x}, buffer do mundo agora {buffer:#x}; identidade-ok={}",
-        A51J_MUNDO.load(Ordering::Relaxed),
-        do_mundo > 0
-    );
-}
-
-/// 51j-a: hook da candidata ao `SetPersistentStateData`.
+/// A#51 51j: gancho da candidata ao `SetPersistentStateData`.
 unsafe fn install_set_persistent_state_data_hook() {
     if ORIG_SET_PERSISTENT_STATE_DATA.load(Ordering::Relaxed) != 0 {
         return;
@@ -4609,7 +4566,7 @@ fn rt_path_recusado(path_hash: u64) -> Option<String> {
 #[cfg(test)]
 mod testes {
     use super::*;
-    use crate::mods_do_usuario::pipeline::testes::travar_tabelas_do_archivexl;
+    use crate::mods_do_usuario::pipeline::testes::travar_tabelas_xl;
 
     /// `game_dir_from_dylib` dá a pasta do jogo só quando a dylib mora na pasta do runtime (`<jogo>/red4ext/`). No executável de teste a
     /// pasta da dylib é `target/<perfil>/deps`, e a pasta do jogo fica desconhecida.
@@ -4704,7 +4661,7 @@ mod testes {
     /// aceitou e a ausência do 0 na tabela, não o tamanho dela.
     #[test]
     fn par_com_caminho_nulo_nao_entra_nas_tabelas() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let nulas = " | base\\c.mesh\nbase\\a.mesh | \n | base\\orig.mesh | copy\nbase\\k.mesh |  | copy\n/ | base\\x.mesh\n";
         assert_eq!(reslink_texto(nulas, false), 0);
         assert_eq!(reslink_texto(nulas, true), 0, "a recarga aplica a mesma guarda");
@@ -4724,7 +4681,7 @@ mod testes {
     /// responde só pelo link. As tabelas são do processo de teste inteiro: os caminhos `bwms\f125\…` são só deste teste.
     #[test]
     fn apelidos_nos_dois_sentidos_por_link_e_por_copia() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let h = |nome: &str| resource_path_hash(&format!("bwms\\f125\\{nome}.mesh"));
         let (a, b, c) = (h("a"), h("b"), h("c"));
         assert_eq!(reslink_texto("bwms\\f125\\a.mesh | bwms\\f125\\b.mesh\nbwms\\f125\\c.mesh | bwms\\f125\\b.mesh | copy\n", false), 2);
@@ -4735,7 +4692,7 @@ mod testes {
         assert_eq!(reslink_aliases_of(c), vec![b]);
         assert!(reslink_aliases_of(h("nenhum")).is_empty());
 
-        // Cópia `k` de `o` e depois `RegisterLink(k, z)`: na referência o link sobrescreve `s_mappings[k]`, e a cópia sai da união.
+        // Cópia `k` de `o` e depois `RegisterLink(k, z)`: o link manda em `k`, e a cópia sai da união.
         let (k, o, z) = (h("k"), h("o"), h("z"));
         assert!(depot::adicionar_copia(k, o) && reslink_add(k, z));
         assert_eq!(reslink_aliases_of(k), vec![z]);
@@ -4757,13 +4714,13 @@ mod testes {
         assert_eq!(reslink_aliases_of(e), vec![d]);
     }
 
-    /// `apply-03`, a folha: com `substituir` (o que o `ArchiveXL.Reload` passa), `reslink_texto`/`reslink_file` trocam as tabelas do `resource.link` e do
-    /// `resource.copy` pelas do arquivo. O par e a cópia que saíram do arquivo somem, o par de `RegisterLink` também (o `Configure` da referência), e o
+    /// `apply-03`, a folha: com `substituir` (o que o `Reload` da fachada de recursos passa), `reslink_texto`/`reslink_file` trocam as tabelas do `resource.link` e do
+    /// `resource.copy` pelas do arquivo. O par e a cópia que saíram do arquivo somem, o par de `RegisterLink` também, e o
     /// arquivo ausente esvazia as duas. Sem `substituir` (o boot), o par de `RegisterLink` gravado antes fica. A fiação do `Reload` até aqui é testada em
     /// `mods_do_usuario::pipeline::testes`. Os caminhos `bwms\f127\…` são só deste teste.
     #[test]
     fn substituir_troca_as_tabelas_do_link_e_do_copy_pelas_do_arquivo() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let h = |nome: &str| resource_path_hash(&format!("bwms\\f127\\{nome}.mesh"));
         let (a, b, alvo, c, d, orig, registrado, servido) = (h("a"), h("b"), h("alvo"), h("c"), h("d"), h("orig"), h("registrado"), h("servido"));
 
@@ -4797,7 +4754,7 @@ mod testes {
     #[test]
     fn carga_de_dez_mil_pares_fica_com_o_ultimo() {
         use std::fmt::Write;
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let h = |nome: &str| resource_path_hash(&format!("bwms\\f405\\{nome}.mesh"));
         for n in [1_000, 10_000] {
             let mut texto = String::new();
@@ -4837,7 +4794,7 @@ mod testes {
     /// na cópia; a contagem que cada shim lê sobe 1. Os caminhos `bwms\f405u\…` são só deste teste.
     #[test]
     fn tres_pares_com_a_mesma_origem_ficam_com_o_ultimo_no_link_e_na_copia() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let h = |nome: &str| resource_path_hash(&format!("bwms\\f405u\\{nome}.mesh"));
         let link_antes = RESLINK.count.load(Ordering::Relaxed);
         for alvo in ["a", "b", "c"] {
@@ -4936,7 +4893,7 @@ mod testes {
     /// deste teste.
     #[test]
     fn shim_troca_so_o_path_da_tabela_e_preserva_os_argumentos() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         ORIG_RESLINK.store(original_que_devolve_os_argumentos as *const () as usize as u64, Ordering::Relaxed);
         let shim: extern "C" fn(u64, u64, u64, u64, u64, u64, u64, u64) -> Argumentos = unsafe { std::mem::transmute(reslink_shim as *const ()) };
         let chamar = |path: u64| shim(path, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77);
@@ -4970,7 +4927,7 @@ mod testes {
     #[cfg(feature = "devtools")]
     #[test]
     fn shim_de_dev_grava_o_ring_e_segue_pelo_do_publico() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         ORIG_RESLINK.store(original_que_devolve_os_argumentos as *const () as usize as u64, Ordering::Relaxed);
         let shim: extern "C" fn(u64, u64, u64, u64, u64, u64, u64, u64) -> Argumentos =
             unsafe { std::mem::transmute(reslink_shim_com_ring as *const ()) };
@@ -4998,7 +4955,7 @@ mod testes {
             path
         }
         const CHAMADAS: usize = 1_000_000;
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         ORIG_RESLINK.store(original_identidade as *const () as usize as u64, Ordering::Relaxed);
         let shim: extern "C" fn(u64) -> u64 = unsafe { std::mem::transmute(reslink_shim as *const ()) };
         let medir = |rotulo: &str, casos: &[(u64, u64)]| {
@@ -5268,7 +5225,7 @@ mod testes {
     #[test]
     fn o_que_o_boot_grava_os_leitores_do_runtime_leem() {
         use bwms_primitives::tabelas;
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let h = |nome: &str| bwms_primitives::resource_path_hash(&format!("bwms\\f726\\{nome}"));
         let g = std::env::temp_dir().join(format!("bwms-f726-install-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&g);

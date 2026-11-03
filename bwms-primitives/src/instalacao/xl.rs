@@ -1,36 +1,32 @@
-//! Parser do formato `.xl` do ArchiveXL (subconjunto YAML), zero-dep (só `std`).
+//! Parser do formato `.xl` (subconjunto YAML), zero-dep (só `std`).
 //!
-//! O `.xl` é um YAML que diz ao ArchiveXL o que fazer ao carregar um mod. Este módulo lê o
-//! arquivo num modelo TIPADO (`XlFile`) a partir da fonte C++ do ArchiveXL
-//! (`cp2077-archive-xl/src/App/Extensions/*/Config.cpp`). Seções tipadas (a lista única, com
+//! O `.xl` é um YAML que diz o que fazer ao carregar um mod. Este módulo lê o
+//! arquivo num modelo TIPADO (`XlFile`). Seções tipadas (a lista única, com
 //! contagem, é `XlFile::secoes`):
-//!   - `factories:`            (FactoryIndex/Config.cpp)  — scalar OU lista de paths .csv
-//!   - `resource.patch:`       (ResourcePatch/Config.cpp) — path → scalar | seq | {props,targets}, tag `!exclude`
-//!   - `resource.{link,copy}:` (ResourceLink/Config.cpp)  — caminho → scalar | seq de caminhos; o link vira pares (pedido, servido)
-//!   - `resource.{scope,fix}:` (ResourceMeta/Config.cpp)
-//!   - `localization.{onscreens,subtitles,lipmaps,vomaps}` + `extend` (Localization/Config.cpp)
-//!   - `overrides.tags` (Garment), `quest.phases` (QuestPhase), `journal` (Journal),
-//!     `player.bodyTypes` (PuppetState), `customizations` (Customization), `animations` (Animation),
-//!     `streaming.{blocks,sectors}` (WorldStreaming)
+//!   - `factories:`            — scalar OU lista de paths .csv
+//!   - `resource.patch:`       — path → scalar | seq | {props,targets}, tag `!exclude`
+//!   - `resource.{link,copy}:` — caminho → scalar | seq de caminhos; o link vira pares (pedido, servido)
+//!   - `resource.{scope,fix}:`
+//!   - `localization.{onscreens,subtitles,lipmaps,vomaps}` + `extend`
+//!   - `overrides.tags`, `quest.phases`, `journal`,
+//!     `player.bodyTypes`, `customizations`, `animations`,
+//!     `streaming.{blocks,sectors}`
 //!
 //! Chave de topo desconhecida (customNodes, ...) e subchave desconhecida de `resource` entram em
 //! `XlFile::other_sections`; subchave desconhecida das outras seções é ignorada sem registro.
 //! Entrada de seção conhecida em formato inválido fica de fora do modelo e o motivo entra em
-//! `XlFile::issues`, com o que fazer; a que a referência aceita e o BWMS ainda não aplica entra em `XlFile::sem_efeito_no_bwms`.
+//! `XlFile::issues`, com o que fazer; a que o formato aceita e o BWMS ainda não aplica entra em `XlFile::sem_efeito_no_bwms`.
 //! Ficam sem issue:
 //! - contêiner do tipo errado, que some do modelo: `resource`, `quest`, `overrides`, `player`, `customizations`, `localization` e
-//!   `streaming` que não são mapa; `resource.{patch,link,copy,scope,fix}` que não são mapa; `quest.phases` e `streaming.sectors` que
-//!   não são lista. `nodeDeletions`/`nodeMutations` que não são lista também saem calados, e o setor só avisa se ficar sem as duas;
+//!   `streaming` que não são mapa; `resource.{patch,link,copy,scope}` que não são mapa;
 //! - campo de entrada válida no tipo errado, que sai ou fica no padrão: `props`/`targets` do `resource.patch` e item de lista que não
-//!   é texto (a entrada só avisa se ficar sem alvo e sem props); par de `names`/`paths` do `resource.fix` com valor que não é texto;
-//!   `streaming.blocks`; `localization.extend`; `vars`, `priority`, `component` e item de `entity` que não é texto em `animations`;
-//!   `intercept` e `socket` de fase; os campos de uma mutação de node (`position`, `orientation`, `scale`, `nbNodesUnderProxyDiff`,
-//!   recurso, aparência, record).
+//!   é texto (a entrada só avisa se ficar sem alvo e sem props); `localization.extend`; `vars`, `priority`, `component` e item de
+//!   `entity` que não é texto em `animations`.
 //!
-//! O YAML é lido pelo leitor único `crate::tweakxl::yaml`, o mesmo dos tweaks do TweakXL (os dois mods leem com o
-//! yaml-cpp). O subconjunto e a lista do que fica fora dele estão no doc daquele módulo.
+//! O YAML é lido pelo leitor único `crate::tweaks::yaml`, o mesmo dos tweaks declarativos. O subconjunto e a lista do que fica fora
+//! dele estão no doc daquele módulo.
 
-use crate::tweakxl::yaml::{self, Kind, Node};
+use crate::tweaks::yaml::{self, Kind, Node};
 
 // ============================ modelo tipado do .xl ============================
 
@@ -45,21 +41,21 @@ pub struct ResourcePatch {
 }
 
 /// Um par de `resource.link`: o loader que pede `pedido` recebe `servido`. Um por item, na ordem do YAML. A forma do YAML decide qual lado é a
-/// chave, e o parse já entrega o par orientado (`ResourceLink/Config.cpp:25-48`, `finalLinks[linkPath] = targetPath` de `Extension.cpp:85-113`):
+/// chave, e o parse já entrega o par orientado:
 /// - escalar `chave: valor`: a chave é pedida e o valor servido (caminho falso → recurso real);
-/// - sequência `chave: [itens]`: cada item é pedido e a chave servida (o `Migration.xl`: cada nome legado → o caminho da chave).
+/// - sequência `chave: [itens]`: cada item é pedido e a chave servida (migração: cada nome legado → o caminho da chave).
 ///
 /// Nenhum dos dois lados é o caminho nulo: o parse tira a entrada ou o item (`caminhos_da_entrada`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResourceLink {
-    /// Caminho que o jogo pede. É o lado que o escopo expande no plano (`ExpandList` de `Extension.cpp:87`).
+    /// Caminho que o jogo pede. É o lado que o escopo expande no plano.
     pub pedido: String,
     /// Caminho que o loader serve no lugar do pedido.
     pub servido: String,
 }
 
 /// Um escopo de recurso (`resource.scope`): o recurso `resource` define o ESCOPO dos `targets`
-/// (ResourceMeta/Config.cpp `LoadScopes`). Alvos = scalar OU lista. Sem caminho nulo e com ao menos um alvo (`caminhos_da_entrada`).
+/// Alvos = scalar OU lista. Sem caminho nulo e com ao menos um alvo (`caminhos_da_entrada`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResourceScope {
     pub resource: String,
@@ -67,7 +63,7 @@ pub struct ResourceScope {
 }
 
 /// Uma cópia de recurso (`resource.copy`): copia `source` para cada `targets`
-/// (ResourceLink/Config.cpp). Alvos = scalar OU lista. Sem caminho nulo e com ao menos um alvo (`caminhos_da_entrada`).
+/// Alvos = scalar OU lista. Sem caminho nulo e com ao menos um alvo (`caminhos_da_entrada`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResourceCopy {
     pub source: String,
@@ -76,7 +72,6 @@ pub struct ResourceCopy {
 
 /// Um conserto de recurso (`resource.fix`): no recurso `resource`, remapeia nomes (`names`:
 /// nome→nome), paths (`paths`: path→path) e parâmetros de contexto (`context`: nome→valor).
-/// (ResourceMeta/Config.cpp `LoadFixes`.)
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ResourceFix {
     pub resource: String,
@@ -92,27 +87,22 @@ pub struct LocalizationGroup {
     pub entries: Vec<(String, Vec<String>)>,
 }
 
-/// `player.bodyTypes` (`PuppetState/Config.cpp`): lista de nomes de tipo de corpo (scalar OU seq).
+/// `player.bodyTypes`: lista de nomes de tipo de corpo (scalar OU seq).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PuppetStateConfig {
     pub body_types: Vec<String>,
 }
 
-/// `customizations.{male,female}` (`Customization/Config.cpp`): paths de opção de customização
-/// por gênero (cada um scalar OU seq — `ReadOptions` idêntica pros dois).
+/// `customizations.{male,female}`: paths de opção de customização
+/// por gênero (cada um scalar OU seq — a mesma leitura pros dois).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct CustomizationConfig {
     pub male_options: Vec<String>,
     pub female_options: Vec<String>,
 }
 
-/// Uma entrada de `animations[]` (`Animation/Config.cpp::AnimationEntry`). `entity`: nomes de
-/// entidade-alvo (scalar OU seq — **achado de RE: o C++ upstream tem um bug de copy-paste,
-/// `else if (entityNode.IsScalar())` deveria ser `IsSequence()`, então a forma-lista NUNCA
-/// preenche no binário real; implementamos CORRETO aqui pro nosso parser ter valor prático,
-/// documentando a divergência**). `set`: nome do anim set (obrigatório). `vars`: **outro bug
-/// upstream** (`if (variablesNode.IsScalar())` checa o nó ERRADO — o pai, não o item do loop —
-/// `variables` fica SEMPRE vazio no binário real; idem, implementamos correto). `priority`
+/// Uma entrada de `animations[]`. `entity`: nomes de
+/// entidade-alvo (scalar OU seq). `set`: nome do anim set (obrigatório). `vars`: lista de variáveis. `priority`
 /// (default 128) e `component` (default "root") opcionais.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AnimationEntry {
@@ -129,7 +119,9 @@ impl Default for AnimationEntry {
     }
 }
 
-/// Vetor 3D (`scale`, sempre `[x, y, z]` — exatamente 3 floats).
+// Modelo de `streaming` lido por `tabelas_de_runtime::emit_streaming_table`/`linhas_de_mutacao` e `emit_resource_patch_table`.
+
+/// Vetor 3D.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Vec3 {
     pub x: f32,
@@ -137,10 +129,7 @@ pub struct Vec3 {
     pub z: f32,
 }
 
-/// Vetor 4D (`position`). **Achado de RE:** o `.W` final é SEMPRE forçado a `0` no C++ real
-/// (`WorldStreaming/Config.cpp`), mesmo quando a lista YAML tem 4 valores — o 4º valor (índice 3)
-/// é lido em `positionValues[3]` mas NUNCA usado; só serve pra decidir se a forma de 4 é aceita
-/// (nó de sector aceita 3 OU 4 valores; sub-node exige EXATAMENTE 4). Replicado aqui fielmente.
+/// Vetor 4D.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Vec4 {
     pub x: f32,
@@ -149,7 +138,7 @@ pub struct Vec4 {
     pub w: f32,
 }
 
-/// Quaternion (`orientation`, sempre `[i, j, k, r]` — exatamente 4 floats, ordem i/j/k/r do RED4).
+/// Quaternion, componentes i, j, k, r.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Quat {
     pub i: f32,
@@ -158,11 +147,7 @@ pub struct Quat {
     pub r: f32,
 }
 
-/// Mutação de um SUB-node (`actorMutations`/`instanceMutations` dentro de um `nodeMutations[]`;
-/// `WorldStreaming/Config.cpp::ParseSubMutations`). Exige `expectedActors`/`expectedInstances`
-/// (a contagem esperada) presente e válido, senão a lista inteira é ignorada (fiel ao C++: sem
-/// count válido, `ParseSubMutations` devolve `false` cedo e NADA é lido). `position` aqui exige
-/// EXATAMENTE 4 valores (≠ do node-level, que aceita 3 ou 4).
+/// Mutação de um sub-node de um node de setor.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorldSubNodeMutation {
     pub sub_node_index: i64,
@@ -171,14 +156,7 @@ pub struct WorldSubNodeMutation {
     pub scale: Option<Vec3>,
 }
 
-/// Mutação de um node de streaming sector (`nodeMutations[]`, `WorldStreaming/Config.cpp`).
-/// `resource_path`/`appearance_name`/`record_id` cada um lido de VÁRIAS chaves-sinônimo (a última
-/// presente vence — `resource`/`mesh`/`meshRef`/`material`/`effect`/`entityTemplate` pro path;
-/// `appearance`/`appearanceName`/`meshAppearance` pro nome; `recordID`/`recordId`/`objectRecordId`
-/// pro TweakDBID). `sub_node_mutations` vem de `actorMutations` e `instanceMutations`: as listas
-/// dos dois sinônimos se ACUMULAM (`push_back` do C++); `expected_sub_nodes` é a contagem do último
-/// sinônimo processado com sucesso (o C++ grava a contagem mesmo quando a lista falha depois —
-/// divergência conhecida).
+/// Mutação de um node de setor.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorldNodeMutation {
     pub node_index: i64,
@@ -194,24 +172,18 @@ pub struct WorldNodeMutation {
     pub sub_node_mutations: Vec<WorldSubNodeMutation>,
 }
 
-/// Deleção de um node de streaming sector (`nodeDeletions[]`). `sub_node_deletions` vem de
-/// `actorDeletions` e `instanceDeletions`, com o mesmo acúmulo e a mesma contagem de
-/// `WorldNodeMutation`; um item inválido no 2º sinônimo apaga a lista inteira, inclusive o que o
-/// 1º leu (`aDeletions.clear()`).
+/// Deleção de um node de setor.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorldNodeDeletion {
     pub node_index: i64,
     pub node_type: String,
     pub expected_sub_nodes: i64,
     pub sub_node_deletions: Vec<i64>,
-    /// `[ator, shape]` de `actorDeletions` (ArchiveXL 1.27.0): só a shape do ator perde a colisão. Com só pares, o node não é apagado inteiro.
+    /// `[ator, shape]` de `actorDeletions`: só a shape do ator perde a colisão. Com só pares, o node não é apagado inteiro.
     pub shape_deletions: Vec<(i64, i64)>,
 }
 
-/// Um streaming sector modificado (`streaming.sectors[]`). `expected_nodes` é obrigatório e usado
-/// como LIMITE de sanidade pros índices de `nodeIndex` (fora do range = descartado, fiel ao C++).
-/// Uma entrada só é mantida se tiver PELO MENOS 1 deleção ou 1 mutação; sem nenhuma ela sai com issue
-/// (diagnóstico do BWMS: a referência descarta calada, `WorldStreaming/Config.cpp:319-322`).
+/// Um setor modificado (`streaming.sectors[]`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorldSectorMod {
     pub path: String,
@@ -220,21 +192,19 @@ pub struct WorldSectorMod {
     pub node_mutations: Vec<WorldNodeMutation>,
 }
 
-/// `streaming.{blocks,sectors}` (`WorldStreaming/Config.cpp`) — o 7º e último item da lista
-/// original de "11 seções" do parser `.xl` (as outras 4 citadas — Attachment/Mesh/Transmog/
-/// InkSpawner — não têm `Config.cpp`/seção própria nenhuma, RE 2026-07-15 cont.60).
+/// `streaming.{blocks,sectors}`.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct WorldStreamingSection {
     pub blocks: Vec<String>,
     pub sectors: Vec<WorldSectorMod>,
 }
 
-/// Máscara de chunks de mesh (`Garment/ChunkMask.hpp`, RE 2026-07-15): decide quais índices de
+/// Máscara de chunks de mesh (RE 2026-07-15): decide quais índices de
 /// chunk do componente aparecem. `show=true` = seleção POSITIVA (a máscara final tem bit setado
 /// exatamente nos chunks listados, forma `show: [...]`, sem inversão). `show=false` = seleção por
 /// EXCLUSÃO (a máscara final é o COMPLEMENTO dos chunks listados — forma `hide: [...]`, sequência
 /// nua, OU escalar cru já-computado). A lista vira máscara em `crate::override_state::mascara_de_chunks`,
-/// o mesmo `ChunkMask::Set` da tabela de tags do runtime. Confirma e generaliza o achado da RE do full-body:
+/// a mesma regra da tabela de tags do runtime. Confirma e generaliza o achado da RE do full-body:
 /// `chunkMask=0xFFFFFFFFFFFFFF1F` em `t0_000_pwa_fpp__01_ca_pale` = `hide: [5, 6, 7]` por esta
 /// fórmula exata (`~((1<<5)|(1<<6)|(1<<7)) = 0xFFFFFFFFFFFFFF1F`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,23 +220,16 @@ impl ChunkMask {
     }
 }
 
-/// Uma conexão de nó do quest graph (`node`+`socket`, ou só `node` — `QuestPhase/Config.cpp::
-/// FillConnection`): forma mapa `{node:[..], socket: nome}` OU sequência nua (só node path, sem
-/// socket).
+// Modelo de `quest.phases` lido por `tabelas_de_runtime::emit_questphase_table`.
+
+/// Ponto de conexão no grafo de quest: caminho de ids de nó e socket opcional.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct QuestPhaseConnection {
     pub node_path: Vec<u16>,
     pub socket: Option<String>,
 }
 
-/// Uma phase de quest (`quest.phases[]`, `QuestPhase/Config.cpp`): `path`+`parent` obrigatórios
-/// (senão a entrada é descartada); `connection`/`input` alimentam o MESMO campo `input` (o C++
-/// chama `FillConnection` duas vezes seguidas pro mesmo destino, `connection` antes): o `input` em
-/// mapa troca node path e socket, em lista troca só o node path e mantém o socket do `connection`;
-/// `output` e `intercept` (bool) opcionais.
-/// `parent` é uma STRING só (não lista): o C++ guarda num `Set` mas cada parse de UM phase-node só
-/// insere UM scalar — o merge entre vários mods pro mesmo `path` acontece rio-acima, fora do escopo
-/// de parsear um `.xl` isolado.
+/// Uma fase de quest de mod (`quest.phases[]`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct QuestPhaseMod {
     pub phase_path: String,
@@ -277,10 +240,7 @@ pub struct QuestPhaseMod {
 }
 
 /// Um override de tag de garment (`overrides.tags.<tag>.<component>` → máscara de chunks;
-/// `Garment/Config.cpp::GarmentOverrideConfig::LoadYAML` — a chave de TOPO real é `overrides`,
-/// não `garment` — `GarmentOverrideConfig::LoadYAML` lê `aNode["overrides"]["tags"]` direto da
-/// raiz do documento, confirmado lendo `ExtensionLoader.cpp::AddConfig`, que passa o documento
-/// INTEIRO pra cada extensão decidir sua própria subchave).
+/// a chave de TOPO real é `overrides`, não `garment`, lida direto da raiz do documento).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GarmentOverrideTag {
     pub tag: String,
@@ -308,10 +268,9 @@ pub struct XlFile {
     /// Chaves de topo e subchaves de `resource` ainda não tipadas (customNodes, ...). Subchave
     /// desconhecida das outras seções não entra aqui.
     pub other_sections: Vec<String>,
-    /// Entradas de seção conhecida em formato inválido, que ficaram de fora do modelo (o `issues`
-    /// da referência, `ExtensionBase.hpp:44`), com onde estão e o que fazer.
+    /// Entradas de seção conhecida em formato inválido, que ficaram de fora do modelo, com onde estão e o que fazer.
     pub issues: Vec<String>,
-    /// Entradas que a referência aceita e o BWMS ainda não aplica (o `context` do `resource.fix`, o grupo de `localization` sem
+    /// Entradas que o formato aceita e o BWMS ainda não aplica (o `context` do `resource.fix`, o grupo de `localization` sem
     /// idioma), com onde estão: limite do BWMS, não defeito do `.xl`. Fora do `issues` para o relatório da `Mods/` não mandar corrigir
     /// um arquivo que funciona no Windows; a gravação das tabelas as junta em `TabelasDosXl::sem_efeito_no_bwms` (`tabelas_de_runtime::entradas_sem_efeito`).
     pub sem_efeito_no_bwms: Vec<String>,
@@ -337,10 +296,9 @@ fn to_str_list(node: &Node) -> Vec<String> {
     }
 }
 
-/// `to_str_list` com o aviso do "Bad format. Expected resource path or list of paths." da referência
-/// (`FactoryIndex`/`Journal`/`PuppetState`/`Customization`/`Localization` `Config.cpp`): mapa, ou item
+/// `to_str_list` com aviso de formato (`factories`/`journal`/`player.bodyTypes`/`customizations`/`localization`): mapa, ou item
 /// de lista que não é escalar, fica de fora. O resultado é o mesmo do `to_str_list`. Em `resource.link`/`copy`/`scope`
-/// o aviso é diagnóstico do BWMS: lá a referência não avisa (`ResourceLink/Config.cpp:36-48,76-88`, `ResourceMeta/Config.cpp:43-55`).
+/// o aviso também é dado.
 fn lista_com_aviso(node: &Node, onde: &str, issues: &mut Vec<String>) -> Vec<String> {
     if node.as_map().is_some() || node.as_seq().is_some_and(|s| s.iter().any(|i| i.as_str().is_none())) {
         issues.push(format!("{onde}: formato inválido (parte ignorada); use um valor ou uma lista de valores"));
@@ -360,9 +318,7 @@ pub fn parse_xl(input: &str) -> Result<XlFile, String> {
             "localization" => parse_localization(val, &mut xl),
             "overrides" => parse_garment(val, &mut xl),
             "quest" => parse_quest_phase(val, &mut xl),
-            // `Journal/Config.cpp`: scalar OU seq de paths. Achado de RE: no C++ real, a forma
-            // escalar lê `aNode.Scalar()` (a RAIZ do documento, não o nó "journal") — sempre
-            // vazio na prática; implementamos correto aqui (lê o valor do próprio nó).
+            // scalar OU seq de paths; a forma escalar lê o valor do próprio nó.
             "journal" => xl.journals = lista_com_aviso(val, "journal", &mut xl.issues),
             "player" => parse_puppet_state(val, &mut xl),
             "customizations" => parse_customization(val, &mut xl),
@@ -387,11 +343,9 @@ fn caminho_nulo(caminho: &str) -> bool {
     crate::resource_path_hash(caminho.trim()) == 0
 }
 
-/// Caminhos de uma entrada de `resource.link`/`copy`/`scope` (`chave: caminho` ou `chave: [caminhos]`), ou `None` quando a entrada sai. A referência
-/// descarta o caminho nulo do valor com `if (sourcePath)`/`if (targetPath)` (`ResourceLink/Config.cpp:30,43,70,83`, `ResourceMeta/Config.cpp:37,50`) e
-/// não insere nada com valor mapa. Aqui a chave nula também tira a entrada: o par com o caminho 0 faz o shim do runtime trocar todo `ResourcePath` 0, e o
-/// `resolver` colapsaria `a → 0 → c` em `a → c`. Entrada sem caminho no fim não muda tabela nenhuma e sai. Os avisos são diagnóstico do BWMS: a
-/// referência descarta calada.
+/// Caminhos de uma entrada de `resource.link`/`copy`/`scope` (`chave: caminho` ou `chave: [caminhos]`), ou `None` quando a entrada sai. O caminho
+/// nulo do valor sai, e valor mapa não insere nada. A chave nula também tira a entrada: o par com o caminho 0 faz o shim do runtime trocar todo `ResourcePath` 0, e o
+/// `resolver` colapsaria `a → 0 → c` em `a → c`. Entrada sem caminho no fim não muda tabela nenhuma e sai. Os avisos são diagnóstico do BWMS.
 fn caminhos_da_entrada(secao: &str, efeito: &str, chave: &str, valor: &Node, issues: &mut Vec<String>) -> Option<Vec<String>> {
     if caminho_nulo(chave) {
         issues.push(format!("resource.{secao}: chave '{chave}' é o caminho vazio ({efeito}); informe o caminho do recurso na chave"));
@@ -423,7 +377,7 @@ fn parse_resource(node: &Node, xl: &mut XlFile) {
             }
         }
     }
-    // scope: recurso → alvos (scalar|seq). Valor mapa não dá alvo nenhum na referência (`ResourceMeta/Config.cpp:32-56`): o escopo sai.
+    // scope: recurso → alvos (scalar|seq). Valor mapa não dá alvo nenhum: o escopo sai.
     if let Some(scope) = node.get("scope").and_then(|s| s.as_map()) {
         for (path, targets) in scope {
             if let Some(targets) = caminhos_da_entrada("scope", "escopo ignorado", path, targets, &mut xl.issues) {
@@ -439,29 +393,8 @@ fn parse_resource(node: &Node, xl: &mut XlFile) {
             }
         }
     }
-    // fix: recurso → { names, paths, context } (cada um map string→string). Definição que não é mapa, ou names/paths/context presente
-    // que não é mapa, tira a entrada inteira, como o `continue` de `ResourceMeta/Config.cpp:69-83`: aplicar só a parte válida trocaria
-    // nomes ou caminhos que o autor pediu junto com a parte inválida.
-    if let Some(fix) = node.get("fix").and_then(|f| f.as_map()) {
-        for (res, def) in fix {
-            if def.as_map().is_none() {
-                xl.issues.push(format!("resource.fix.{res}: formato inválido (entrada ignorada); use um mapa com names, paths ou context"));
-                continue;
-            }
-            if let Some(chave) = ["names", "paths", "context"].into_iter().find(|k| def.get(k).is_some_and(|v| v.as_map().is_none())) {
-                xl.issues.push(format!("resource.fix.{res}.{chave}: formato inválido (entrada ignorada); use um mapa de valor antigo → valor novo"));
-                continue;
-            }
-            // O `emit_resfixes` grava o context e o runtime o entrega ao estado de mesh dinâmico nativo da 2.5 pelo `PrepareMeshState` do jogo
-            // (`cp77-console` `aparencia::injetar_contexto_do_mesh`; na referência, `ResourcePatch/Extension.cpp:649`).
-            let context = str_pairs(def.get("context"));
-            xl.fixes.push(ResourceFix {
-                resource: res.clone(),
-                names: str_pairs(def.get("names")),
-                paths: str_pairs(def.get("paths")),
-                context,
-            });
-        }
+    if let Some(fix) = node.get("fix") {
+        parse_resource_fix(fix, xl);
     }
     if let Some(patch) = node.get("patch").and_then(|p| p.as_map()) {
         for (path, def) in patch {
@@ -498,7 +431,7 @@ fn parse_resource(node: &Node, xl: &mut XlFile) {
             }
         }
     }
-    // link: a sequência inverte o par em relação ao escalar (`ResourceLink/Config.cpp:25-48`), e a direção se resolve aqui, uma vez.
+    // link: a sequência inverte o par em relação ao escalar, e a direção se resolve aqui, uma vez.
     if let Some(link) = node.get("link").and_then(|l| l.as_map()) {
         for (chave, valor) in link {
             let Some(caminhos) = caminhos_da_entrada("link", "link ignorado", chave, valor, &mut xl.issues) else {
@@ -513,13 +446,35 @@ fn parse_resource(node: &Node, xl: &mut XlFile) {
     }
 }
 
-/// sequência de escalares → índices de chunk; `None` se um item não for número de 0 a 255, a regra de `to_f32_list`. Tirar só o item
-/// inválido mudaria o pedido: `[x]` ficaria vazio, que é o hide-all (`Hide()` sem lista, máscara 0). A faixa 0..=63 é do `ChunkMask::from_chunks`.
+/// `resource.fix` (o valor da chave `fix` de `resource`) → `xl.fixes` e `xl.issues`. Uma sublista presente que não é mapa tira a entrada
+/// inteira: aplicar só as outras trocaria parte do recurso e deixaria o resto como o mod não pediu.
+fn parse_resource_fix(fix: &Node, xl: &mut XlFile) {
+    let Some(entradas) = fix.as_map() else { return };
+    for (recurso, def) in entradas {
+        if def.as_map().is_none() {
+            xl.issues.push(format!("resource.fix.{recurso}: formato inválido (entrada ignorada); use um mapa com names, paths ou context"));
+            continue;
+        }
+        let invalida = ["names", "paths", "context"].into_iter().find(|c| def.get(c).is_some_and(|v| v.as_map().is_none()));
+        if let Some(chave) = invalida {
+            xl.issues.push(format!("resource.fix.{recurso}.{chave}: formato inválido (entrada ignorada); use um mapa de valor antigo → valor novo"));
+            continue;
+        }
+        xl.fixes.push(ResourceFix {
+            resource: recurso.clone(),
+            names: str_pairs(def.get("names")),
+            paths: str_pairs(def.get("paths")),
+            context: str_pairs(def.get("context")),
+        });
+    }
+}
+
+/// sequência de escalares → índices de chunk; `None` se algum item não for número de 0 a 255. A faixa 0..=63 é do `ChunkMask::from_chunks`.
 fn to_u8_list(seq: &[Node]) -> Option<Vec<u8>> {
     seq.iter().map(|n| n.as_str()?.trim().parse::<u8>().ok()).collect()
 }
 
-/// `ParseInt` do C++ (`Num.hpp`): decimal, ou hex com prefixo `0x`/`0X`.
+/// Inteiro do `.xl`: decimal, ou hex com prefixo `0x`/`0X`.
 fn parse_u64(s: &str) -> Option<u64> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
@@ -529,143 +484,127 @@ fn parse_u64(s: &str) -> Option<u64> {
     }
 }
 
-/// `overrides.tags.<tag>.<component>` → `ChunkMask` (`Garment/Config.cpp::LoadYAML`, 3 formas):
-/// mapa `{hide:[..]}` ou `{show:[..]}` (o 1º op presente decide, mesmo inválido: `hide: x` ao lado de
-/// `show: [..]` tira o componente, como o `break` de `Garment/Config.cpp:52-68`; desde o 1.27.3 o op aceita
-/// número, `hide: 224`, como os bits da lista); sequência nua = hide
-/// implícito; escalar = máscara já-computada, crua (sem inversão — `ChunkMask(uint64_t)` guarda
-/// `show=false` e o valor tal como está). Lista com chunk inválido tira o componente (`to_u8_list` e `from_chunks`).
+const CHUNK_INVALIDO: &str = "chunk que não é número de 0 a 63 (componente ignorado); corrija a lista de chunks";
+const MASCARA_INVALIDA: &str = "máscara inválida (componente ignorado); use hide/show com lista de chunks, lista de chunks ou número";
+
+/// Lista de chunks do `.xl` → `ChunkMask`, ou o motivo da recusa.
+fn mascara_da_lista(show: bool, itens: &[Node]) -> Result<ChunkMask, &'static str> {
+    to_u8_list(itens).and_then(|chunks| ChunkMask::from_chunks(show, &chunks)).ok_or(CHUNK_INVALIDO)
+}
+
+/// Valor de um componente de `overrides.tags.<tag>`: lista nua = esconder; mapa = `hide` (se presente, mesmo inválido) senão `show`, com lista
+/// de chunks ou número (os bits dos chunks); texto numérico = a máscara já pronta, gravada crua.
+fn mascara_do_componente(valor: &Node) -> Result<ChunkMask, &'static str> {
+    match &valor.kind {
+        Kind::Seq(itens) => mascara_da_lista(false, itens),
+        Kind::Scalar(s) => parse_u64(s).map(|mask| ChunkMask { show: false, mask }).ok_or(MASCARA_INVALIDA),
+        Kind::Map(_) => {
+            let (show, op) = match (valor.get("hide"), valor.get("show")) {
+                (Some(op), _) => (false, op),
+                (None, Some(op)) => (true, op),
+                (None, None) => return Err(MASCARA_INVALIDA),
+            };
+            match &op.kind {
+                Kind::Seq(itens) => mascara_da_lista(show, itens),
+                Kind::Scalar(s) => {
+                    parse_u64(s).map(|bits| ChunkMask { show, mask: crate::override_state::mascara_de_bits(show, bits) }).ok_or(MASCARA_INVALIDA)
+                }
+                Kind::Map(_) => Err(MASCARA_INVALIDA),
+            }
+        }
+    }
+}
+
+/// `overrides` (o valor da chave de topo) → `xl.garment_overrides` e `xl.issues`. Tag sem nenhum componente válido não entra.
 fn parse_garment(node: &Node, xl: &mut XlFile) {
-    let Some(tags_node) = node.get("tags") else { return };
-    let Some(tags) = tags_node.as_map() else {
+    let Some(tags) = node.get("tags") else { return };
+    let Some(tags) = tags.as_map() else {
         xl.issues.push("overrides.tags: formato inválido (ignorado); use um mapa tag → componentes".to_string());
         return;
     };
-    for (tag, components_node) in tags {
-        let Some(components) = components_node.as_map() else {
+    for (tag, componentes) in tags {
+        let Some(componentes) = componentes.as_map() else {
             xl.issues.push(format!("overrides.tags.{tag}: formato inválido (tag ignorada); use um mapa componente → chunks"));
             continue;
         };
-        let mut out = Vec::new();
-        for (comp, chunks) in components {
-            // (show, lista de chunks) das formas mapa e sequência
-            let lista = match &chunks.kind {
-                Kind::Map(_) => match (chunks.get("hide"), chunks.get("show")) {
-                    (Some(op), _) => op.as_seq().map(|seq| (false, seq)),
-                    (None, Some(op)) => op.as_seq().map(|seq| (true, seq)),
-                    (None, None) => None,
-                },
-                Kind::Seq(seq) => Some((false, seq.as_slice())),
-                _ => None,
-            };
-            // ArchiveXL 1.27.3: número no lugar da lista do op (`hide: 224`) = os bits dos chunks, com a regra do `ChunkMask(op, bits)` da lista.
-            let numero_do_op = match &chunks.kind {
-                Kind::Map(_) => match (chunks.get("hide"), chunks.get("show")) {
-                    (Some(op), _) => op.as_str().map(|s| (false, s)),
-                    (None, Some(op)) => op.as_str().map(|s| (true, s)),
-                    (None, None) => None,
-                },
-                _ => None,
-            };
-            let mask = match (&chunks.kind, lista) {
-                _ if numero_do_op.is_some() => numero_do_op
-                    .and_then(|(show, s)| parse_u64(s).map(|bits| ChunkMask { show, mask: crate::override_state::mascara_de_bits(show, bits) })),
-                (Kind::Scalar(s), _) => parse_u64(s).map(|m| ChunkMask { show: false, mask: m }),
-                (_, Some((show, seq))) => {
-                    let Some(mask) = to_u8_list(seq).and_then(|indices| ChunkMask::from_chunks(show, &indices)) else {
-                        xl.issues.push(format!(
-                            "overrides.tags.{tag}.{comp}: chunk que não é número de 0 a 63 (componente ignorado); corrija a lista de chunks"
-                        ));
-                        continue;
-                    };
-                    Some(mask)
-                }
-                _ => None,
-            };
-            let Some(mask) = mask else {
-                xl.issues.push(format!(
-                    "overrides.tags.{tag}.{comp}: máscara inválida (componente ignorado); use hide/show com lista de chunks, lista de chunks ou número"
-                ));
-                continue;
-            };
-            out.push((comp.clone(), mask));
+        let mut validos = Vec::new();
+        for (comp, valor) in componentes {
+            match mascara_do_componente(valor) {
+                Ok(m) => validos.push((comp.clone(), m)),
+                Err(motivo) => xl.issues.push(format!("overrides.tags.{tag}.{comp}: {motivo}")),
+            }
         }
-        if !out.is_empty() {
-            xl.garment_overrides.push(GarmentOverrideTag { tag: tag.clone(), components: out });
+        if !validos.is_empty() {
+            xl.garment_overrides.push(GarmentOverrideTag { tag: tag.clone(), components: validos });
         }
     }
 }
 
-/// sequência de escalares → node path do quest graph; `None` se um item não for id u16, a regra de `to_f32_list`.
-fn to_u16_list(seq: &[Node]) -> Option<Vec<u16>> {
-    seq.iter().map(|n| n.as_str()?.trim().parse::<u16>().ok()).collect()
+/// Uma conexão de `quest.phases[]` como o `.xl` a escreveu.
+enum LeituraDeConexao {
+    /// Mapa com `node`: troca caminho e socket.
+    Mapa(QuestPhaseConnection),
+    /// Lista de ids: troca só o caminho, o socket já posto fica.
+    Lista(Vec<u16>),
+    /// Valor de outro tipo: a chave sai, a fase fica.
+    ChaveIgnorada,
+    /// Lista com item que não é id, ou mapa sem lista em `node`: a fase sai.
+    FaseIgnorada(&'static str),
 }
 
-/// `FillConnection` (`QuestPhase/Config.cpp:53-70`): grava em `destino` só o que lê. Mapa `{node: [..], socket: nome}` grava o
-/// node path e o socket; sequência nua grava só o node path, e o socket que um `connection` em mapa gravou antes continua
-/// (`Config.cpp:63-66`). Chave ausente, escalar ou vazia não toca o destino e dá `Ok(false)`, o `return false` da referência.
-///
-/// `Err` = node path que não é lista de ids u16: mapa sem lista em `node`, ou item que não é id. [UNCONFIRMED] se o
-/// `as<Core::Vector<uint16_t>>` do yaml-cpp lança nesses casos (o código dele não está em `_referencia-de-terceiro`). A fase sai
-/// porque o caminho que sobraria muda a ligação. Em `connection`/`input`, vazio liga a entrada no `questStartNodeDefinition`
-/// (`QuestPhase/Extension.cpp:247-249`). Em `output`, vazio pula a ligação de saída (`Extension.cpp:205`) e a fase entra sem
-/// saída. Nas três chaves, um item a menos aponta outro nó.
-fn fill_connection(node: Option<&Node>, destino: &mut QuestPhaseConnection) -> Result<bool, String> {
-    let Some(node) = node else { return Ok(false) };
-    if node.as_map().is_some() {
-        let lista = node.get("node").and_then(|n| n.as_seq()).ok_or("mapa sem lista de ids em node")?;
-        destino.node_path = to_u16_list(lista).ok_or("node com item que não é id de 0 a 65535")?;
-        destino.socket = node.get("socket").and_then(|v| v.as_str()).map(String::from);
-        Ok(true)
-    } else if let Some(seq) = node.as_seq() {
-        destino.node_path = to_u16_list(seq).ok_or("item que não é id de 0 a 65535")?;
-        Ok(true)
-    } else {
-        Ok(false)
+/// Lista de ids de nó de quest (`u16` decimal, com `trim`); `None` se algum item não for id.
+fn ids_de_no(itens: &[Node]) -> Option<Vec<u16>> {
+    itens.iter().map(|n| n.as_str()?.trim().parse::<u16>().ok()).collect()
+}
+
+fn ler_conexao(valor: &Node) -> LeituraDeConexao {
+    match &valor.kind {
+        Kind::Seq(itens) => ids_de_no(itens).map_or(LeituraDeConexao::FaseIgnorada("item que não é id de 0 a 65535"), LeituraDeConexao::Lista),
+        Kind::Map(_) => {
+            let Some(itens) = valor.get("node").and_then(Node::as_seq) else {
+                return LeituraDeConexao::FaseIgnorada("mapa sem lista de ids em node");
+            };
+            let Some(node_path) = ids_de_no(itens) else {
+                return LeituraDeConexao::FaseIgnorada("node com item que não é id de 0 a 65535");
+            };
+            let socket = valor.get("socket").and_then(Node::as_str).map(String::from);
+            LeituraDeConexao::Mapa(QuestPhaseConnection { node_path, socket })
+        }
+        Kind::Scalar(_) => LeituraDeConexao::ChaveIgnorada,
     }
 }
 
-/// `quest.phases[]` (`QuestPhase/Config.cpp::LoadYAML`): cada item precisa de `path`+`parent`
-/// escalares (senão é descartado); `connection`, `input` e `output` são lidos nessa ordem
-/// (`Config.cpp:38-40`), os dois primeiros no mesmo `input` (ver `fill_connection`); `intercept: true` opcional.
+/// `quest` (o valor da chave de topo) → `xl.quest_phases` e `xl.issues`.
 fn parse_quest_phase(node: &Node, xl: &mut XlFile) {
-    let Some(phases) = node.get("phases").and_then(|p| p.as_seq()) else { return };
-    'fases: for (i, phase) in phases.iter().enumerate() {
-        let (Some(path), Some(parent)) = (phase.get("path").and_then(|p| p.as_str()), phase.get("parent").and_then(|p| p.as_str())) else {
+    let Some(fases) = node.get("phases").and_then(Node::as_seq) else { return };
+    'fases: for (i, f) in fases.iter().enumerate() {
+        let (Some(phase_path), Some(parent)) = (f.get("path").and_then(Node::as_str), f.get("parent").and_then(Node::as_str)) else {
             xl.issues.push(format!("quest.phases[{i}]: sem path ou parent (fase ignorada); informe os dois"));
             continue;
         };
-        let mut input = QuestPhaseConnection::default();
-        let mut output = QuestPhaseConnection::default();
-        for (chave, e_saida) in [("connection", false), ("input", false), ("output", true)] {
-            let valor = phase.get(chave);
-            match fill_connection(valor, if e_saida { &mut output } else { &mut input }) {
-                Ok(true) => {}
-                // Chave presente que não é lista nem mapa: a referência a ignora e a fase fica.
-                Ok(false) if valor.is_some() => xl.issues.push(format!(
+        let mut fase = QuestPhaseMod { phase_path: phase_path.to_string(), parent: parent.to_string(), ..Default::default() };
+        // Ordem fixa, não a do YAML: `connection` e `input` escrevem a mesma entrada e `input` tem de vencer.
+        for chave in ["connection", "input", "output"] {
+            let Some(valor) = f.get(chave) else { continue };
+            let conexao = if chave == "output" { &mut fase.output } else { &mut fase.input };
+            match ler_conexao(valor) {
+                LeituraDeConexao::Mapa(c) => *conexao = c,
+                LeituraDeConexao::Lista(ids) => conexao.node_path = ids,
+                LeituraDeConexao::ChaveIgnorada => xl.issues.push(format!(
                     "quest.phases[{i}].{chave}: formato inválido (chave ignorada); use uma lista de ids ou um mapa com node e socket"
                 )),
-                Ok(false) => {}
-                Err(motivo) => {
-                    xl.issues.push(format!(
-                        "quest.phases[{i}].{chave}: {motivo} (fase ignorada); use uma lista de ids ou um mapa com node e socket"
-                    ));
+                LeituraDeConexao::FaseIgnorada(motivo) => {
+                    xl.issues.push(format!("quest.phases[{i}].{chave}: {motivo} (fase ignorada); use uma lista de ids ou um mapa com node e socket"));
                     continue 'fases;
                 }
             }
         }
-        let intercept = phase.get("intercept").and_then(|i| i.as_str()).map(|s| s == "true").unwrap_or(false);
-        xl.quest_phases.push(QuestPhaseMod {
-            phase_path: path.to_string(),
-            parent: parent.to_string(),
-            input,
-            output,
-            intercept,
-        });
+        fase.intercept = f.get("intercept").and_then(Node::as_str) == Some("true");
+        xl.quest_phases.push(fase);
     }
 }
 
-/// `player.bodyTypes` (`PuppetState/Config.cpp`).
+/// `player.bodyTypes`.
 fn parse_puppet_state(node: &Node, xl: &mut XlFile) {
     let Some(body_types) = node.get("bodyTypes") else { return };
     let list = lista_com_aviso(body_types, "player.bodyTypes", &mut xl.issues);
@@ -674,7 +613,7 @@ fn parse_puppet_state(node: &Node, xl: &mut XlFile) {
     }
 }
 
-/// `customizations.{male,female}` (`Customization/Config.cpp`).
+/// `customizations.{male,female}`.
 fn parse_customization(node: &Node, xl: &mut XlFile) {
     let male = node.get("male").map(|n| lista_com_aviso(n, "customizations.male", &mut xl.issues)).unwrap_or_default();
     let female = node.get("female").map(|n| lista_com_aviso(n, "customizations.female", &mut xl.issues)).unwrap_or_default();
@@ -683,8 +622,7 @@ fn parse_customization(node: &Node, xl: &mut XlFile) {
     }
 }
 
-/// `animations[]` (`Animation/Config.cpp::LoadYAML` — ver doc de `AnimationEntry` pros 2 bugs
-/// upstream que corrigimos aqui: `entity` como sequência e `vars` nunca funcionam no C++ real).
+/// `animations[]` (ver doc de `AnimationEntry`: `entity` e `vars` aceitam escalar ou sequência).
 fn parse_animations(node: &Node, xl: &mut XlFile) {
     let Some(entries) = node.as_seq() else {
         xl.issues.push("animations: formato inválido (ignorado); use uma lista de entradas".to_string());
@@ -707,40 +645,9 @@ fn parse_animations(node: &Node, xl: &mut XlFile) {
     }
 }
 
-// ===== streaming.sectors (WorldStreaming/Config.cpp) =====
+// ===== streaming =====
 
-/// sequência de escalares → f32; `None` se QUALQUER item não for um número (fiel ao C++: um único
-/// item inválido invalida a lista inteira — `as<std::vector<float>>()` do yaml-cpp lançaria).
-fn to_f32_list(seq: &[Node]) -> Option<Vec<f32>> {
-    let mut out = Vec::with_capacity(seq.len());
-    for item in seq {
-        out.push(item.as_str()?.trim().parse::<f32>().ok()?);
-    }
-    Some(out)
-}
-
-fn parse_vec3(node: Option<&Node>) -> Option<Vec3> {
-    let v = to_f32_list(node?.as_seq()?)?;
-    (v.len() == 3).then(|| Vec3 { x: v[0], y: v[1], z: v[2] })
-}
-
-/// `position` no nível de NODE: aceita 3 OU 4 valores; o `.w` final é SEMPRE 0 (RE, ver doc de `Vec4`).
-fn parse_position_node(node: Option<&Node>) -> Option<Vec4> {
-    let v = to_f32_list(node?.as_seq()?)?;
-    (v.len() == 3 || v.len() == 4).then(|| Vec4 { x: v[0], y: v[1], z: v[2], w: 0.0 })
-}
-
-/// `position` no nível de SUB-node: exige EXATAMENTE 4 valores; `.w` também sempre 0.
-fn parse_position_subnode(node: Option<&Node>) -> Option<Vec4> {
-    let v = to_f32_list(node?.as_seq()?)?;
-    (v.len() == 4).then(|| Vec4 { x: v[0], y: v[1], z: v[2], w: 0.0 })
-}
-
-fn parse_quat(node: Option<&Node>) -> Option<Quat> {
-    let v = to_f32_list(node?.as_seq()?)?;
-    (v.len() == 4).then(|| Quat { i: v[0], j: v[1], k: v[2], r: v[3] })
-}
-
+/// Inteiro do `.xl`: decimal, ou hex com prefixo `0x`/`0X`.
 fn parse_i64(s: &str) -> Option<i64> {
     let s = s.trim();
     if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
@@ -750,59 +657,8 @@ fn parse_i64(s: &str) -> Option<i64> {
     }
 }
 
-/// "última chave PRESENTE vence" — replica a sequência de `ParseResource`/`ParseName`/
-/// `ParseRecordID` chamadas nas várias chaves-sinônimo (cada chamada só sobrescreve se o
-/// SEU próprio nó estiver definido; ausência não apaga o que já foi lido por um sinônimo anterior).
-fn last_present_str(node: &Node, keys: &[&str]) -> Option<String> {
-    keys.iter().filter_map(|k| node.get(k).and_then(|n| n.as_str())).last().map(String::from)
-}
-
-/// `ParseSubDeletions` (`WorldStreaming/Config.cpp:369-417`): exige a lista de índices E a contagem esperada, ambas presentes e
-/// válidas (senão não faz nada). Índice fora de `[0, count)` OU item não-numérico invalida a lista
-/// INTEIRA (`aDeletions.clear()` no C++ — inclusive apagando entradas já lidas por um sinônimo
-/// anterior nesta mesma chamada de node). `expected` é sobrescrito pelo count desta chamada.
-/// `Err(motivo)` = a chave da lista está presente e não entrou (o `return false` da referência, que não avisa); quem chama diz o
-/// efeito, que depende do que sobrou depois dos dois sinônimos.
-fn parse_sub_deletions(
-    node: &Node,
-    list_key: &str,
-    count_key: &str,
-    out: &mut Vec<i64>,
-    pares: &mut Vec<(i64, i64)>,
-    expected: &mut i64,
-) -> Result<(), String> {
-    let Some(lista) = node.get(list_key) else { return Ok(()) };
-    let seq = lista.as_seq().ok_or("não é uma lista de índices")?;
-    let count = node
-        .get(count_key)
-        .and_then(|n| n.as_str())
-        .and_then(parse_i64)
-        .filter(|c| *c > 0)
-        .ok_or_else(|| format!("sem {count_key} maior que 0"))?;
-    let mut collected = Vec::with_capacity(seq.len());
-    let mut pares_lidos = Vec::new();
-    for item in seq {
-        if let Some(par) = par_de_shape(item, list_key, count) {
-            pares_lidos.push(par);
-            continue;
-        }
-        match item.as_str().and_then(parse_i64) {
-            Some(idx) if (0..count).contains(&idx) => collected.push(idx),
-            _ => {
-                out.clear();
-                pares.clear();
-                return Err(format!("item que não é índice de 0 a {}", count - 1));
-            }
-        }
-    }
-    out.extend(collected);
-    pares.extend(pares_lidos);
-    *expected = count;
-    Ok(())
-}
-
-/// Item `[ator, shape]` de `actorDeletions` (ArchiveXL 1.27.0): só a shape `shape` do ator perde a colisão, o resto do ator fica. Ator em
-/// `[0, count)`, shape ≥ 0; o par entra no mesmo vetor que os índices na referência, então item inválido apaga os dois.
+/// Item `[ator, shape]` de `actorDeletions`: só a shape `shape` do ator perde a colisão, o resto do ator fica. Ator em
+/// `[0, count)`, shape ≥ 0; o par vale como os índices da mesma lista, então item inválido apaga os dois.
 fn par_de_shape(item: &Node, list_key: &str, count: i64) -> Option<(i64, i64)> {
     if list_key != "actorDeletions" {
         return None;
@@ -813,163 +669,206 @@ fn par_de_shape(item: &Node, list_key: &str, count: i64) -> Option<(i64, i64)> {
     Some((ator, shape))
 }
 
-/// `ParseSubMutations` (`WorldStreaming/Config.cpp:419-556`): exige a lista E a contagem esperada válidas; itens malformados ou sem
-/// NENHUM de position/orientation/scale são simplesmente PULADOS (≠ `parse_sub_deletions`, que
-/// invalida a lista inteira — assimetria real do C++, replicada fielmente). Lista que não entra e
-/// item pulado viram issue em `issues`, com `onde` na frente (diagnóstico do BWMS; a referência pula calada).
-fn parse_sub_mutations(
-    node: &Node,
-    list_key: &str,
-    count_key: &str,
-    out: &mut Vec<WorldSubNodeMutation>,
-    expected: &mut i64,
-    onde: &str,
-    issues: &mut Vec<String>,
-) {
-    let Some(lista) = node.get(list_key) else { return };
-    let Some(seq) = lista.as_seq() else {
-        issues.push(format!("{onde}.{list_key}: não é uma lista (lista ignorada); use uma lista de mutações com index"));
-        return;
-    };
-    let Some(count) = node.get(count_key).and_then(|n| n.as_str()).and_then(parse_i64).filter(|c| *c > 0) else {
-        issues.push(format!("{onde}.{list_key}: sem {count_key} maior que 0 (lista ignorada); informe {count_key}, a contagem de sub-nodes do node"));
-        return;
-    };
-    for (k, item) in seq.iter().enumerate() {
-        if item.as_map().is_none() {
-            issues.push(format!("{onde}.{list_key}[{k}]: não é um mapa (item ignorado); use um mapa com index e position, orientation ou scale"));
-            continue;
-        }
-        let Some(idx) = item.get("index").and_then(|n| n.as_str()).and_then(parse_i64).filter(|i| (0..count).contains(i)) else {
-            issues.push(format!("{onde}.{list_key}[{k}]: sem index de 0 a {} (item ignorado); informe o index do sub-node", count - 1));
-            continue;
-        };
-        let position = parse_position_subnode(item.get("position"));
-        let orientation = parse_quat(item.get("orientation"));
-        let scale = parse_vec3(item.get("scale"));
-        if position.is_none() && orientation.is_none() && scale.is_none() {
-            issues.push(format!(
-                "{onde}.{list_key}[{k}]: sem position, orientation nem scale válidos (item ignorado); informe position [x, y, z, w], orientation [i, j, k, r] ou scale [x, y, z]"
-            ));
-            continue;
-        }
-        out.push(WorldSubNodeMutation { sub_node_index: idx, position, orientation, scale });
-    }
-    *expected = count;
+/// Inteiro do `.xl` no valor escalar da chave `chave` do mapa `no`.
+fn inteiro_da_chave(no: &Node, chave: &str) -> Option<i64> {
+    no.get(chave)?.as_str().and_then(parse_i64)
 }
 
-const RESOURCE_KEYS: [&str; 6] = ["resource", "mesh", "meshRef", "material", "effect", "entityTemplate"];
-const APPEARANCE_KEYS: [&str; 3] = ["appearance", "appearanceName", "meshAppearance"];
-const RECORD_ID_KEYS: [&str; 3] = ["recordID", "recordId", "objectRecordId"];
+/// Lista de números reais (`f32`, com `trim`); `None` se o valor não for lista ou algum item não for número.
+fn numeros(valor: Option<&Node>) -> Option<Vec<f32>> {
+    valor?.as_seq()?.iter().map(|n| n.as_str()?.trim().parse::<f32>().ok()).collect()
+}
 
-fn parse_world_streaming(node: &Node, xl: &mut XlFile) {
-    let blocks = node.get("blocks").map(to_str_list).unwrap_or_default();
-    let mut sectors = Vec::new();
-    if let Some(sector_seq) = node.get("sectors").and_then(|s| s.as_seq()) {
-        for (i, sector) in sector_seq.iter().enumerate() {
-            // Os avisos de setor são os da referência (`WorldStreaming/Config.cpp:38-99`); os de node, o de sub-node e o de setor sem
-            // operação são diagnóstico do BWMS (a referência descarta calada, `Config.cpp:110-142`, `:159-196`, `:369-556` e `:319-322`).
-            if sector.as_map().is_none() {
-                xl.issues.push(format!("streaming.sectors[{i}]: setor inválido (ignorado); use um mapa com path e expectedNodes"));
+/// Posição: o runtime grava `w = 0` (ponto, não direção), então o 4º número, quando aceito, não é lido.
+fn posicao(valor: Option<&Node>, tamanhos: &[usize]) -> Option<Vec4> {
+    numeros(valor).filter(|v| tamanhos.contains(&v.len())).map(|v| Vec4 { x: v[0], y: v[1], z: v[2], w: 0.0 })
+}
+
+fn orientacao(valor: Option<&Node>) -> Option<Quat> {
+    numeros(valor).filter(|v| v.len() == 4).map(|v| Quat { i: v[0], j: v[1], k: v[2], r: v[3] })
+}
+
+fn escala(valor: Option<&Node>) -> Option<Vec3> {
+    numeros(valor).filter(|v| v.len() == 3).map(|v| Vec3 { x: v[0], y: v[1], z: v[2] })
+}
+
+/// Texto da última chave presente de `chaves`, na ordem dada (não na do YAML); chave com valor que não é texto conta como ausente.
+fn ultimo_sinonimo(no: &Node, chaves: &[&str]) -> Option<String> {
+    chaves.iter().rev().find_map(|c| no.get(c)?.as_str()).map(String::from)
+}
+
+/// Listas de sub-node e a contagem que cada uma exige, na ordem em que acumulam.
+const SUB_DELECOES: [(&str, &str); 2] = [("actorDeletions", "expectedActors"), ("instanceDeletions", "expectedInstances")];
+const SUB_MUTACOES: [(&str, &str); 2] = [("actorMutations", "expectedActors"), ("instanceMutations", "expectedInstances")];
+
+/// Sub-listas de uma deleção de node. Um item inválido tira tudo o que o node leu até ali: apagar só parte dos sub-nodes pedidos deixaria o
+/// setor num estado que o mod não descreve. As issues saem depois das duas listas, com o efeito que sobrou.
+fn ler_sub_delecoes(item: &Node, d: &mut WorldNodeDeletion, onde: &str, issues: &mut Vec<String>) {
+    let mut falhas: Vec<(&str, String)> = Vec::new();
+    for (lista, contagem) in SUB_DELECOES {
+        let Some(valor) = item.get(lista) else { continue };
+        let Some(itens) = valor.as_seq() else {
+            falhas.push((lista, "não é uma lista de índices".to_string()));
+            continue;
+        };
+        let Some(n) = inteiro_da_chave(item, contagem).filter(|n| *n > 0) else {
+            falhas.push((lista, format!("sem {contagem} maior que 0")));
+            continue;
+        };
+        let mut indices = Vec::new();
+        let mut pares = Vec::new();
+        let mut valida = true;
+        for it in itens {
+            if let Some(k) = it.as_str().and_then(parse_i64).filter(|k| (0..n).contains(k)) {
+                indices.push(k);
+            } else if let Some(par) = par_de_shape(it, lista, n) {
+                pares.push(par);
+            } else {
+                valida = false;
+                break;
+            }
+        }
+        if valida {
+            d.sub_node_deletions.extend(indices);
+            d.shape_deletions.extend(pares);
+            d.expected_sub_nodes = n;
+        } else {
+            d.sub_node_deletions.clear();
+            d.shape_deletions.clear();
+            falhas.push((lista, format!("item que não é índice de 0 a {}", n - 1)));
+        }
+    }
+    let efeito = if d.sub_node_deletions.is_empty() && d.shape_deletions.is_empty() {
+        "lista ignorada: o node inteiro será apagado"
+    } else {
+        "lista ignorada"
+    };
+    for (lista, motivo) in falhas {
+        issues.push(format!("{onde}.{lista}: {motivo} ({efeito}); corrija a lista ou tire a chave"));
+    }
+}
+
+/// Sub-listas de uma mutação de node. Item ruim só pula ele; a contagem da última lista válida fica, mesmo sem item aceito.
+fn ler_sub_mutacoes(item: &Node, m: &mut WorldNodeMutation, onde: &str, issues: &mut Vec<String>) {
+    for (lista, contagem) in SUB_MUTACOES {
+        let Some(valor) = item.get(lista) else { continue };
+        let onde_lista = format!("{onde}.{lista}");
+        let Some(itens) = valor.as_seq() else {
+            issues.push(format!("{onde_lista}: não é uma lista (lista ignorada); use uma lista de mutações com index"));
+            continue;
+        };
+        let Some(n) = inteiro_da_chave(item, contagem).filter(|n| *n > 0) else {
+            issues.push(format!("{onde_lista}: sem {contagem} maior que 0 (lista ignorada); informe {contagem}, a contagem de sub-nodes do node"));
+            continue;
+        };
+        m.expected_sub_nodes = n;
+        for (k, sub) in itens.iter().enumerate() {
+            if sub.as_map().is_none() {
+                issues.push(format!("{onde_lista}[{k}]: não é um mapa (item ignorado); use um mapa com index e position, orientation ou scale"));
                 continue;
             }
-            let Some(path_node) = sector.get("path") else {
-                xl.issues.push(format!("streaming.sectors[{i}]: sem path (setor ignorado); informe o caminho do .streamingsector em path"));
+            let Some(sub_node_index) = inteiro_da_chave(sub, "index").filter(|x| (0..n).contains(x)) else {
+                issues.push(format!("{onde_lista}[{k}]: sem index de 0 a {} (item ignorado); informe o index do sub-node", n - 1));
                 continue;
             };
-            let Some(path) = path_node.as_str().filter(|s| !s.is_empty()) else {
-                xl.issues.push(format!("streaming.sectors[{i}]: path inválido (setor ignorado); use o caminho do .streamingsector como texto"));
-                continue;
+            let mutacao = WorldSubNodeMutation {
+                sub_node_index,
+                position: posicao(sub.get("position"), &[4]),
+                orientation: orientacao(sub.get("orientation")),
+                scale: escala(sub.get("scale")),
             };
-            let Some(count_node) = sector.get("expectedNodes") else {
-                xl.issues.push(format!("streaming.sectors[{i}] ({path}): sem expectedNodes (setor ignorado); informe expectedNodes, um inteiro maior que 0"));
-                continue;
-            };
-            let Some(expected_nodes) = count_node.as_str().and_then(parse_i64).filter(|n| *n > 0) else {
-                xl.issues.push(format!("streaming.sectors[{i}] ({path}): expectedNodes inválido (setor ignorado); use um inteiro maior que 0"));
-                continue;
-            };
-            let mut node_deletions = Vec::new();
-            if let Some(seq) = sector.get("nodeDeletions").and_then(|n| n.as_seq()) {
-                for (j, del) in seq.iter().enumerate() {
-                    let onde = format!("streaming.sectors[{i}] ({path}).nodeDeletions[{j}]");
-                    let (Some(node_type), Some(idx)) =
-                        (del.get("type").and_then(|t| t.as_str()), del.get("index").and_then(|i| i.as_str()).and_then(parse_i64))
-                    else {
-                        xl.issues.push(format!("{onde}: sem type ou index (ignorado); informe o type e o index do node"));
-                        continue;
-                    };
-                    if !(0..expected_nodes).contains(&idx) {
-                        xl.issues.push(format!("{onde}: index {idx} fora de 0..{expected_nodes} (ignorado); use um index de 0 a {}", expected_nodes - 1));
-                        continue;
-                    }
-                    let mut d = WorldNodeDeletion { node_index: idx, node_type: node_type.to_string(), ..Default::default() };
-                    let mut falhas = Vec::new();
-                    for (lista, contagem) in [("actorDeletions", "expectedActors"), ("instanceDeletions", "expectedInstances")] {
-                        if let Err(motivo) =
-                            parse_sub_deletions(del, lista, contagem, &mut d.sub_node_deletions, &mut d.shape_deletions, &mut d.expected_sub_nodes)
-                        {
-                            falhas.push((lista, motivo));
-                        }
-                    }
-                    // O efeito sai do que sobrou depois dos dois sinônimos: item inválido no 2º apaga também o que o 1º leu, e sem
-                    // sub-deleção o node inteiro é apagado (`WorldStreaming/Extension.cpp:476`), como na referência.
-                    let efeito = if d.sub_node_deletions.is_empty() && d.shape_deletions.is_empty() {
-                        "lista ignorada: o node inteiro será apagado"
-                    } else {
-                        "lista ignorada"
-                    };
-                    for (lista, motivo) in falhas {
-                        xl.issues.push(format!("{onde}.{lista}: {motivo} ({efeito}); corrija a lista ou tire a chave"));
-                    }
-                    node_deletions.push(d);
-                }
-            }
-            let mut node_mutations = Vec::new();
-            if let Some(seq) = sector.get("nodeMutations").and_then(|n| n.as_seq()) {
-                for (j, mu) in seq.iter().enumerate() {
-                    let onde = format!("streaming.sectors[{i}] ({path}).nodeMutations[{j}]");
-                    let (Some(node_type), Some(idx)) =
-                        (mu.get("type").and_then(|t| t.as_str()), mu.get("index").and_then(|i| i.as_str()).and_then(parse_i64))
-                    else {
-                        xl.issues.push(format!("{onde}: sem type ou index (ignorado); informe o type e o index do node"));
-                        continue;
-                    };
-                    if !(0..expected_nodes).contains(&idx) {
-                        xl.issues.push(format!("{onde}: index {idx} fora de 0..{expected_nodes} (ignorado); use um index de 0 a {}", expected_nodes - 1));
-                        continue;
-                    }
-                    let nb_diff = mu
-                        .get("nbNodesUnderProxyDiff")
-                        .and_then(|n| n.as_str())
-                        .and_then(|s| parse_i64(s))
-                        .and_then(|v| i32::try_from(v).ok());
-                    let mut m = WorldNodeMutation {
-                        node_index: idx,
-                        node_type: node_type.to_string(),
-                        position: parse_position_node(mu.get("position")),
-                        orientation: parse_quat(mu.get("orientation")),
-                        scale: parse_vec3(mu.get("scale")),
-                        resource_path: last_present_str(mu, &RESOURCE_KEYS),
-                        appearance_name: last_present_str(mu, &APPEARANCE_KEYS),
-                        record_id: last_present_str(mu, &RECORD_ID_KEYS),
-                        nb_nodes_under_proxy_diff: nb_diff,
-                        ..Default::default()
-                    };
-                    for (lista, contagem) in [("actorMutations", "expectedActors"), ("instanceMutations", "expectedInstances")] {
-                        parse_sub_mutations(mu, lista, contagem, &mut m.sub_node_mutations, &mut m.expected_sub_nodes, &onde, &mut xl.issues);
-                    }
-                    node_mutations.push(m);
-                }
-            }
-            if node_deletions.is_empty() && node_mutations.is_empty() {
-                xl.issues.push(format!(
-                    "streaming.sectors[{i}] ({path}): sem nodeDeletions nem nodeMutations válidos (setor ignorado); acrescente uma deleção ou mutação de node, ou tire o setor"
+            if mutacao.position.is_none() && mutacao.orientation.is_none() && mutacao.scale.is_none() {
+                issues.push(format!(
+                    "{onde_lista}[{k}]: sem position, orientation nem scale válidos (item ignorado); informe position [x, y, z, w], orientation [i, j, k, r] ou scale [x, y, z]"
                 ));
                 continue;
             }
-            sectors.push(WorldSectorMod { path: path.to_string(), expected_nodes, node_deletions, node_mutations });
+            m.sub_node_mutations.push(mutacao);
         }
+    }
+}
+
+/// `type` e `index` de um item de `nodeDeletions`/`nodeMutations`, com o índice em `0..expected_nodes`; `None` com a issue já dada.
+fn alvo_do_node(item: &Node, expected_nodes: i64, onde: &str, issues: &mut Vec<String>) -> Option<(String, i64)> {
+    let (Some(tipo), Some(indice)) = (item.get("type").and_then(Node::as_str), inteiro_da_chave(item, "index")) else {
+        issues.push(format!("{onde}: sem type ou index (ignorado); informe o type e o index do node"));
+        return None;
+    };
+    if !(0..expected_nodes).contains(&indice) {
+        issues.push(format!("{onde}: index {indice} fora de 0..{expected_nodes} (ignorado); use um index de 0 a {}", expected_nodes - 1));
+        return None;
+    }
+    Some((tipo.to_string(), indice))
+}
+
+/// Um item de `streaming.sectors`; `None` com a issue já dada quando o setor sai.
+fn ler_setor(i: usize, no: &Node, issues: &mut Vec<String>) -> Option<WorldSectorMod> {
+    let raiz = format!("streaming.sectors[{i}]");
+    if no.as_map().is_none() {
+        issues.push(format!("{raiz}: setor inválido (ignorado); use um mapa com path e expectedNodes"));
+        return None;
+    }
+    let Some(path) = no.get("path") else {
+        issues.push(format!("{raiz}: sem path (setor ignorado); informe o caminho do .streamingsector em path"));
+        return None;
+    };
+    let Some(path) = path.as_str().filter(|p| !p.is_empty()) else {
+        issues.push(format!("{raiz}: path inválido (setor ignorado); use o caminho do .streamingsector como texto"));
+        return None;
+    };
+    let onde = format!("{raiz} ({path})");
+    let Some(esperado) = no.get("expectedNodes") else {
+        issues.push(format!("{onde}: sem expectedNodes (setor ignorado); informe expectedNodes, um inteiro maior que 0"));
+        return None;
+    };
+    let Some(expected_nodes) = esperado.as_str().and_then(parse_i64).filter(|n| *n > 0) else {
+        issues.push(format!("{onde}: expectedNodes inválido (setor ignorado); use um inteiro maior que 0"));
+        return None;
+    };
+    let mut setor = WorldSectorMod { path: path.to_string(), expected_nodes, ..Default::default() };
+    for (j, item) in no.get("nodeDeletions").and_then(Node::as_seq).unwrap_or_default().iter().enumerate() {
+        let onde_item = format!("{onde}.nodeDeletions[{j}]");
+        let Some((node_type, node_index)) = alvo_do_node(item, expected_nodes, &onde_item, issues) else { continue };
+        let mut d = WorldNodeDeletion { node_index, node_type, ..Default::default() };
+        ler_sub_delecoes(item, &mut d, &onde_item, issues);
+        setor.node_deletions.push(d);
+    }
+    for (j, item) in no.get("nodeMutations").and_then(Node::as_seq).unwrap_or_default().iter().enumerate() {
+        let onde_item = format!("{onde}.nodeMutations[{j}]");
+        let Some((node_type, node_index)) = alvo_do_node(item, expected_nodes, &onde_item, issues) else { continue };
+        let mut m = WorldNodeMutation {
+            node_index,
+            node_type,
+            position: posicao(item.get("position"), &[3, 4]),
+            orientation: orientacao(item.get("orientation")),
+            scale: escala(item.get("scale")),
+            resource_path: ultimo_sinonimo(item, &["resource", "mesh", "meshRef", "material", "effect", "entityTemplate"]),
+            appearance_name: ultimo_sinonimo(item, &["appearance", "appearanceName", "meshAppearance"]),
+            record_id: ultimo_sinonimo(item, &["recordID", "recordId", "objectRecordId"]),
+            nb_nodes_under_proxy_diff: inteiro_da_chave(item, "nbNodesUnderProxyDiff").and_then(|n| i32::try_from(n).ok()),
+            ..Default::default()
+        };
+        ler_sub_mutacoes(item, &mut m, &onde_item, issues);
+        setor.node_mutations.push(m);
+    }
+    if setor.node_deletions.is_empty() && setor.node_mutations.is_empty() {
+        issues.push(format!(
+            "{onde}: sem nodeDeletions nem nodeMutations válidos (setor ignorado); acrescente uma deleção ou mutação de node, ou tire o setor"
+        ));
+        return None;
+    }
+    Some(setor)
+}
+
+/// `streaming` (o valor da chave de topo) → `xl.streaming` e `xl.issues`. `xl.streaming` só existe com algum bloco ou setor.
+fn parse_world_streaming(node: &Node, xl: &mut XlFile) {
+    if node.as_map().is_none() {
+        return;
+    }
+    let blocks = node.get("blocks").map(to_str_list).unwrap_or_default();
+    let mut sectors = Vec::new();
+    for (i, setor) in node.get("sectors").and_then(Node::as_seq).unwrap_or_default().iter().enumerate() {
+        sectors.extend(ler_setor(i, setor, &mut xl.issues));
     }
     if !blocks.is_empty() || !sectors.is_empty() {
         xl.streaming = Some(WorldStreamingSection { blocks, sectors });
@@ -980,7 +879,7 @@ fn parse_localization(node: &Node, xl: &mut XlFile) {
     for kind in ["onscreens", "subtitles", "lipmaps", "vomaps"] {
         let Some(grp_node) = node.get(kind) else { continue };
         let Some(grp) = grp_node.as_map() else {
-            // A referência aceita lista ou escalar sem idioma (vira en-us, `Localization/Config.cpp:98-133`); este parser ainda não lê essa forma.
+            // O formato aceita lista ou escalar sem idioma (vira en-us); este parser ainda não lê essa forma.
             // Só o `onscreens` tem aplicação no runtime (`TIPOS_DE_TEXTO_APLICADOS`): para ele a forma de mapa é o conserto; os outros ficam sem
             // efeito em qualquer forma.
             let aviso = if kind == "onscreens" {
@@ -993,7 +892,7 @@ fn parse_localization(node: &Node, xl: &mut XlFile) {
         };
         let mut entries: Vec<(String, Vec<String>)> = Vec::new();
         for (lang, paths) in grp {
-            // Código fora dos idiomas de jogador (caixa errada e o db-db inclusive) sai aqui, como `Localization/Config.cpp:67-70`: na
+            // Código fora dos idiomas de jogador (caixa errada e o db-db inclusive) sai aqui: na
             // tabela do runtime ele viraria a reserva do mod quando é o primeiro declarado.
             if !crate::instalacao::localizacao::e_idioma_conhecido(lang.trim()) {
                 let codigos: Vec<&str> = crate::instalacao::localizacao::CODIGOS.into_iter().filter(|c| crate::instalacao::localizacao::e_idioma_conhecido(c)).collect();
@@ -1129,7 +1028,7 @@ impl XlFile {
                 s.push_str(&format!("  - {i}\n"));
             }
         }
-        // Formato que a referência aceita: sob "formato inválido" a linha se contradiria.
+        // Formato aceito pelo `.xl`: sob "formato inválido" a linha se contradiria.
         if !self.sem_efeito_no_bwms.is_empty() {
             s.push_str("⚠ entradas que o BWMS ainda não aplica:\n");
             for i in &self.sem_efeito_no_bwms {
@@ -1160,7 +1059,7 @@ mod tests {
         assert_eq!(to_str_list(y.get("factories").unwrap()), vec!["a.csv", "b.csv"]);
     }
 
-    // ---- exemplos REAIS do ArchiveXL (cp2077-archive-xl/.../resources) ----
+    // ---- exemplos das formas principais ----
 
     #[test]
     fn template_factories_e_localization() {
@@ -1176,28 +1075,28 @@ mod tests {
     }
 
     #[test]
-    fn patch_real_hairpatch() {
-        // PlayerCustomizationHairPatch.xl (forma mapa: props + targets)
-        let src = "resource:\n  patch:\n    archive_xl\\characters\\common\\hair\\h1_base_color_patch.mesh:\n      props: [ appearances ]\n      targets: [ player_ma_hair.mesh, player_wa_hair.mesh ]\n";
+    fn patch_forma_mapa_props_e_targets() {
+        // forma mapa: props + targets
+        let src = "resource:\n  patch:\n    mod\\characters\\common\\hair\\h1_base_color_patch.mesh:\n      props: [ appearances ]\n      targets: [ player_ma_hair.mesh, player_wa_hair.mesh ]\n";
         let xl = parse_xl(src).unwrap();
         assert_eq!(xl.patches.len(), 1);
         let p = &xl.patches[0];
-        assert_eq!(p.patch, "archive_xl\\characters\\common\\hair\\h1_base_color_patch.mesh");
+        assert_eq!(p.patch, "mod\\characters\\common\\hair\\h1_base_color_patch.mesh");
         assert_eq!(p.props, vec!["appearances"]);
         assert_eq!(p.includes, vec!["player_ma_hair.mesh", "player_wa_hair.mesh"]);
         assert!(p.excludes.is_empty());
     }
 
     #[test]
-    fn link_real_migration() {
-        // Migration.xl: na sequência cada item é pedido e a chave é servida (`ResourceLink/Config.cpp:36-48`)
-        let src = "resource:\n  link:\n    archive_xl\\a\\h1.mesh:\n      - archive_xl\\a\\base.mesh\n    archive_xl\\b\\head.app:\n      - archive_xl\\b\\lashes.app\n";
+    fn link_de_migracao_em_sequencia() {
+        // migração de nome legado: na sequência cada item é pedido e a chave é servida
+        let src = "resource:\n  link:\n    mod\\a\\h1.mesh:\n      - mod\\a\\base.mesh\n    mod\\b\\head.app:\n      - mod\\b\\lashes.app\n";
         let xl = parse_xl(src).unwrap();
         assert_eq!(
             xl.links,
             vec![
-                ResourceLink { pedido: "archive_xl\\a\\base.mesh".into(), servido: "archive_xl\\a\\h1.mesh".into() },
-                ResourceLink { pedido: "archive_xl\\b\\lashes.app".into(), servido: "archive_xl\\b\\head.app".into() },
+                ResourceLink { pedido: "mod\\a\\base.mesh".into(), servido: "mod\\a\\h1.mesh".into() },
+                ResourceLink { pedido: "mod\\b\\lashes.app".into(), servido: "mod\\b\\head.app".into() },
             ]
         );
     }
@@ -1213,7 +1112,7 @@ mod tests {
         assert!(xl.summary().contains("resource.link: 3\n  fake → real\n  p1 → novo\n  p2 → novo\n"), "{}", xl.summary());
     }
 
-    // ---- formas alternativas da fonte C++ ----
+    // ---- formas alternativas ----
 
     #[test]
     fn patch_scalar_e_seq_e_exclude() {
@@ -1235,8 +1134,7 @@ mod tests {
 
     #[test]
     fn secao_desconhecida_vai_pra_other_sections() {
-        // "streaming" agora É tipado (RE 2026-07-15 cont.60) — usa 2 chaves genuinamente
-        // desconhecidas (Attachment/Mesh/Transmog/InkSpawner não têm seção .xl própria nenhuma).
+        // "streaming" é tipado — usa 2 chaves genuinamente desconhecidas.
         let xl = parse_xl("attachment:\n  x: y\ncustomNode: x\n").unwrap();
         assert!(xl.other_sections.contains(&"attachment".to_string()));
         assert!(xl.other_sections.contains(&"customNode".to_string()));
@@ -1286,7 +1184,7 @@ mod tests {
         assert!(!crate::instalacao::tabelas_de_runtime::emit_resfixes(&xl).lines().any(|l| !l.starts_with('#')));
 
         // chunk que não é número, fora de 0..=63, e `hide` inválido ao lado de `show` válido: o componente sai, e o válido fica; número no op
-        // (ArchiveXL 1.27.3) = os bits dos chunks, `hide` invertido
+        // = os bits dos chunks, `hide` invertido
         let xl = parse_xl("overrides:\n  tags:\n    t:\n      c0: [ x ]\n      c1:\n        hide: [ 70 ]\n      c2:\n        hide: x\n        show: [ 1 ]\n      c3: [ 1, 63 ]\n      c4:\n        hide: 5\n      c5:\n        show: 0x6\n").unwrap();
         assert_eq!(xl.garment_overrides.len(), 1);
         assert_eq!(
@@ -1311,7 +1209,7 @@ mod tests {
         let tabela = crate::instalacao::tabelas_de_runtime::emit_questphase_table(&xl, "m");
         assert_eq!(tabela.lines().filter(|l| !l.starts_with('#')).collect::<Vec<_>>(), vec!["m | p.questphase | c.questphase |  | - | 2 | - | 0"]);
 
-        // chave escalar não lida fica de fora com issue, e a fase segue com o `connection` que leu (`return false` da referência)
+        // chave escalar não lida fica de fora com issue, e a fase segue com o `connection` que leu
         let xl = parse_xl("quest:\n  phases:\n    - path: a.questphase\n      parent: p.questphase\n      connection: [ 1, 2 ]\n      input: 5\n      output: x\n").unwrap();
         assert_eq!(xl.quest_phases.len(), 1);
         assert_eq!(xl.quest_phases[0].input, QuestPhaseConnection { node_path: vec![1, 2], socket: None });
@@ -1364,15 +1262,15 @@ mod tests {
 
     #[test]
     fn input_em_lista_mantem_o_socket_do_connection_em_mapa() {
-        // `FillConnection` em sequência grava só o nodePath (`QuestPhase/Config.cpp:63-66`): o socket que o `connection` em mapa
-        // gravou continua, e o runtime liga em "Out2", como a referência (`QuestPhase/Extension.cpp:228`), e não no "Out" do `-`.
+        // A conexão em sequência grava só o nodePath: o socket que o `connection` em mapa
+        // gravou continua, e o runtime liga em "Out2", e não no "Out" do `-`.
         let xl = parse_xl("quest:\n  phases:\n    - path: a.questphase\n      parent: p.questphase\n      connection:\n        node: [ 3 ]\n        socket: Out2\n      input: [ 5 ]\n").unwrap();
         assert!(xl.issues.is_empty(), "{:?}", xl.issues);
         assert_eq!(xl.quest_phases[0].input, QuestPhaseConnection { node_path: vec![5], socket: Some("Out2".into()) });
         let tabela = crate::instalacao::tabelas_de_runtime::emit_questphase_table(&xl, "m");
         assert!(tabela.lines().any(|l| l == "m | p.questphase | a.questphase | 5 | Out2 |  | - | 0"), "{tabela}");
 
-        // `input` em mapa troca node path e socket (`Config.cpp:57-61`): sem socket, volta ao padrão
+        // `input` em mapa troca node path e socket: sem socket, volta ao padrão
         let xl = parse_xl("quest:\n  phases:\n    - path: a.questphase\n      parent: p.questphase\n      connection:\n        node: [ 3 ]\n        socket: Out2\n      input:\n        node: [ 5 ]\n").unwrap();
         assert_eq!(xl.quest_phases[0].input, QuestPhaseConnection { node_path: vec![5], socket: None });
 
@@ -1387,7 +1285,7 @@ mod tests {
         let fonte = |extra: &str| {
             format!("streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeDeletions:\n        - type: t\n          index: 1\n{extra}")
         };
-        // lista inválida e nada mais: sem sub-deleção o node inteiro é apagado, como na referência (`WorldStreaming/Extension.cpp:476`)
+        // lista inválida e nada mais: sem sub-deleção o node inteiro é apagado
         let xl = parse_xl(&fonte("          expectedActors: 2\n          actorDeletions: [ 0, x ]\n")).unwrap();
         let d = &xl.streaming.as_ref().unwrap().sectors[0].node_deletions[0];
         assert!(d.sub_node_deletions.is_empty());
@@ -1525,8 +1423,8 @@ mod tests {
         assert!(!xl.other_sections.contains(&"resource.fix".to_string()));
     }
 
-    /// O `.xl` segue a regra do leitor único (`crate::tweakxl::yaml`): tag com a lista em bloco embaixo e flow-map viram o que o
-    /// yaml-cpp lê; tab na indentação e merge `<<` derrubam o documento com a linha, em vez de um modelo calado errado.
+    /// O `.xl` segue a regra do leitor único (`crate::tweaks::yaml`): tag com a lista em bloco embaixo e flow-map viram o que o
+    /// YAML define; tab na indentação e merge `<<` derrubam o documento com a linha, em vez de um modelo calado errado.
     #[test]
     fn xl_segue_a_regra_do_leitor_unico() {
         let xl = parse_xl("resource:\n  patch:\n    a.mesh: !exclude\n      - x.mesh\n    b.mesh: { props: [ appearances ], targets: [ y.mesh ] }\n").unwrap();
@@ -1598,7 +1496,7 @@ mod tests {
         assert_eq!(xl.localization_extend, Some("base".to_string()));
     }
 
-    /// Lista ou valor sem idioma é forma que a referência aceita (vira en-us, `Localization/Config.cpp:98-133`) e que o parser ainda não
+    /// Lista ou valor sem idioma é forma que o formato aceita (vira en-us) e que o parser ainda não
     /// lê: vai para `sem_efeito_no_bwms`, não para `issues`.
     #[test]
     fn localization_sem_idioma_e_limite_do_bwms_e_nao_formato_invalido() {
@@ -1631,7 +1529,7 @@ mod tests {
 
     #[test]
     fn garment_overrides_forma_sequencia_e_hide_implicito() {
-        // sequência nua = hide implícito (ChunkMask(vector<uint8_t>), sem `set` explícito).
+        // sequência nua = hide implícito, sem `set` explícito.
         let src = "overrides:\n  tags:\n    my_tag:\n      my_component:\n        - 0\n        - 1\n";
         let xl = parse_xl(src).unwrap();
         assert_eq!(xl.garment_overrides.len(), 1);
@@ -1673,7 +1571,7 @@ mod tests {
 
     #[test]
     fn garment_overrides_forma_escalar() {
-        // escalar = máscara já-computada, crua (sem inversão — ChunkMask(uint64_t): show=false).
+        // escalar = máscara já-computada, crua (sem inversão: show=false).
         let src = "overrides:\n  tags:\n    t1:\n      c1: 0xff\n      c2: 15\n";
         let xl = parse_xl(src).unwrap();
         let t = &xl.garment_overrides[0];
@@ -1695,7 +1593,7 @@ mod tests {
         assert_eq!(mask, 0xFFFFFFFFFFFFFF1Fu64);
     }
 
-    // ===== quest.phases (QuestPhase/Config.cpp) =====
+    // ===== quest.phases =====
 
     #[test]
     fn quest_phases_path_parent_e_conexoes() {
@@ -1785,7 +1683,7 @@ mod tests {
         assert!(xl.animations.is_empty());
     }
 
-    // ===== streaming.sectors (WorldStreaming/Config.cpp) =====
+    // ===== streaming.sectors =====
 
     #[test]
     fn streaming_blocks_e_sector_com_delecao() {
@@ -1819,7 +1717,7 @@ mod tests {
         let pos = m.position.unwrap();
         assert_eq!((pos.x, pos.y, pos.z, pos.w), (1.0, 2.0, 3.0, 0.0));
 
-        // forma com 4 valores: o 4º é aceito mas IGNORADO (w continua 0, fiel ao C++)
+        // forma com 4 valores: o 4º é aceito mas IGNORADO (w continua 0)
         let src2 = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeMutations:\n        - type: t\n          index: 0\n          position: [1.0, 2.0, 3.0, 9.0]\n";
         let xl2 = parse_xl(src2).unwrap();
         let m2 = &xl2.streaming.unwrap().sectors[0].node_mutations[0];
@@ -1863,7 +1761,7 @@ mod tests {
 
     #[test]
     fn streaming_subdelecoes_sem_expected_count_e_ignorada() {
-        // actorDeletions presente mas SEM expectedActors → parse_sub_deletions não faz nada
+        // actorDeletions presente mas SEM expectedActors: nenhuma sub-deleção entra
         let src = "streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeDeletions:\n        - type: t\n          index: 0\n          actorDeletions:\n            - 1\n";
         let xl = parse_xl(src).unwrap();
         let d = &xl.streaming.unwrap().sectors[0].node_deletions[0];
@@ -1878,7 +1776,7 @@ mod tests {
         assert!(xl.streaming.is_none());
     }
 
-    /// Patch de `.inkanim` (ArchiveXL 1.27.2) entra no modelo como os outros e sem aviso: o runtime aplica (`interface::mesclar_inkanim`).
+    /// Patch de `.inkanim` entra no modelo como os outros e sem aviso: o runtime aplica (`interface::mesclar_inkanim`).
     #[test]
     fn patch_de_inkanim_entra_sem_aviso() {
         let xl = parse_xl("resource:\n  patch:\n    mod\\x.inkanim:\n      - base\\gameplay\\gui\\a.inkanim\n    mod\\y.mesh:\n      - base\\b.mesh\n").unwrap();
@@ -1887,7 +1785,7 @@ mod tests {
         assert!(xl.sem_efeito_no_bwms.is_empty(), "{:?}", xl.sem_efeito_no_bwms);
     }
 
-    /// `[ator, shape]` do ArchiveXL 1.27.0 em `actorDeletions`: o par entra no `shape_deletions`, o índice simples no `sub_node_deletions`, e a
+    /// `[ator, shape]` em `actorDeletions`: o par entra no `shape_deletions`, o índice simples no `sub_node_deletions`, e a
     /// tabela leva uma linha `subshape` (o node só com pares não vira linha de node inteiro).
     #[test]
     fn streaming_par_ator_shape_vai_a_tabela_sem_apagar_o_node() {
@@ -1905,7 +1803,7 @@ mod tests {
         assert!(linhas[0].ends_with("| 1 | worldCollisionNode | subdel | 5 2"), "{}", linhas[0]);
         assert!(linhas[1].ends_with("| 1 | worldCollisionNode | subshape | 5 4 1"), "{}", linhas[1]);
         assert!(linhas[2].ends_with("| 2 | worldCollisionNode | subshape | 5 3 0"), "{}", linhas[2]);
-        // Em instanceDeletions o par não é forma da referência: a lista cai inteira, como antes.
+        // Em instanceDeletions o par não é forma aceita: a lista cai inteira.
         let inst = parse_xl("streaming:\n  sectors:\n    - path: s.streamingsector\n      expectedNodes: 5\n      nodeDeletions:\n        - type: worldInstancedMeshNode\n          index: 2\n          expectedInstances: 5\n          instanceDeletions: [[3, 0]]\n").unwrap();
         assert_eq!(inst.issues.len(), 1, "{:?}", inst.issues);
     }

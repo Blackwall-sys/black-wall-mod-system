@@ -22,8 +22,8 @@ pub struct Stats {
     pub total_uncompressed: u64,
 }
 
-/// Deriva a extensão a partir do path resolvido (sem path → `?`). O WolvenKit
-/// também adivinha pelo magic do payload, mas isso exigiria descomprimir o
+/// Deriva a extensão a partir do path resolvido (sem path → `?`). Adivinhar
+/// pelo magic do payload exigiria descomprimir o
 /// segmento principal (Kraken) — fora do escopo do datamap.
 fn ext_of(name: Option<&str>) -> &str {
     match name {
@@ -53,7 +53,7 @@ pub fn write_datamap<W: Write>(
     writeln!(
         w,
         "Índice RDAR (REDengine archive) do Cyberpunk 2077. Gerado a partir do \
-         índice não-comprimido; o payload (Kraken/Oodle) **não** foi descomprimido."
+         índice não-comprimido; o payload (Kraken) **não** foi descomprimido."
     )?;
     writeln!(w)?;
     writeln!(w, "| Campo | Valor |")?;
@@ -107,12 +107,12 @@ pub fn write_datamap<W: Write>(
     if ar.custom_paths_need_kraken {
         writeln!(
             w,
-            "| Paths embutidos (LxrsFooter) | comprimido, requer Kraken para ler |"
+            "| Paths embutidos (rodapé de paths) | comprimido, requer Kraken para ler |"
         )?;
     } else if !ar.custom_paths.is_empty() {
         writeln!(
             w,
-            "| Paths embutidos (LxrsFooter) | {} |",
+            "| Paths embutidos (rodapé de paths) | {} |",
             ar.custom_paths.len()
         )?;
     }
@@ -127,7 +127,7 @@ pub fn write_datamap<W: Write>(
          segmentos e de dependências. `inl` = buffers inline (campo \
          NumInlineBufferSegments). `disco` = Σ zsize; `descomp` = size do \
          segmento principal. `sha1` = hash de conteúdo gravado no índice. O nome \
-         só aparece quando resolvido (via --hashes ou LxrsFooter).\n"
+         só aparece quando resolvido (via --hashes ou rodapé de paths).\n"
     )?;
     writeln!(
         w,
@@ -200,13 +200,13 @@ pub fn write_datamap<W: Write>(
         writeln!(w)?;
     }
 
-    // --- Paths embutidos do LxrsFooter (mods/ArchiveXL) ---
+    // --- Paths embutidos do rodapé de paths (mods) ---
     if !ar.custom_paths.is_empty() {
         writeln!(
             w,
-            "## Paths embutidos (LxrsFooter)\n\n\
+            "## Paths embutidos (rodapé de paths)\n\n\
              Lista de paths que o próprio archive carrega (mecanismo de registro \
-             do ArchiveXL). {} entradas.\n",
+             de mods). {} entradas.\n",
             ar.custom_paths.len()
         )?;
         writeln!(w, "```")?;

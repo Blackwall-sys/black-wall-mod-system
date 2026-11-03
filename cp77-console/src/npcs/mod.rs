@@ -78,16 +78,15 @@ pub(crate) unsafe extern "C" fn tramp_dyt_tag(_c: *mut c_void, frame: *mut c_voi
     rtti::make_handle(out, obj);
 }
 
-/// `DynamicEntityTarget.Tags(tags: array<CName>) -> ref<DynamicEntityTarget>` — Codeware `#133`,
+/// `DynamicEntityTarget.Tags(tags: array<CName>) -> ref<DynamicEntityTarget>` —
 /// 2026-08-18: implementa a fábrica PLURAL que `tramp_dyt_tag` (acima) tinha deixado de fora por
 /// falta de marshalling de `array<T>` como parâmetro (mecanismo agora existe, ver
-/// `rtti::read_params_consuming_with_cnamearray`). Fonte real (`DynamicEntityTarget.hpp::Tags`):
-/// `for (tag : aTags) target->tags.insert(tag);` — insere CADA tag do array no MESMO `Set<CName>`
+/// `rtti::read_params_consuming_with_cnamearray`). Insere CADA tag do array no MESMO conjunto
 /// que `.Tag(x)` (fábrica singular) já usa, sem nenhuma diferença de semântica de despacho (o
-/// `Matches()` real itera `tags` inteiro com OR — `return true` na 1ª tag que bater). Replicado
+/// casamento itera as tags com OR — verdadeiro na 1ª tag que bater). Feito
 /// aqui com UMA linha `(obj, tags)` em `DYNAMICENTITYTARGET_STATES` (a MESMA tabela do `.Tag(x)`,
-/// que grava `[tag]`), array vazio inclusive (`gravar_alvo_por_tags`): `Matches()` com `tags` vazio
-/// devolve true (`DynamicEntityTarget.hpp:18-19`), e o alvo sem linha sairia dos alvos suportados
+/// que grava `[tag]`), array vazio inclusive (`gravar_alvo_por_tags`): alvo com `tags` vazio
+/// casa com tudo, e o alvo sem linha sairia dos alvos suportados
 /// no despacho. `alvo_casa` (`corpo_e_rosto`) acha a linha do ponteiro e `bate_por_tags` faz OR
 /// entre as tags dela; entre alvos `alvos_barram_o_disparo` (`corpo_e_rosto`) faz `any`, então N
 /// tags do MESMO objeto dão o mesmo resultado que N objetos `.Tag(x)` separados via `AddTarget`
@@ -118,7 +117,7 @@ pub unsafe fn register_dynamicentitytarget(reg: &Registry) -> String {
     )
 }
 
-// Layout REAL, lido do header do Codeware (`src/Red/CommunitySystem.hpp`) — não é chute:
+// Layout REAL do motor — não é chute:
 //   Community        : id:EntityID@0x08, active@0x10, initialized@0x11,
 //                      entries:DynArray<CommunityEntry*>@0x18, template@0x38
 //   CommunityEntry   : phases:DynArray<CName>@0x08, name@0x20, spawner:CommunityEntrySpawner*@0x30
@@ -126,11 +125,11 @@ pub unsafe fn register_dynamicentitytarget(reg: &Registry) -> String {
 // `DynArray<T>` do RED = { entries:ptr@0x00, capacity:u32@0x08, size:u32@0x0C } (`register::dynarray_em`).
 pub(crate) const COMMUNITY_ENTRIES_OFF: usize = 0x18;
 
-/// Codeware `#77` — anda uma `Community` REAL e conta os spawners pendurados nas entries.
+/// Anda uma `Community` REAL e conta os spawners pendurados nas entries.
 ///
 /// **Por que isto substitui a varredura por `HashMap`.** O boot de 2026-09-04 rodou o minerador de
-/// mapa contra o `CommunitySystem` e deu `mapas=0`. Não era filtro apertado demais: lendo o header
-/// do Codeware ficou claro que **não existe mapa de spawners** — um spawner pende de
+/// mapa contra o `CommunitySystem` e deu `mapas=0`. Não era filtro apertado demais: pelo layout
+/// do motor **não existe mapa de spawners** — um spawner pende de
 /// `Community.entries[i].spawner`. Procurar mapa ali era procurar uma estrutura que o motor não tem.
 ///
 /// `GetCommunity(id)` já é PROVADO (2026-08-14) e a sessão de 08-14 deixou 10.254 IDs de comunidade
@@ -268,7 +267,7 @@ pub(crate) unsafe fn mine_community_spawner_keys(sys: *mut c_void, scan_bytes: u
     );
 }
 
-/// Codeware `#142` — acha EMPIRICAMENTE o slot de vtable de `GetPoiMappinPhase`, usando a native
+/// Acha EMPIRICAMENTE o slot de vtable de `GetPoiMappinPhase`, usando a native
 /// VANILLA como gabarito.
 ///
 /// **Por que é preciso (medido ao vivo 2026-09-04).** Com hash de POI REAL, o slot `0x3D0`
@@ -337,15 +336,14 @@ pub(crate) unsafe fn vtable_slot_count(obj: *mut c_void, teto: usize) -> usize {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#77` (`CommunityWrapper`/`CommunitySystem`, sessão 2026-08-14, 100% offline) — fonte
-// real (`enablers/Codeware/src/Red/CommunitySystem.hpp`): 7 dos 9 métodos de
-// `Raw::CommunitySystem` são `Core::RawVFunc` — slot de VTABLE em bytes (Windows), NÃO
-// `RawFunc`/`AddressLib` — mesma categoria zero-RE-de-endereço já usada pelo `MappinSystem`
+// `CommunityWrapper`/`CommunitySystem` (sessão 2026-08-14, 100% offline): 7 dos 9 métodos do
+// `CommunitySystem` são slot de VTABLE em bytes (Windows), NÃO
+// endereço de função — mesma categoria zero-RE-de-endereço já usada pelo `MappinSystem`
 // acima (`#142`/`#232`) e reconfirmada de novo aqui: só o shift Itanium Mac=Windows+0x08 já
 // estabelecido neste projeto. `ActivateCommunity`@0x1B0/`DeactivateCommunity`@0x1B8/
 // `SetCommunityPhase`@0x1C0/`ResetCommunity`@0x1C8/`ActivateSpawner`@0x1D8/
 // `DeactivateSpawner`@0x1E0/`ResetSpawner`@0x1E8 (offsets Windows, bytes) → Mac = +0x08 cada.
-// `GetCommunity`@0x228/`GetSpawner`@0x260 devolvem `Red::WeakPtr<T>&` por out-param e entram
+// `GetCommunity`@0x228/`GetSpawner`@0x260 devolvem `WeakPtr<T>&` por out-param e entram
 // pelo sret (`mundo::CommunityWeakPtrSret`): `community_get_community`/`community_get_spawner`
 // (abaixo), só leitura. As 7 funções ficam gated como MUTAÇÃO
 // REAL DE MUNDO (ativam/desativam spawn de NPC/crowd) — nunca chamadas automaticamente por
@@ -359,8 +357,7 @@ pub(crate) unsafe fn vtable_slot_count(obj: *mut c_void, teto: usize) -> usize {
 // nesta mesma rodada, era `mappinsystem_vtbl_fn`) e chamam — sempre validando
 // `crate::memoria::is_readable` em cada passo antes de dereferenciar (idêntico ao MappinSystem).
 // `aCommunityID`/`aSpawnerID` são `uint64_t` cru (o hash de um `EntityID`/`gameCommunityID`,
-// já confirmado ser `{entityId: EntityID}` — `enablers/Codeware/scripts/Base/Imports/
-// gameCommunityID.reds`); `CName` (nomes de entry/fase) é sempre 8 bytes/hash na ABI Itanium,
+// já confirmado ser `{entityId: EntityID}`); `CName` (nomes de entry/fase) é sempre 8 bytes/hash na ABI Itanium,
 // mesma convenção já usada neste projeto pra todo CName passado a native do motor.
 pub(crate) const COMMUNITY_ACTIVATE_SLOT: usize = 0x1B0 + 0x08;
 
@@ -524,9 +521,7 @@ pub(crate) unsafe extern "C" fn tramp_community_get_community(_c: *mut c_void, f
     write_uint_ret(out, instance, 8);
 }
 
-// `GetSpawner` (Codeware `#77`, 2026-08-14, mesma sessão — irmão de `GetCommunity`, fecha o
-// item por completo, 9/9 slots de vtable). Fonte real
-// (`enablers/Codeware/src/Red/CommunitySystem.hpp`):
+// `GetSpawner` (2026-08-14, mesma sessão — irmão de `GetCommunity`, 9/9 slots de vtable):
 //   GetSpawner@0x260 = void* (ICommunitySystem::*)(WeakPtr<Spawner>& aOut, uint64_t aSpawnerID)
 // Mac = Windows 0x260 + 0x08 (mesmo shift Itanium já estabelecido pra esta classe) = 0x268.
 // MESMA técnica exata que fechou `GetCommunity` acima (`CommunityWeakPtrSret`, sret real via
@@ -570,7 +565,7 @@ pub(crate) unsafe fn community_get_spawner(sys: *mut c_void, spawner_id: u64) ->
 /// de `wref<T>` forjado — mesma divergência de escopo consciente já usada em `GetCommunity`
 /// (nenhum tipo `Spawner` foi forjado na RTTI).
 /// `BwmsCommunitySpawnerMine(sys: ref<CommunitySystem>, scanBytes: Int32, maxKeys: Int32) -> Void`
-/// — ponta redscript da mineração de `spawnerID` reais (Codeware `#77`).
+/// — ponta redscript da mineração de `spawnerID` reais.
 ///
 /// **Por que o sistema vem por argumento e não é resolvido aqui.** A 1ª versão resolvia o
 /// `CommunitySystem` pelo `systemMap` (via do `BwmsGetSystemByName`) e o boot de 2026-09-04 provou
@@ -579,12 +574,12 @@ pub(crate) unsafe fn community_get_spawner(sys: *mut c_void, spawner_id: u64) ->
 /// (`[spawnermine] classe 'gameICommunitySystem' -> sys=0x0`). O jeito certo é o vanilla:
 /// `GameInstance.GetCommunitySystem(game)` (`orphans.script:11401`), que o redscript já tem — daí
 /// o sistema chegar pronto por argumento, exatamente como nas outras 9 natives deste item.
-/// Codeware `#77` — anda TODAS as comunidades reais do save e conta quantas têm spawner.
+/// Anda TODAS as comunidades reais do save e conta quantas têm spawner.
 ///
 /// É o probe decisivo que faltava. Os 10.254 hashes do save **todos resolvem como Community**
 /// (medido em 2026-08-14) — então são entrada VÁLIDA e abundante; o erro daquela sessão foi
 /// alimentá-los ao `GetSpawner`, que espera id de node do mundo. Aqui eles são usados pra o que
-/// realmente são: pegar a Community e olhar dentro dela, onde o header do Codeware diz que o
+/// realmente são: pegar a Community e olhar dentro dela, onde pelo layout do motor o
 /// spawner mora (`Community.entries[i].spawner`).
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn walk_all_communities(sys: *mut c_void, max_com: usize, max_entries: usize) {
@@ -694,11 +689,9 @@ pub(crate) unsafe extern "C" fn tramp_community_get_spawner(_c: *mut c_void, fra
 // `BwmsCommunityScanSpawners` (2026-08-14, continuação — retomada dedicada ao teste decisivo
 // de `GetSpawner`). Achado da rodada anterior: os 3 hashes usados até agora (`realId1/2/3`,
 // primeiros 3 do dump de 10254 do `save-parser`) são todos de COMUNIDADE (confirmados via
-// `GetCommunity`), não de spawner. `save-parser/src/community.rs`/`CommunitySystemParser.cs`
-// (fonte real WolvenKit, `WolvenKit.RED4/Save/Parser/CommunitySystemParser.cs`) confirma que o
-// node `CommunitySystem` do save é uma ÚNICA lista sem distinção estrutural — o próprio campo
-// da WolvenKit se chama `Unk_HashList` (nem os autores da ferramenta de referência sabem a
-// semântica completa) — não existe uma 2ª lista separada de spawners pra extrair; extender o
+// `GetCommunity`), não de spawner. `save-parser/src/community.rs` confirma que o
+// node `CommunitySystem` do save é uma ÚNICA lista de hashes sem distinção estrutural (semântica
+// completa desconhecida) — não existe uma 2ª lista separada de spawners pra extrair; extender o
 // parser não teria o que achar de novo. Em vez disso, varre TODOS os 10254 hashes já
 // extraídos contra os 2 métodos SÓ-LEITURA (`GetCommunity`/`GetSpawner`), embutidos aqui via
 // `include_str!` (mesmo hash-set já provado seguro pros 3 primeiros, agora testado por
@@ -1051,7 +1044,7 @@ pub(crate) unsafe extern "C" fn tramp_cew_get_template_entry_data(c: *mut c_void
     variante_de_handle_ret(out, tipo, h.unwrap_or([0, 0]));
 }
 
-/// Codeware `#77`: `CommunityWrapper` (pai `IScriptable`).
+/// `CommunityWrapper` (pai `IScriptable`).
 pub unsafe fn register_communitywrapper(reg: &Registry) -> String {
     let iscriptable = reg.class_by_name("IScriptable");
     if !rtti::sane(iscriptable) || register_type_instantiable_with_parent(reg, "CommunityWrapper", "gameuiInGameMenuGameController", iscriptable).is_null() {
@@ -1069,7 +1062,7 @@ pub unsafe fn register_communitywrapper(reg: &Registry) -> String {
     format!("[reg] CommunityWrapper: classe=OK métodos {r:?}")
 }
 
-/// Codeware `#77`: `CommunityEntryWrapper` (pai `IScriptable`).
+/// `CommunityEntryWrapper` (pai `IScriptable`).
 pub unsafe fn register_communityentrywrapper(reg: &Registry) -> String {
     let iscriptable = reg.class_by_name("IScriptable");
     if !rtti::sane(iscriptable) || register_type_instantiable_with_parent(reg, "CommunityEntryWrapper", "gameuiInGameMenuGameController", iscriptable).is_null() {
@@ -1098,9 +1091,9 @@ pub(crate) unsafe fn register_communitysystem_natives(reg: &Registry, proto: *mu
     let okmine = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:CommunitySystem", "Int32", "Int32"], "BwmsCommunitySpawnerMine", "BwmsCommunitySpawnerMine", corpo_de_prova!(tramp_community_spawner_mine)));
     let okwalk = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:CommunitySystem", "Uint64", "Int32"], "BwmsCommunityWalkSpawners", "BwmsCommunityWalkSpawners", corpo_de_prova!(tramp_community_walk_spawners)));
     let okall = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:CommunitySystem", "Int32", "Int32"], "BwmsCommunityWalkAll", "BwmsCommunityWalkAll", corpo_de_prova!(tramp_community_walk_all)));
-    crate::log_dev!("[reg] register_all: Codeware.#77 BwmsCommunityWalkAll={okall}");
-    crate::log_dev!("[reg] register_all: Codeware.#77 BwmsCommunityWalkSpawners={okwalk} (Community.entries[i].spawner, offsets do header)");
-    crate::log_dev!("[reg] register_all: Codeware.#77 BwmsCommunitySpawnerMine={okmine} (minera spawnerID reais do próprio sistema)");
+    crate::log_dev!("[reg] register_all: comunidade BwmsCommunityWalkAll={okall}");
+    crate::log_dev!("[reg] register_all: comunidade BwmsCommunityWalkSpawners={okwalk} (Community.entries[i].spawner)");
+    crate::log_dev!("[reg] register_all: comunidade BwmsCommunitySpawnerMine={okmine} (minera spawnerID reais do próprio sistema)");
     let ok3 = register_argful_by_types(reg, proto, &["handle:CommunitySystem", "EntityID", "CName"], "BwmsCommunityReset", "BwmsCommunityReset", tramp_community_reset);
     let ok4 = register_argful_by_types(reg, proto, &["handle:CommunitySystem", "EntityID", "CName", "CName"], "BwmsCommunitySetPhase", "BwmsCommunitySetPhase", tramp_community_set_phase);
     let ok5 = register_argful_by_types(reg, proto, &["handle:CommunitySystem", "Uint64"], "BwmsCommunitySpawnerActivate", "BwmsCommunitySpawnerActivate", tramp_community_spawner_activate);
@@ -1111,14 +1104,14 @@ pub(crate) unsafe fn register_communitysystem_natives(reg: &Registry, proto: *mu
     let ok10 = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:CommunitySystem"], "BwmsCommunityScanSpawners", "BwmsCommunityScanSpawners", corpo_de_prova!(tramp_community_scan_spawners)));
     let ok11 = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:CommunitySystem"], "BwmsCommunityScanSpawnersEndGame", "BwmsCommunityScanSpawnersEndGame", corpo_de_prova!(tramp_community_scan_spawners_endgamesave2)));
     let ok12 = register_argful_by_types(reg, proto, &["handle:CommunitySystem", "Uint64"], "BwmsCommunityGetWrapper", "BwmsCommunityGetWrapper", tramp_community_get_wrapper as NativeHandler);
-    crate::log_dev!("[reg] register_all: Codeware.#77 BwmsCommunityGetWrapper={ok12}");
+    crate::log_dev!("[reg] register_all: comunidade BwmsCommunityGetWrapper={ok12}");
     crate::log_dev!(
-        "[reg] register_all: cw-communitysystem (#77) Activate={ok1} Deactivate={ok2} Reset={ok3} SetPhase={ok4} SpawnerActivate={ok5} SpawnerDeactivate={ok6} SpawnerReset={ok7} GetCommunity={ok8} GetSpawner={ok9} ScanSpawners={ok10} ScanSpawnersEndGame={ok11}"
+        "[reg] register_all: communitysystem Activate={ok1} Deactivate={ok2} Reset={ok3} SetPhase={ok4} SpawnerActivate={ok5} SpawnerDeactivate={ok6} SpawnerReset={ok7} GetCommunity={ok8} GetSpawner={ok9} ScanSpawners={ok10} ScanSpawnersEndGame={ok11}"
     );
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#220` — `TagSystem::AssignTag`/`UnassignTag` do motor (2026-09-14, desmonte). O `redTagSystem` fica embutido em `GameTagSystem+0x48`: o handler
+// `TagSystem::AssignTag`/`UnassignTag` do motor (2026-09-14, desmonte). O `redTagSystem` fica embutido em `GameTagSystem+0x48`: o handler
 // vanilla do `GetAnyMatchingEntity` (`0x101709e88`) passa `gts+0x48` pro `0x104008a34`, que lê o `HashMap<CName tag, DynArray<EntityID>>` em `+0x00` (hash
 // de 64 B dobrado em 32) sob a trava de 1 B em `+0x60`. `AssignTag` = `0x1040075e8` e `UnassignTag` = `0x104007b40`, as 2 com `(sistema, EntityID, CName)`
 // e a trava exclusiva em `+0x60` (o `Assign` também mexe no mapa de `+0x38` sob a trava `+0x61`); os `AssignTags`/`UnassignTags` do motor
@@ -1129,8 +1122,8 @@ pub(crate) const TAG_UNASSIGN_VM: u64 = 0x1_0400_7b40;
 
 pub(crate) const GAMETAGSYSTEM_TAGSYSTEM_OFF: usize = 0x48;
 
-// Codeware `#80` parte 80c (2026-09-11): leitura do `Red::Spawner` devolvido pelo `BwmsCommunityGetSpawner` (ponteiro `Uint64`). Layout da
-// referência (`active@08`, `initialized@09`, `recordID@40`, `appearanceName@48`, `record Handle@60`, `restored@78`, `spawned@88`,
+// Spawner, parte 80c (2026-09-11): leitura do spawner devolvido pelo `BwmsCommunityGetSpawner` (ponteiro `Uint64`). Layout
+// (`active@08`, `initialized@09`, `recordID@40`, `appearanceName@48`, `record Handle@60`, `restored@78`, `spawned@88`,
 // `reserved@98`), conferido ao vivo pelo cruzamento `recordID@40` == `[record]+0x40` (TweakDBID do `gamedataTweakDBRecord`, `0x48` B).
 pub(crate) const SPAWNER_TAMANHO_LIDO: usize = 0xb8;
 
@@ -1147,7 +1140,7 @@ pub(crate) unsafe fn spawner_de(args: &[(u64, u64)]) -> Option<*const u8> {
     Some(ptr as *const u8)
 }
 
-/// `BwmsSpawnerIsActive(ptr) -> Bool`: `+0x10`. No Mac o id u64 fica em `+0x08` (a referência Windows põe active ali, e a 80c lia esse byte até a
+/// `BwmsSpawnerIsActive(ptr) -> Bool`: `+0x10`. No Mac o id u64 fica em `+0x08` (no Windows o active fica ali, e a 80c lia esse byte até a
 /// RE da 80d-2: `Activate` `0x101667480` grava `+0x10`).
 pub(crate) unsafe extern "C" fn tramp_spawner_is_active(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
@@ -1205,7 +1198,7 @@ pub(crate) unsafe extern "C" fn tramp_spawner_ids_count(_c: *mut c_void, frame: 
     write_uint_ret(out, n as u32 as u64, 4);
 }
 
-/// Codeware `#80` parte 80d-1 (2026-09-11): `BwmsSpawnerEntityHash(ptr, qual, i) -> Uint64`, hash do `EntityID` `i` do array `qual` (0 restored
+/// Spawner, parte 80d-1 (2026-09-11): `BwmsSpawnerEntityHash(ptr, qual, i) -> Uint64`, hash do `EntityID` `i` do array `qual` (0 restored
 /// `@78`, 1 spawned `@88`, 2 reserved `@98`); 0 com índice fora ou array inválido. O script monta o `EntityID` com `BwmsHashToEntityID`.
 pub(crate) unsafe extern "C" fn tramp_spawner_entity_hash(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
@@ -1234,7 +1227,7 @@ pub(crate) unsafe extern "C" fn tramp_spawner_entity_hash(_c: *mut c_void, frame
 }
 
 /// `BwmsSpawnerPosition(ptr) -> Vector4`: `transform@20` é `WorldTransform` (`WorldPosition` com 3 `FixedPoint` de 17 bits de fração em `+0x00`,
-/// `Quaternion` em `+0x10`, pelo header do SDK); W = 1. Spawner inválido = vetor zero.
+/// `Quaternion` em `+0x10`); W = 1. Spawner inválido = vetor zero.
 pub(crate) const SPAWNER_FIXEDPOINT_UM: f32 = 131072.0;
 
 pub(crate) unsafe extern "C" fn tramp_spawner_position(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -1261,7 +1254,7 @@ pub(crate) unsafe extern "C" fn tramp_spawner_orientation(_c: *mut c_void, frame
     write_raw16_ret(out, &q);
 }
 
-// Codeware `#80` parte 80d-2 (2026-09-11, RE `proofs/20260911-codeware-80-parte80d2-active-entity-ids-offline.log`): o objeto é
+// Spawner, parte 80d-2 (2026-09-11, RE offline dos ids de entidade ativa): o objeto é
 // `game::PopulationSpawner` (vptr `0x107c6d9a8`). Pool de stubs em `[+0xa8]`: trava de leitor num byte em `+0x30` (o motor soma 1 e, se o bit7 do
 // escritor estava ligado, espera ele soltar; solta subtraindo 1) e array A de ponteiros em `+0x08` (cap `+0x10`, tamanho `+0x14`), com o id da
 // entidade em `[p+0x40]`. Ativos = ids de A seguidos do `spawnedEntityIDs` (`+0x88`), como o `vt[0x00]`, lidos sem alocar no heap do motor.
@@ -1362,12 +1355,12 @@ pub(crate) unsafe extern "C" fn tramp_spawner_active_count_motor(_c: *mut c_void
     write_uint_ret(out, n as u32 as u64, 4);
 }
 
-// ArchiveXL `#35` parte 35b (2026-09-11): grafo de uma fase de quest carregada, só leitura (RE da parte a): `questQuestPhaseResource.graph`
+// Fase de quest, parte 35b (2026-09-11): grafo de uma fase de quest carregada, só leitura (RE da parte a): `questQuestPhaseResource.graph`
 // (`Handle<graphGraphDefinition>`) em `0x40`; `graphGraphDefinition.nodes` (`DynArray<Handle<graphGraphNodeDefinition>>`) em `0x30`, tamanho `0x3c`.
 pub(crate) const QUESTPHASE_GRAPH_OFF: usize = 0x40;
 
 
-// ArchiveXL `#35` parte 35c-2a (2026-09-11, RE `proofs/20260911-archivexl-35-parte-c2-edicao-de-grafo-offline.log`): leitura coerente do grafo de uma
+// Fase de quest, parte 35c-2a (2026-09-11, RE offline da edição de grafo): leitura coerente do grafo de uma
 // fase carregada, só leitura. Nó: `sockets` `@0x30`, `id` u16 `@0x40`; socket: `connections` `@0x38`, dono (WeakHandle) `@0x48`; conexão: `source`
 // `@0x30`, `destination` `@0x40` (instância na 1ª palavra do Handle). `desloc` soma um deslocamento nas leituras de dono e das pontas: é o controle
 // negativo (com 8 as igualdades têm que quebrar).
@@ -1417,7 +1410,7 @@ pub(crate) unsafe fn questphase_grafo_estatistica(res: *mut c_void, desloc: usiz
     Some(e)
 }
 
-// ArchiveXL `#35` parte 35c-2b (2026-09-12): tirar e recolocar 1 conexão do grafo de uma fase carregada, sem alocar. A conexão (Handle de 16 B) sai dos
+// Fase de quest, parte 35c-2b (2026-09-12): tirar e recolocar 1 conexão do grafo de uma fase carregada, sem alocar. A conexão (Handle de 16 B) sai dos
 // `connections` dos dois sockets, deslocando os seguintes, e as duas cópias do Handle ficam guardadas aqui — o strong não muda, só troca de dono (do array
 // pro estado desta native) —; recolocar devolve os 16 B nas mesmas posições (a retirada garante a capacidade). Controle: conexões em comum entre dois
 // sockets de nós diferentes que não se ligam = 0. Só na game thread, numa fase que não executa (o smoke usa o epilogue).
@@ -1509,7 +1502,7 @@ pub(crate) unsafe fn questphase_conexao_controle(res: *mut c_void) -> i32 {
     -2
 }
 
-// ArchiveXL `#35` parte 35c-2c (2026-09-12): criar 1 conexão nova no grafo de uma fase carregada que não executa (epilogue). Com a AL-2c, o objeto
+// Fase de quest, parte 35c-2c (2026-09-12): criar 1 conexão nova no grafo de uma fase carregada que não executa (epilogue). Com a AL-2c, o objeto
 // `graphGraphConnectionDefinition` (0x50 B) sai do `CreateInstance`, pelo allocator do motor; `source`/`destination` (`@0x30`/`@0x40`) recebem os dois
 // sockets pelo tipo real da propriedade no RTTI (Handle ou WeakHandle), e a conexão entra nos `connections` dos dois só se já houver capacidade (sem
 // reserve). Desfazer tira dos dois arrays e solta o handle da native: o destrutor do motor solta as referências dos campos, e o hook da destruição
@@ -1782,7 +1775,7 @@ pub(crate) unsafe fn questphase_no_desfazer() -> i32 {
     r
 }
 
-// ArchiveXL `#35` parte 35c-2d-2 (2026-09-12): o `PatchPhase` da referência em memória, numa fase carregada que não executa (epilogue), desfeito na mesma
+// Fase de quest, parte 35c-2d-2 (2026-09-12): o patch de fase em memória, numa fase carregada que não executa (epilogue), desfeito na mesma
 // execução. `FindConnectionPoint` pelo caminho de ids (vazio = 1º `questStartNodeDefinition`, desce por `phaseGraph`); `CreatePhaseNode` com id
 // `quest_phase_node_id("<fase do mod>:<id do nó de entrada>")` e `phaseResource` = hash do path; `ResolveSocket` acha por tipo e nome ou cria (dono pelo
 // set-owner vanilla); `AddConnection` com os dois `WeakHandle` e a conexão nos dois `connections`; com `intercept`, `RemoveConnection` entre o nó de saída e
@@ -1791,7 +1784,7 @@ pub(crate) unsafe fn questphase_no_desfazer() -> i32 {
 // mesmas posições, sockets criados em nós que já existiam saem, o nó sai do `nodes` e os donos da native são soltos; o strong dos sockets que já existiam
 // tem que voltar ao valor de antes.
 #[cfg(feature = "devtools")]
-pub(crate) const PATCH_TESTE_FASE: &str = "mod\\bwms\\teste\\archivexl_35_2d.questphase";
+pub(crate) const PATCH_TESTE_FASE: &str = "mod\\bwms\\teste\\fase_35_2d.questphase";
 
 #[cfg(feature = "devtools")]
 pub(crate) const PATCH_TESTE_ENTRADA: [u16; 1] = [17];
@@ -1814,7 +1807,7 @@ pub(crate) const QUESTPHASENODE_GRAFO_OFF: usize = 0x60;
 pub(crate) const QUESTPHASENODE_RECURSO_OFF: usize = 0x88;
 
 #[cfg(feature = "devtools")]
-pub(crate) const PATCH_CARGA_TESTE_FASE: &str = "mod\\bwms\\teste\\archivexl_35_2d3.questphase";
+pub(crate) const PATCH_CARGA_TESTE_FASE: &str = "mod\\bwms\\teste\\fase_35_2d3.questphase";
 
 pub(crate) struct PatchCtx {
     pub(crate) cls_no: usize,
@@ -1870,60 +1863,78 @@ pub(crate) unsafe fn weak_sem_strong(out: *mut u8, obj: *const u8) -> bool {
     rtti::make_weak_handle(out as *mut c_void, obj as *mut c_void)
 }
 
-/// `AddConnection(nó de saída, socket de saída, nó de entrada, socket de entrada)`.
+/// Conexão nova do socket `nome_out` (saída) de `no_out` ao socket `nome_in` (entrada) de `no_in`; o feito fica em `p`.
 pub(crate) unsafe fn fase_conexao_adiciona(ctx: &PatchCtx, no_out: *const u8, nome_out: &str, no_in: *const u8, nome_in: &str, p: &mut PatchAplicado) -> Result<(), i32> {
-    let out = fase_socket_resolve(ctx, no_out, ctx.tipo_out, nome_out, p)?;
-    let inn = fase_socket_resolve(ctx, no_in, ctx.tipo_in, nome_in, p)?;
-    if !(conexoes_folga(out) && conexoes_folga(inn)) {
+    let saida = fase_socket_resolve(ctx, no_out, ctx.tipo_out, nome_out, p)?;
+    let entrada = fase_socket_resolve(ctx, no_in, ctx.tipo_in, nome_in, p)?;
+    if !conexoes_folga(saida) || !conexoes_folga(entrada) {
         return Err(-4);
     }
     let (obj, mut dono) = patch_objeto_novo(ctx.cls_conexao, GRAPHCONNECTION_VPTR_VM)?;
-    for (off, alvo) in [(GRAPHCONNECTION_SOURCE_OFF, out), (GRAPHCONNECTION_DESTINATION_OFF, inn)] {
-        if !weak_sem_strong(obj.add(off), alvo) {
+    for (off, socket) in [(GRAPHCONNECTION_SOURCE_OFF, saida), (GRAPHCONNECTION_DESTINATION_OFF, entrada)] {
+        if !weak_sem_strong(obj.add(off), socket) {
             p.weak_com_strong += 1;
         }
     }
-    let (_, _, tam_out) = handles_arr_em(out, GRAPHSOCKET_CONNECTIONS_OFF);
-    let (_, _, tam_in) = handles_arr_em(inn, GRAPHSOCKET_CONNECTIONS_OFF);
+    // Uma referência forte por array que guarda a conexão.
     handle_strong_soma(&dono, 2);
-    let ok_out = handles_insere(out, GRAPHSOCKET_CONNECTIONS_OFF, tam_out as usize, dono);
-    let ok_in = handles_insere(inn, GRAPHSOCKET_CONNECTIONS_OFF, tam_in as usize, dono);
-    if !(ok_out && ok_in) {
-        for (s, ok) in [(out, ok_out), (inn, ok_in)] {
-            if let Some(i) = conexao_indice(s, obj).filter(|_| ok) {
-                let _ = handles_tira(s, GRAPHSOCKET_CONNECTIONS_OFF, i);
+    let mut postos: Vec<*const u8> = Vec::with_capacity(2);
+    for s in [saida, entrada] {
+        let (_, _, tam) = handles_arr_em(s, GRAPHSOCKET_CONNECTIONS_OFF);
+        if !handles_insere(s, GRAPHSOCKET_CONNECTIONS_OFF, tam as usize, dono) {
+            break;
+        }
+        postos.push(s);
+    }
+    if postos.len() < 2 {
+        for s in postos {
+            if let Some(i) = conexao_indice(s, obj) {
+                handles_tira(s, GRAPHSOCKET_CONNECTIONS_OFF, i);
             }
         }
         handle_strong_soma(&dono, -2);
-        let _ = crate::jogo::objetos::soltar_handle_contando(&mut dono);
+        crate::jogo::objetos::soltar_handle(&mut dono);
         return Err(-4);
     }
-    p.conexoes.push((out as usize, inn as usize, obj as usize, dono));
+    p.conexoes.push((saida as usize, entrada as usize, obj as usize, dono));
     Ok(())
 }
 
-/// `RemoveConnection(nó de saída, nó de entrada)`: nos sockets `Output` do nó de entrada tira as conexões cujo destino é socket do nó de saída; nos `Input`
-/// do nó de saída, as cuja origem é socket do nó de entrada. Os 16 B vão pra `p.tiradas` (o strong passa do array pro estado).
-pub(crate) unsafe fn fase_conexao_remove(ctx: &PatchCtx, no_out: *const u8, no_in: *const u8, p: &mut PatchAplicado) -> usize {
-    let mut n = 0;
-    for (no, tipo, ponta, outro) in [(no_in, ctx.tipo_out, GRAPHCONNECTION_DESTINATION_OFF, no_out), (no_out, ctx.tipo_in, GRAPHCONNECTION_SOURCE_OFF, no_in)] {
-        for s in handles_legiveis_em(no, GRAPHNODE_SOCKETS_OFF, 256) {
-            if !vptr_e(s, QUESTSOCKET_VPTR_VM) || inteiro_le(s, QUESTSOCKET_TIPO_OFF, ctx.tipo_largura) != tipo {
+/// Conexões de `conexoes` de cada socket de quest do tipo `tipo` de `no` cuja ponta em `ponta_off` é socket com dono `outro`, tiradas do fim para o
+/// começo e guardadas em `p.tiradas`.
+unsafe fn fase_tirar_ligacoes(ctx: &PatchCtx, no: *const u8, tipo: u64, ponta_off: usize, outro: *const u8, p: &mut PatchAplicado) -> usize {
+    let mut tiradas = 0;
+    for s in handles_legiveis_em(no, GRAPHNODE_SOCKETS_OFF, 256) {
+        if !vptr_e(s, QUESTSOCKET_VPTR_VM) || inteiro_le(s, QUESTSOCKET_TIPO_OFF, ctx.tipo_largura) != tipo {
+            continue;
+        }
+        let (ptr, cap, tam) = handles_arr_em(s, GRAPHSOCKET_CONNECTIONS_OFF);
+        if ptr.is_null() || tam > cap || tam > 256 || !crate::memoria::is_readable(ptr as *const c_void, tam as usize * 16) {
+            continue;
+        }
+        for i in (0..tam as usize).rev() {
+            let c = ptr.add(i * 2).read_unaligned() as *const u8;
+            if !rtti::sane(c as *mut c_void) || !crate::memoria::is_readable(c as *const c_void, 0x50) {
                 continue;
             }
-            for c in handles_legiveis_em(s, GRAPHSOCKET_CONNECTIONS_OFF, 256).into_iter().rev() {
-                let alvo = (c.add(ponta) as *const u64).read_unaligned() as *const u8;
-                let do_outro = rtti::sane(alvo as *mut c_void)
-                    && crate::memoria::is_readable(alvo as *const c_void, 0x60)
-                    && (alvo.add(GRAPHSOCKET_DONO_OFF) as *const u64).read_unaligned() == outro as u64;
-                if let Some(i) = conexao_indice(s, c).filter(|_| do_outro) {
-                    p.tiradas.push((s as usize, i, handles_tira(s, GRAPHSOCKET_CONNECTIONS_OFF, i)));
-                    n += 1;
-                }
+            let ponta = (c.add(ponta_off) as *const u64).read_unaligned() as *const u8;
+            if rtti::sane(ponta as *mut c_void)
+                && crate::memoria::is_readable(ponta as *const c_void, 0x60)
+                && (ponta.add(GRAPHSOCKET_DONO_OFF) as *const u64).read_unaligned() == outro as u64
+            {
+                let h = handles_tira(s, GRAPHSOCKET_CONNECTIONS_OFF, i);
+                p.tiradas.push((s as usize, i, h));
+                tiradas += 1;
             }
         }
     }
-    n
+    tiradas
+}
+
+/// Tira as conexões entre `no_out` e `no_in`; o tirado fica em `p.tiradas`. Devolve quantas.
+pub(crate) unsafe fn fase_conexao_remove(ctx: &PatchCtx, no_out: *const u8, no_in: *const u8, p: &mut PatchAplicado) -> usize {
+    fase_tirar_ligacoes(ctx, no_in, ctx.tipo_out, GRAPHCONNECTION_DESTINATION_OFF, no_out, p)
+        + fase_tirar_ligacoes(ctx, no_out, ctx.tipo_in, GRAPHCONNECTION_SOURCE_OFF, no_in, p)
 }
 
 /// Conexões dos sockets `Output` do nó `a` com destino em socket do nó `b`, presentes nos dois arrays.
@@ -1949,7 +1960,7 @@ pub(crate) unsafe fn fase_ligacoes(ctx: &PatchCtx, a: *const u8, b: *const u8) -
     n
 }
 
-/// Passos do `PatchPhase` depois das checagens; o que foi feito fica em `p` (também no erro, pra desfazer).
+/// Escrita do patch de fase no grafo `g_in`, depois das checagens; o que foi feito fica em `p` (também no erro, pra desfazer).
 pub(crate) unsafe fn fase_patch_passos(
     ctx: &PatchCtx,
     fase: &str,
@@ -1964,23 +1975,24 @@ pub(crate) unsafe fn fase_patch_passos(
         return Err(-4);
     }
     let (no, dono) = patch_objeto_novo(ctx.cls_no, QUESTPHASENODE_VPTR_VM)?;
-    p.dono_no = dono;
     p.no = no as usize;
+    p.dono_no = dono;
     (no.add(QUESTNODE_ID_OFF) as *mut u16).write_unaligned(id);
     (no.add(QUESTPHASENODE_RECURSO_OFF) as *mut u64).write_unaligned(bwms_primitives::resource_path_hash(fase));
+    // O `nodes` do grafo guarda uma referência forte própria.
+    handle_strong_soma(&dono, 1);
     let (_, _, tam) = handles_arr_em(g_in, GRAPHDEF_NODES_OFF);
-    handle_strong_soma(&p.dono_no, 1);
-    if !handles_insere(g_in, GRAPHDEF_NODES_OFF, tam as usize, p.dono_no) {
-        handle_strong_soma(&p.dono_no, -1);
+    if !handles_insere(g_in, GRAPHDEF_NODES_OFF, tam as usize, dono) {
+        handle_strong_soma(&dono, -1);
         return Err(-4);
     }
     if let Some((no_out, socket)) = saida {
         if intercept {
             fase_conexao_remove(ctx, no_out, entrada.0, p);
         }
-        let socket = socket.unwrap_or(if vptr_e(no_out, QUESTPHASENODE_VPTR_VM) { "In1" } else { "In" });
-        fase_conexao_adiciona(ctx, no, "Out", no_out, socket, p)?;
-        fase_conexao_adiciona(ctx, no, "Out1", no_out, socket, p)?;
+        let socket_in = socket.unwrap_or(if vptr_e(no_out, QUESTPHASENODE_VPTR_VM) { "In1" } else { "In" });
+        fase_conexao_adiciona(ctx, no, "Out", no_out, socket_in, p)?;
+        fase_conexao_adiciona(ctx, no, "Out1", no_out, socket_in, p)?;
     }
     fase_conexao_adiciona(ctx, entrada.0, entrada.1, no, "In1", p)
 }
@@ -2122,7 +2134,7 @@ pub(crate) unsafe fn register_spawner_census_natives(reg: &Registry, proto: *mut
     let ok8 = registro_de_prova!(reg1("BwmsQuestPhaseNodeCount", &["handle:IScriptable"], corpo_de_prova!(tramp_questphase_node_count)));
     let ok_grafo = registro_de_prova!(reg1("BwmsQuestPhaseGraphStat", &["handle:IScriptable", "Int32", "Int32"], corpo_de_prova!(tramp_questphase_graph_stat)));
     let ok_conexao = registro_de_prova!(reg1("BwmsQuestPhaseConnectionEdit", &["handle:IScriptable", "Int32"], corpo_de_prova!(tramp_questphase_connection_edit)));
-    crate::log_dev!("[reg] register_all: axl-35 35c-2a GraphStat={ok_grafo} 35c-2b ConnectionEdit={ok_conexao}");
+    crate::log_dev!("[reg] register_all: fase-35 35c-2a GraphStat={ok_grafo} 35c-2b ConnectionEdit={ok_conexao}");
     let ok9 = reg1("BwmsSpawnerEntityHash", &["Uint64", "Int32", "Int32"], tramp_spawner_entity_hash);
     let ok10 = reg1("BwmsSpawnerPosition", &["Uint64"], tramp_spawner_position);
     let ok11 = reg1("BwmsSpawnerOrientation", &["Uint64"], tramp_spawner_orientation);
@@ -2131,10 +2143,10 @@ pub(crate) unsafe fn register_spawner_census_natives(reg: &Registry, proto: *mut
     let ok14 = reg1("BwmsSpawnerActiveEntityHash", &["Uint64", "Int32"], tramp_spawner_active_entity_hash);
     let ok15 = registro_de_prova!(reg1("BwmsSpawnerActiveCountMotor", &["Uint64"], corpo_de_prova!(tramp_spawner_active_count_motor)));
     crate::log_dev!(
-        "[reg] register_all: cw-80d wrapper EntityHash={ok9} Position={ok10} Orientation={ok11} SelfId={ok12} ActiveCount={ok13} ActiveEntityHash={ok14} ActiveCountMotor={ok15}"
+        "[reg] register_all: spawner-80d wrapper EntityHash={ok9} Position={ok10} Orientation={ok11} SelfId={ok12} ActiveCount={ok13} ActiveEntityHash={ok14} ActiveCountMotor={ok15}"
     );
     crate::log_dev!(
-        "[reg] register_all: cw-80 censo de spawners Count={ok1} Id={ok2} | leitura IsActive={ok3} IsInitialized={ok4} RecordId={ok5} AppearanceName={ok6} IdsCount={ok7} | axl-35 QuestPhaseNodeCount={ok8}"
+        "[reg] register_all: spawner-80 censo de spawners Count={ok1} Id={ok2} | leitura IsActive={ok3} IsInitialized={ok4} RecordId={ok5} AppearanceName={ok6} IdsCount={ok7} | fase-35 QuestPhaseNodeCount={ok8}"
     );
 }
 
@@ -2173,13 +2185,13 @@ pub(crate) unsafe extern "C" fn tramp_community_update(_c: *mut c_void, frame: *
     write_bool_ret(out, community_update(sys));
 }
 
-// ===== cw-world-depot Fase 2: `DynamicEntitySystem` — FECHADO 2026-08-06 cont.23 ================
+// ===== world-depot Fase 2: `DynamicEntitySystem` — FECHADO 2026-08-06 cont.23 ================
 //
 // **HISTÓRICO (corrigido):** cont.18-20 (2026-08-06, mesmo dia) testaram isto ao vivo e CROU 2/2
 // vezes, mesma assinatura de `inkWidget` (`EXC_BREAKPOINT`/`brk #1`) — hipótese da época (ERRADA,
 // nunca confirmada): "`EntityID` struct-by-value como param novo aciona o assert genérico de
 // bind". cont.23 (mesmo dia, mais tarde) achou a causa real, igual ao `inkWidget`: o `.reds`
-// tinha `module Codeware.World` no mesmo escopo da declaração native — mesmo bug de qualificação
+// tinha uma declaração `module` no mesmo escopo da declaração native — mesmo bug de qualificação
 // de `fullName` já documentado. **Fix (remover `module`) testado ao vivo: `DynamicEntitySystem`
 // completo (8 métodos, incl. os 4 com `EntityID` — RULED OUT como gatilho por este mesmo teste)
 // forjado+registrado+chamado via `newobj`/`callon`, zero crash, GAMEPLAY t=86s em 2 boots.**
@@ -2187,8 +2199,7 @@ pub(crate) unsafe extern "C" fn tramp_community_update(_c: *mut c_void, frame: *
 // abaixo (estruturas + trampolins) é chamado de produção, incondicional, via `inicio/boot.rs::
 // class_validate_probe_hook` (`register_dynamicentitysystem`, mais abaixo) — NÃO é código morto.
 //
-// Fonte real: `enablers/Codeware/scripts/World/DynamicEntitySystem.reds` — `public native class
-// DynamicEntitySystem extends IGameSystem`, 21 métodos. `cw-world-depot` já tinha fechado (IMPL,
+// `public native class DynamicEntitySystem extends IGameSystem`, 21 métodos. `world-depot` já tinha fechado (IMPL,
 // 2026-07-25) usando `CompanionSystem.SpawnSubcharacterOnPosition` como substituto — a auditoria
 // de 2026-08-05 apontou que isso é "bucket largo, prova estreita" (só prova spawn pontual, não a
 // API real de tracking-por-tag/listener que mods reais usam). `register_dynamicentitysystem` (mais
@@ -2197,7 +2208,7 @@ pub(crate) unsafe extern "C" fn tramp_community_update(_c: *mut c_void, frame: *
 // o ciclo de entidade pelo motor (`CreateEntity`/`DeleteEntity`/`Enable*`/`Disable*`, os 3 arrays
 // `GetTags`/`GetTagged`/`GetTaggedIDs` e os ouvintes, `#73b`/`#73c`); `IsReady`/`IsRestored`
 // consultam os sistemas da sessão.
-// `EntityID` é confirmado (RED4ext.SDK `entEntityID.hpp`) `{ hash: u64 }` — 8 bytes, mesma
+// `EntityID` é confirmado `{ hash: u64 }` — 8 bytes, mesma
 // categoria de "struct escalar" já tratada dezenas de vezes neste projeto (TweakDBID/ItemID/CName).
 pub(crate) type DynentMap = std::sync::Mutex<std::collections::HashMap<u64, std::collections::HashSet<u64>>>;
 
@@ -2213,7 +2224,7 @@ pub(crate) fn dynent_by_tag() -> &'static DynentMap {
     DYNENT_BY_TAG_CELL.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
 
-/// `IsReady`: os sistemas do motor que o `CreateEntity` usa resolvem na sessão (o `m_ready` da referência liga no `OnWorldAttached`).
+/// `IsReady`: os sistemas do motor que o `CreateEntity` usa resolvem na sessão.
 /// Sem parâmetro, mas consome o frame: sem pular o `ParamEnd` a native usada inline (`des.IsReady() ? a : b`) devolve lixo (boot 233).
 pub(crate) unsafe extern "C" fn tramp_des_is_ready(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     rtti::read_params_consuming(current_native_func(), frame);
@@ -2292,7 +2303,7 @@ pub(crate) unsafe extern "C" fn tramp_des_delete_tagged(_c: *mut c_void, frame: 
     let func = current_native_func();
     let args = rtti::read_params_consuming(func, frame);
     let tag = args.first().map(|(v, _)| *v).unwrap_or(0);
-    // C#73c: as entidades do `CreateEntity` com a tag são apagadas; as só marcadas pelo `AssignTag` perdem a tag.
+    // As entidades do `CreateEntity` com a tag são apagadas; as só marcadas pelo `AssignTag` perdem a tag.
     let (apagar, marcadas): (Vec<u64>, Vec<u64>) = dynent_ids_com_tag(tag).into_iter().partition(|id| dynent_gerenciada(*id));
     for id in &apagar {
         dynent_apagar(*id);
@@ -2354,11 +2365,8 @@ pub(crate) unsafe extern "C" fn tramp_des_get_tag_by_index(_c: *mut c_void, fram
     write_uint_ret(out, tag, 8);
 }
 
-// ===== Codeware `#73b` — entidade dinâmica transiente pelo motor (2026-09-18) =====================================================
-// RE offline em `proofs/20260918-codeware-73b-re-offline.log`. Ciclo: id transiente do `DynamicEntityIDSystem` → `CreateStub` com um
-// callback nosso → no callback (tick posterior do `EntityStubSystem`), com status 1, tomar o stub do token e pedir o `RegisterEntity` ao
-// `PopulationSystem` → a entidade aparece pelo `FindEntity` → `RemoveEntity` e só então `DeleteStub` (os dois do `PopulationSystem`
-// desreferenciam o stub sem checar nulo). Só id transiente: o persistente iria pro save, e o BWMS não grava dado de mod no save.
+// ===== Entidade dinâmica transiente pelo motor (2026-09-18) =====================================================
+// RE offline em `proofs/20260918-*-73b-re-offline.log`. Só id transiente: o persistente iria pro save, e o BWMS não grava dado de mod no save.
 pub(crate) const STUBSYS_VTBL_VM: u64 = 0x1_0787_1808;
 
 pub(crate) const STUB_CREATE_VM: u64 = 0x1_0174_835c;
@@ -2387,7 +2395,7 @@ pub(crate) struct PedidoStub {
     pub(crate) _38: u64,
 }
 
-/// `PopulationEntityRegisterRequest` (0x28 B); `+0x11`, `+0x15` e o `WeakHandle` em `+0x18` ficam zerados, como na referência.
+/// `PopulationEntityRegisterRequest` (0x28 B); `+0x11`, `+0x15` e o `WeakHandle` em `+0x18` ficam zerados.
 #[repr(C)]
 pub(crate) struct PedidoRegistro {
     pub(crate) id: u64,
@@ -2447,87 +2455,72 @@ pub(crate) unsafe extern "C" fn dynent_cb_mover(dst: *mut u8, src: *mut u8) {
 
 pub(crate) unsafe extern "C" fn dynent_cb_destruir(_buf: *mut u8) {}
 
-/// Invoke do callback do `CreateStub` (buffer: id `@0`, geração do pedido `@8`). Com status 1, a entidade viva e o pedido atual, toma o stub (o
-/// motor apaga o que ficar no token) e pede o registro ao `PopulationSystem`, com a trava nossa segurando o `DeleteEntity`/`DisableEntity` até o
-/// fim do registro.
+/// Invoke do callback do `CreateStub` (buffer: id `@0`, geração do pedido `@8`; token em `token_sp`).
 pub(crate) unsafe extern "C" fn dynent_cb_invoke(buffer: *mut u8, token_sp: *mut [u64; 2]) {
-    let id = (buffer as *const u64).read_unaligned();
-    let pedido = (buffer.add(8) as *const u64).read_unaligned();
-    let token = if token_sp.is_null() { 0 } else { (*token_sp)[0] };
-    if token == 0 {
+    if buffer.is_null() || token_sp.is_null() {
         return;
     }
-    let t = token as *mut u8;
-    let status = i32::from(*t.add(0x10));
-    let Ok(mut m) = DYNENT_ESTADOS.lock() else {
+    let token = (*token_sp)[0] as *mut u8;
+    if token.is_null() {
         return;
-    };
+    }
+    let (id, geracao) = ((buffer as *const u64).read_unaligned(), (buffer.add(8) as *const u64).read_unaligned());
+    // A trava segura `DeleteEntity`/`DisableEntity` até o fim do registro.
+    let Ok(mut estados) = DYNENT_ESTADOS.lock() else { return };
+    let status = token.add(0x10).read();
     dynent_trilhar(id, "criado", i64::from(status));
-    let Some(e) = m.get_mut(&id).filter(|e| e.pedido == pedido) else {
-        return;
-    };
-    e.status = status;
-    let stub = (t as *const u64).read_unaligned();
-    if status != 1 || stub == 0 || (t.add(8) as *const u64).read_unaligned() != id {
+    let Some(e) = estados.get_mut(&id).filter(|e| e.pedido == geracao) else { return };
+    e.status = i32::from(status);
+    let stub = (token as *const u64).read_unaligned();
+    if status != 1 || stub == 0 || (token.add(8) as *const u64).read_unaligned() != id {
         return;
     }
-    (t as *mut u64).write_unaligned(0);
+    // O stub passa a ser nosso: o motor apaga o que ficar no token depois do invoke.
+    (token as *mut u64).write_unaligned(0);
     e.holder = stub;
     let pedido = PedidoRegistro {
         id,
         aparencia: e.aparencia,
         prioridade: 0,
         _11: 0,
-        sempre: u8::from(e.sempre),
-        na_vista: u8::from(e.na_vista),
-        prefetch: u8::from(e.aparencia != 0),
+        sempre: e.sempre as u8,
+        na_vista: e.na_vista as u8,
+        prefetch: (e.aparencia != 0) as u8,
         _15: [0; 3],
         fraco: [0; 2],
     };
-    let registrar: extern "C" fn(*mut c_void, *const PedidoRegistro) -> u32 = std::mem::transmute(crate::rebase(POP_REGISTER_VM));
-    e.registrada = registrar(e.pop as *mut c_void, &pedido) & 0xff != 0;
+    let registrar: unsafe extern "C" fn(usize, *const PedidoRegistro) -> u64 = std::mem::transmute(crate::rebase(POP_REGISTER_VM));
+    e.registrada = registrar(e.pop, &pedido) & 0xff != 0;
     dynent_trilhar(id, "registrada", i64::from(e.registrada));
 }
 
-/// Solta a referência forte do `SharedPtr<EntityStubToken>` que o `CreateStub` devolve, só se não for a última (o pedido na fila tem a dele;
-/// a última, que destruiria o token, fica com o motor).
+/// Solta a referência do BWMS a um `SharedPtr` de token de spawn (`[objeto, bloco de contagem]`).
 pub(crate) unsafe fn dynent_soltar_token(sp: [u64; 2]) {
     if sp[1] == 0 {
         return;
     }
+    // A última referência fica com o motor, que destrói o token pelo caminho dele.
     let forte = &*(sp[1] as *const std::sync::atomic::AtomicU32);
-    let mut atual = forte.load(Ordering::SeqCst);
-    while atual > 1 {
-        match forte.compare_exchange(atual, atual - 1, Ordering::SeqCst, Ordering::SeqCst) {
-            Ok(_) => return,
-            Err(v) => atual = v,
-        }
-    }
+    let _ = forte.fetch_update(Ordering::AcqRel, Ordering::Acquire, |v| (v > 1).then(|| v - 1));
 }
 
-/// Os 3 sistemas da sessão, conferidos pela vtable: (stubs, população, ids).
+/// Os 3 sistemas do motor da sessão: (stubs, população, ids).
 pub(crate) unsafe fn dynent_sistemas() -> Option<(*mut c_void, *mut c_void, *mut c_void)> {
-    // Um `GetGame` pros três: cada `sistema_da_sessao` faria o seu.
-    let (Some(reg), Some(game)) = (crate::registry(), crate::jogo::sessao::game_instance_ptr()) else {
-        return None;
+    let (reg, game) = (crate::registry()?, crate::jogo::sessao::game_instance_ptr()?);
+    let sistema = |tipo: &str, vtbl: u64| {
+        let s = crate::jogo::sessao::sistema_do_motor_por_nome(reg, game, tipo, |s| crate::jogo::sessao::sistema_com_vtable(s, Some(vtbl)));
+        (!s.is_null()).then_some(s)
     };
-    let por = |tipo: &str, vt: u64| crate::jogo::sessao::sistema_do_motor_por_nome(reg, game, tipo, |s| crate::jogo::sessao::sistema_com_vtable(s, Some(vt)));
-    let stubs = por("gameEntityStubSystem", STUBSYS_VTBL_VM);
-    let pop = por("gamePopulationSystem", POPSYS_VTBL_VM);
-    let ids = por("gameDynamicEntityIDSystem", IDSYS_VTBL_VM);
-    (!stubs.is_null() && !pop.is_null() && !ids.is_null()).then_some((stubs, pop, ids))
+    Some((sistema("gameEntityStubSystem", STUBSYS_VTBL_VM)?, sistema("gamePopulationSystem", POPSYS_VTBL_VM)?, sistema("gameDynamicEntityIDSystem", IDSYS_VTBL_VM)?))
 }
 
+/// Handle forte da entidade de `id` no `PopulationSystem` `pop`; `[0, 0]` sem entidade.
 pub(crate) unsafe fn dynent_find_entity(pop: *mut c_void, id: u64) -> [u64; 2] {
     let mut h = [0u64; 2];
-    core::arch::asm!(
-        "blr {f}",
-        f = in(reg) crate::rebase(POP_FIND_VM),
-        in("x0") pop,
-        in("x1") id & 0xffff_ffff,
-        in("x8") h.as_mut_ptr(),
-        clobber_abi("C"),
-    );
+    if pop.is_null() {
+        return h;
+    }
+    crate::jogo::chamada::sret_chamar(crate::rebase(POP_FIND_VM), [pop as u64, id & 0xffff_ffff, 0, 0], h.as_mut_ptr() as *mut c_void);
     h
 }
 
@@ -2540,10 +2533,10 @@ pub(crate) struct PedidoDeSpawn {
 
 /// Marca `e` com um pedido novo e devolve o que o `CreateStub` precisa; chamar com a trava dos estados.
 pub(crate) fn dynent_marcar_spawn(id: u64, e: &mut EntidadeDinamica) -> PedidoDeSpawn {
-    let geracao = DYNENT_PEDIDOS.fetch_add(1, Ordering::Relaxed) + 1;
+    let geracao = DYNENT_PEDIDOS.fetch_add(1, Ordering::AcqRel) + 1;
     e.pedido = geracao;
     e.status = 0;
-    let orientacao = if e.orientacao == [0.0; 4] { [0.0, 0.0, 0.0, 1.0] } else { e.orientacao };
+    let orientacao = if e.orientacao.iter().all(|v| *v == 0.0) { [0.0, 0.0, 0.0, 1.0] } else { e.orientacao };
     PedidoDeSpawn {
         stubs: e.stubs,
         pedido: PedidoStub {
@@ -2559,56 +2552,56 @@ pub(crate) fn dynent_marcar_spawn(id: u64, e: &mut EntidadeDinamica) -> PedidoDe
     }
 }
 
+/// Pede o stub ao motor (`STUB_CREATE_VM`) com o callback [`DYNENT_CALLBACK`].
 pub(crate) unsafe fn dynent_create_stub(p: PedidoDeSpawn) {
-    let id = p.pedido.id;
+    if p.stubs == 0 {
+        return;
+    }
     let mut cb = CallbackMotor { buffer: [0; 0x80], tabela: &DYNENT_CALLBACK, _88: 0 };
-    cb.buffer[..8].copy_from_slice(&id.to_le_bytes());
+    cb.buffer[..8].copy_from_slice(&p.pedido.id.to_le_bytes());
     cb.buffer[8..16].copy_from_slice(&p.geracao.to_le_bytes());
-    let mut token = [0u64; 2];
-    core::arch::asm!(
-        "blr {f}",
-        f = in(reg) crate::rebase(STUB_CREATE_VM),
-        in("x0") p.stubs,
-        in("x1") &p.pedido as *const PedidoStub,
-        in("x2") &mut cb as *mut CallbackMotor,
-        in("x8") token.as_mut_ptr(),
-        clobber_abi("C"),
+    let mut sp = [0u64; 2];
+    crate::jogo::chamada::sret_chamar(
+        crate::rebase(STUB_CREATE_VM),
+        [p.stubs as u64, &p.pedido as *const PedidoStub as u64, &mut cb as *mut CallbackMotor as u64, 0],
+        sp.as_mut_ptr() as *mut c_void,
     );
-    dynent_trilhar(id, "pedido", token[0] as i64);
-    dynent_soltar_token(token);
+    dynent_trilhar(p.pedido.id, "pedido", sp[0] as i64);
+    dynent_soltar_token(sp);
 }
 
-/// Tira a entidade do mundo mantendo o estado: `RemoveEntity` e `DeleteStub` com o stub em mãos, e o pedido em curso deixa de valer (o callback
-/// dele não toma o stub). Chamar com a trava dos estados; `mesma_sessao` falso só esquece o stub (o mundo dele já foi).
+/// Tira a entidade do mundo mantendo o estado; chamar com a trava dos estados. Devolve se havia stub ou pedido.
 pub(crate) unsafe fn dynent_despawnar(id: u64, e: &mut EntidadeDinamica, mesma_sessao: bool) -> bool {
-    let tinha = e.holder != 0 || e.pedido != 0;
+    let havia = e.holder != 0 || e.pedido != 0;
     if e.holder != 0 && mesma_sessao {
-        let remover: extern "C" fn(*mut c_void, u32, u64) = std::mem::transmute(crate::rebase(POP_REMOVE_VM));
-        let apagar_stub: extern "C" fn(*mut c_void, *mut u64) = std::mem::transmute(crate::rebase(STUB_DELETE_VM));
-        remover(e.pop as *mut c_void, id as u32, 0);
-        apagar_stub(e.stubs as *mut c_void, &mut e.holder);
-        dynent_trilhar(id, "removida", e.holder as i64);
+        // `RemoveEntity` e `DeleteStub` desreferenciam o stub sem checar nulo: com ele em mãos, `RemoveEntity` primeiro.
+        let remover: unsafe extern "C" fn(usize, u32, u64) = std::mem::transmute(crate::rebase(POP_REMOVE_VM));
+        remover(e.pop, id as u32, 0);
+        let apagar_stub: unsafe extern "C" fn(usize, *mut u64) = std::mem::transmute(crate::rebase(STUB_DELETE_VM));
+        apagar_stub(e.stubs, &mut e.holder);
+        dynent_trilhar(id, "removida", 1);
     }
     e.holder = 0;
     e.pedido = 0;
     e.status = -1;
     e.registrada = false;
-    tinha
+    havia
 }
 
-/// `CreateEntity` a partir do spec: id transiente, estado e tags; com `active`, o pedido de stub. Devolve o id, 0 sem sistema, sem spec ou
-/// sem record (spec por template fica pro `#75`).
+/// Os sistemas da sessão atual são os do estado `e`.
+unsafe fn dynent_mesma_sessao(atuais: Option<(*mut c_void, *mut c_void, *mut c_void)>, e: &EntidadeDinamica) -> bool {
+    atuais.is_some_and(|(stubs, pop, _)| stubs as usize == e.stubs && pop as usize == e.pop)
+}
+
+/// `CreateEntity` a partir do spec; devolve o id ou 0.
 pub(crate) unsafe fn dynent_criar(spec: &DynamicEntitySpecFields) -> u64 {
     if spec.record_id == 0 {
-        crate::log_dev!("[dynent] CreateEntity: spec sem recordID");
+        crate::log_dev!("[dynent] CreateEntity sem record: recusado");
         return 0;
     }
-    let Some((stubs, pop, ids)) = dynent_sistemas() else {
-        crate::log_dev!("[dynent] CreateEntity: sistemas do motor não resolveram");
-        return 0;
-    };
+    let Some((stubs, pop, ids)) = dynent_sistemas() else { return 0 };
     dynent_ouvir_motor();
-    let proximo: extern "C" fn(*mut c_void) -> u64 = std::mem::transmute(crate::rebase(ID_NEXT_TRANSIENT_VM));
+    let proximo: unsafe extern "C" fn(*mut c_void) -> u64 = std::mem::transmute(crate::rebase(ID_NEXT_TRANSIENT_VM));
     let id = proximo(ids) & 0xffff_ffff;
     if id == 0 {
         return 0;
@@ -2628,30 +2621,30 @@ pub(crate) unsafe fn dynent_criar(spec: &DynamicEntitySpecFields) -> u64 {
         sempre: spec.always_spawned,
         na_vista: spec.spawn_in_view,
     };
-    let spawn = spec.active.then(|| dynent_marcar_spawn(id, &mut e));
-    let Ok(mut m) = DYNENT_ESTADOS.lock() else {
-        return 0;
-    };
-    m.insert(id, e);
-    drop(m);
+    let pedido = spec.active.then(|| dynent_marcar_spawn(id, &mut e));
+    match DYNENT_ESTADOS.lock() {
+        Ok(mut m) => {
+            m.insert(id, e);
+        }
+        Err(_) => return 0,
+    }
     if let Ok(mut s) = DYNENT_IDS.lock() {
         s.insert(id);
     }
     if let (Ok(mut porid), Ok(mut portag)) = (dynent_tags().lock(), dynent_by_tag().lock()) {
-        let s = porid.entry(id).or_default();
-        for tag in &spec.tags {
-            s.insert(*tag);
-            portag.entry(*tag).or_default().insert(id);
+        for &tag in &spec.tags {
+            porid.entry(id).or_default().insert(tag);
+            portag.entry(tag).or_default().insert(id);
         }
     }
     dynent_enfileirar(EVENTO_CRIADA, id, spec.tags.clone());
-    if let Some(p) = spawn {
+    if let Some(p) = pedido {
         dynent_create_stub(p);
     }
     id
 }
 
-/// Entidade transiente por record, sem aparência, tags nem persistência (o teste do A#63/#101 em `aparencia_do_record`).
+/// Entidade transiente por record, sem aparência, tags nem persistência (o teste em `aparencia_do_record`).
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn dynent_criar_por_record(record: u64, posicao: [f32; 4]) -> u64 {
     dynent_criar(&DynamicEntitySpecFields {
@@ -2670,7 +2663,7 @@ pub(crate) unsafe fn dynent_criar_por_record(record: u64, posicao: [f32; 4]) -> 
     })
 }
 
-/// Codeware `#153`: recria uma entidade a partir do spec que o BWMS guardou fora do save.
+/// Recria uma entidade a partir do spec que o BWMS guardou fora do save.
 pub(crate) unsafe fn dynent_criar_do_spec(s: &crate::salvamento::entidades_persistentes::Spec) -> u64 {
     dynent_criar(&DynamicEntitySpecFields {
         record_id: s.record,
@@ -2702,28 +2695,25 @@ pub(crate) unsafe fn dynent_apagar_pub(id: u64) -> bool {
     dynent_apagar(id)
 }
 
-/// `DeleteEntity`: tira do mundo (ou invalida o pedido em curso) e esquece o estado e as tags; o `Deleted` sai com as tags de antes, que ficam
-/// guardadas pro `Despawned` do motor que vem depois.
+/// `DeleteEntity`.
 pub(crate) unsafe fn dynent_apagar(id: u64) -> bool {
-    let sistemas = dynent_sistemas();
-    let Ok(mut m) = DYNENT_ESTADOS.lock() else {
+    if !dynent_gerenciada(id) {
         return false;
-    };
-    let Some(mut e) = m.remove(&id) else {
-        return false;
-    };
-    let mesma_sessao = sistemas.is_some_and(|(s, p, _)| s as usize == e.stubs && p as usize == e.pop);
-    dynent_despawnar(id, &mut e, mesma_sessao);
-    drop(m);
+    }
+    let atuais = dynent_sistemas();
+    let Some(mut e) = DYNENT_ESTADOS.lock().ok().and_then(|mut m| m.remove(&id)) else { return false };
+    let mesma = dynent_mesma_sessao(atuais, &e);
+    dynent_despawnar(id, &mut e, mesma);
     let mut tags: Vec<u64> = Vec::new();
     if let (Ok(mut porid), Ok(mut portag)) = (dynent_tags().lock(), dynent_by_tag().lock()) {
-        for tag in porid.remove(&id).unwrap_or_default() {
-            if let Some(s) = portag.get_mut(&tag) {
+        tags = porid.remove(&id).map(|s| s.into_iter().collect()).unwrap_or_default();
+        for tag in &tags {
+            if let Some(s) = portag.get_mut(tag) {
                 s.remove(&id);
             }
-            tags.push(tag);
         }
     }
+    // O `Despawned` do motor chega depois do `DeleteEntity` e ainda precisa das tags.
     if let Ok(mut a) = DYNENT_TAGS_APAGADAS.lock() {
         a.insert(id, tags.clone());
     }
@@ -2734,33 +2724,33 @@ pub(crate) unsafe fn dynent_apagar(id: u64) -> bool {
     true
 }
 
-/// `EnableEntity`/`DisableEntity`: `false` se não gerenciada ou já no estado pedido.
+/// `EnableEntity`/`DisableEntity`.
 pub(crate) unsafe fn dynent_ligar(id: u64, ligar: bool) -> bool {
-    let sistemas = dynent_sistemas();
-    let Ok(mut m) = DYNENT_ESTADOS.lock() else {
-        return false;
+    let atuais = dynent_sistemas();
+    let pedido = {
+        let Ok(mut m) = DYNENT_ESTADOS.lock() else { return false };
+        let Some(e) = m.get_mut(&id) else { return false };
+        if e.ativa == ligar {
+            return false;
+        }
+        e.ativa = ligar;
+        let mesma = dynent_mesma_sessao(atuais, e);
+        if !ligar {
+            return dynent_despawnar(id, e, mesma);
+        }
+        if !mesma {
+            return false;
+        }
+        dynent_marcar_spawn(id, e)
     };
-    let Some(e) = m.get_mut(&id).filter(|e| e.ativa != ligar) else {
-        return false;
-    };
-    e.ativa = ligar;
-    let mesma_sessao = sistemas.is_some_and(|(s, p, _)| s as usize == e.stubs && p as usize == e.pop);
-    if !ligar {
-        return dynent_despawnar(id, e, mesma_sessao);
-    }
-    if !mesma_sessao {
-        return false;
-    }
-    let p = dynent_marcar_spawn(id, e);
-    drop(m);
     if let Ok(mut s) = DYNENT_MORTOS.lock() {
         s.remove(&id);
     }
-    dynent_create_stub(p);
+    dynent_create_stub(pedido);
     true
 }
 
-/// Codeware `#153`: entrada em sessão nova. As entidades da sessão anterior morreram com o mundo dela,
+/// Entrada em sessão nova. As entidades da sessão anterior morreram com o mundo dela,
 /// mas os estados e as tags ficavam — e o `GetTaggedIDs` contava fantasma (medido no boot 311: tag=2
 /// com 1 entidade viva). Esquece tudo que aponta pra sistemas que não são os do jogo agora.
 ///
@@ -2821,7 +2811,7 @@ pub(crate) fn dynent_gerenciada(id: u64) -> bool {
     DYNENT_ESTADOS.lock().map(|m| m.contains_key(&id)).unwrap_or(false)
 }
 
-// ----- Eventos (C#73c) ---------------------------------------------------------------------------------------------------------------------
+// ----- Eventos ---------------------------------------------------------------------------------------------------------------------
 // `Created`/`Deleted` saem do `CreateEntity`/`DeleteEntity`; `Spawned`/`Despawned`/`Dead` vêm do `EntitySpawnerEventsBroadcaster` do motor
 // (valores nativos 2/3/4, os mesmos do `DynamicEntityEventType`). O ouvinte do motor roda num job com a trava de escrita do broadcaster presa:
 // só enfileira. O tick da thread do jogo despacha pro script.
@@ -2925,7 +2915,7 @@ pub(crate) unsafe fn dynent_ouvir_motor() {
     }
 }
 
-/// Fim de sessão (o mundo saiu): como o `OnAfterWorldDetach` da referência, esquece estados, tags, ouvintes e o registro no broadcaster.
+/// Fim de sessão (o mundo saiu): esquece estados, tags, ouvintes e o registro no broadcaster.
 pub(crate) unsafe fn dynent_fim_de_sessao() {
     if let Ok(mut r) = DYNENT_REGISTRO.lock() {
         *r = (0, 0);
@@ -2959,8 +2949,8 @@ pub(crate) unsafe fn dynent_fim_de_sessao() {
     }
 }
 
-/// `Dead` (C#73c): o motor não emite `Death` no broadcaster neste build (os únicos `QueueEvent` do slot `+0x1c8` são `Spawn` em `0x1047e637c` e
-/// `0x104c48fb8` e `Despawn` em `0x1047ef538`, nenhum script vanilla emite `Death`), então o `Dead` da referência nunca dispararia. O BWMS vigia:
+/// `Dead`: o motor não emite `Death` no broadcaster neste build (os únicos `QueueEvent` do slot `+0x1c8` são `Spawn` em `0x1047e637c` e
+/// `0x104c48fb8` e `Despawn` em `0x1047ef538`, nenhum script vanilla emite `Death`), então um `Dead` preso ao `Death` nunca dispararia. O BWMS vigia:
 /// a cada ~1 s, com ouvinte registrado, as entidades no mundo que respondem `IsDead()` verdadeiro viram um `Dead`, uma vez por spawn.
 pub(crate) static DYNENT_MORTOS: std::sync::Mutex<std::collections::BTreeSet<u64>> = std::sync::Mutex::new(std::collections::BTreeSet::new());
 
@@ -3056,7 +3046,7 @@ pub(crate) unsafe extern "C" fn tramp_des_create_entity(_c: *mut c_void, frame: 
     let spec_obj = dynent_id_do_frame(frame) as usize;
     let spec = des_spec_map().lock().ok().and_then(|m| m.get(&spec_obj).cloned());
     let id = spec.as_ref().map_or(0, |s| dynent_criar(s));
-    // Codeware `#153`: com `persistSpawn`, o spec vai pro arquivo do save (fora dele) e volta na carga.
+    // Com `persistSpawn`, o spec vai pro arquivo do save (fora dele) e volta na carga.
     if id != 0 {
         if let Some(s) = spec.as_ref().filter(|s| s.persist_spawn) {
             crate::salvamento::entidades_persistentes::registrar(
@@ -3313,27 +3303,26 @@ RegisterListener={m26} UnregisterListener={m27} UnregisterListeners={m28}"
 
 
 
-// ===== Codeware `#74` (`DynamicEntitySpec`) — implementação NOVA, 2026-08-19 =========================
+// ===== `DynamicEntitySpec` — implementação NOVA, 2026-08-19 =========================
 //
-// Companion struct do `#73`/`DynamicEntitySystem` — item catalogado como "groundwork parcial" numa
-// investigação dedicada de 2026-08-19 (offline): a rodada anterior leu `DynamicEntitySpec.hpp` (79
-// linhas) por completo e achou que o item IRMÃO `StaticEntitySpec` (`#76`, FECHADO 2026-08-15,
+// Companion struct do `DynamicEntitySystem` (investigação offline de 2026-08-19): o IRMÃO
+// `StaticEntitySpec` (FECHADO 2026-08-15,
 // `register_staticentityspec` acima) é um TEMPLATE quase mecânico — mesmo parent `IScriptable`
 // direto, mesmo registry-Rust-por-ponteiro, mesmo `Vector4`/`Quaternion`-como-parâmetro já resolvido
 // (`read_params_consuming_with_raw16`/`write_raw16_ret`), mesmo idioma Count+ByIndex pra tags. Esta
-// rodada porta os 12 campos (StaticEntitySpec tinha só 6):
+// rodada cobre os 12 campos (StaticEntitySpec tinha só 6):
 //
-//   Red::TweakDBID            recordID;       // NOVO (não existe em StaticEntitySpec)
-//   Red::RaRef<>              templatePath;   // igual StaticEntitySpec (ResRef, mesma divergência do #63)
+//   TweakDBID                 recordID;       // NOVO (não existe em StaticEntitySpec)
+//   ResRef                    templatePath;   // igual StaticEntitySpec
 //   uint64_t                  templateHash;   // NOVO — companion de templatePath p/ (de)serialização
-//   Red::CName                appearanceName; // igual
-//   Red::Vector4               position;       // igual
-//   Red::Quaternion            orientation;    // igual
+//   CName                     appearanceName; // igual
+//   Vector4                   position;       // igual
+//   Quaternion                orientation;    // igual
 //   bool                      persistState;   // NOVO
 //   bool                      persistSpawn;   // NOVO
 //   bool                      alwaysSpawned;  // NOVO
 //   bool                      spawnInView;    // NOVO
-//   Red::DynArray<Red::CName> tags;           // igual
+//   DynArray<CName>           tags;           // igual
 //   bool                      active;         // NOVO
 //
 // `recordID` (TweakDBID) e `templateHash` (Uint64 cru) são ambos escalares de 8 bytes — mesma
@@ -3343,12 +3332,9 @@ RegisterListener={m26} UnregisterListener={m27} UnregisterListeners={m28}"
 // (rodada 11 do #76 — bug real de leitura de parâmetro Bool sem máscara, documentado ali) — aplicado
 // AQUI DESDE A ORIGEM, nunca reproduzindo o bug.
 //
-// `IsRecord()`/`IsTemplate()`/`PrepareForSaving()`/`RestoreAfterLoading()` (métodos C++ inline da
-// fonte real) NÃO são `RTTI_METHOD`/native func expostos — são helpers internos do motor Windows,
-// nunca declarados em nenhum `.reds` real do Codeware (confirmado: `StaticEntitySpec.reds`/
-// `DynamicEntitySpec.reds` vendorizados só declaram os campos `native let`, zero método) — fora de
-// escopo, mesma divergência já aceita pro `#76` (Create+Setters/Getters em vez de campos `native let`
-// diretos, decisão de design já estabelecida por aquele item).
+// Helpers internos (`IsRecord()`/`IsTemplate()`/`PrepareForSaving()`/`RestoreAfterLoading()`) não
+// são expostos a script — fora de escopo. Create+Setters/Getters em vez de campos `native let`
+// diretos, a mesma decisão de design do `StaticEntitySpec`.
 #[derive(Clone, Default)]
 pub(crate) struct DynamicEntitySpecFields {
     pub(crate) record_id: u64,
@@ -3701,15 +3687,15 @@ pub(crate) unsafe extern "C" fn tramp_population_is_spawning(_c: *mut c_void, fr
     write_bool_ret(out, spawning);
 }
 
-// ===== Codeware `#82` — `GetWorkspotInstance` com forma própria do BWMS (2026-09-14) =====
-// Porte de `App/World/WorkspotSystemEx.hpp` e `Red/WorkspotSystem.hpp`: o `workWorkspotSystem` é o runtime system 31 da `RuntimeScene` (índice e base
+// ===== `GetWorkspotInstance` com forma própria do BWMS (2026-09-14) =====
+// O `workWorkspotSystem` é o runtime system 31 da `RuntimeScene` (índice e base
 // provados em 2026-08-22, `proofs/2026-08-22-runtime-systems-cena-PROVADO.log`; base também em `[CGameFramework+0x18]`, boot 210). No Mac a trava e o
 // mapa ficam 4 e 8 B antes do Windows (desmonte de 2026-09-14 das 7 buscas do sistema a partir de `0x1045e3470`, o `IsActorInWorkspot` que o handler
 // `0x10266fc28` chama com `[[gamesystem+0x40]+0x78]+0x1f0`): sob a trava compartilhada de 1 B `+0x4C` (`SharedSpinLock`: toma pelo `0x1000015c8`, solta
 // com −1), o `InstanceMap` `+0x68` (`HashMap<u64, workWorkspotInstance*>`, chave = `EntityID.hash`, `hashedKey` e bucket pelos 32 B baixos da chave) dá a
 // instância. O boot 210 caiu lendo o mapa em `+0x70` (o `indexTable` saiu `{21, 28}`, que são o tamanho e a capacidade). O tipo `workWorkspotInstance` não é visível ao redscript desta build, então o BWMS entrega os campos por natives globais pelo `EntityID` do
-// ator: `resource` `+0x70` (o caminho do recurso), `animName` `+0x110`, `idleAnim` `+0x118` e `entryId` `+0x120` (offsets do `RTTI_EXPAND_CLASS` da
-// referência, com o `tree` `+0x60`, conferidos no teste pela classe dos handles).
+// ator: `resource` `+0x70` (o caminho do recurso), `animName` `+0x110`, `idleAnim` `+0x118` e `entryId` `+0x120` (com o `tree` `+0x60`,
+// conferidos no teste pela classe dos handles).
 pub(crate) const C82_SISTEMA_INDICE: usize = 31;
 
 pub(crate) unsafe fn c82_ator(frame: *mut c_void) -> u64 {
@@ -3756,12 +3742,12 @@ pub(crate) const COMMUNITY_ENTRY_NAME_OFF: usize = 0x20;
 
 pub(crate) const COMMUNITY_GET_COMMUNITY_SLOT: usize = 0x228 + 0x08;
 
-// Codeware `#77` — `CommunityWrapper`/`CommunityEntryWrapper` sobre a `game::Community` viva. Cada wrapper guarda a comunidade pelo `WeakPtr` do
-// `GetCommunity` e trava a comunidade a cada leitura (strong +1 por CAS, como o builder do C#8/C#25): com a comunidade descarregada, os getters devolvem
-// vazio. Layout do header da referência: `Community` `entries` `+0x18` e `template_` `+0x38`; `CommunityEntry` `phases` `+0x08`, `name` `+0x20`, `active`
+// `CommunityWrapper`/`CommunityEntryWrapper` sobre a `game::Community` viva. Cada wrapper guarda a comunidade pelo `WeakPtr` do
+// `GetCommunity` e trava a comunidade a cada leitura (strong +1 por CAS): com a comunidade descarregada, os getters devolvem
+// vazio. Layout: `Community` `entries` `+0x18` e `template_` `+0x38`; `CommunityEntry` `phases` `+0x08`, `name` `+0x20`, `active`
 // `+0x28`, `spawner` `+0x30`, `spawnEntry` `+0x40`; `CommunityEntrySpawner` com os arrays de ids em `+0x18`/`+0x28`/`+0x38`/`+0x48`. A vtable da
 // `game::Community` no Mac (`0x107c65b88`, pelos fixups do `__DATA_CONST`, sem typeinfo) tem 4 virtuais antes dos 2 destrutores — `GetActiveEntityIDs`
-// `0x104709d58`, `GetActiveEntityCount` `0x104709e14`, `IsOwnedEntity` `0x104709eb0` e um 4º que o header não lista —; o destrutor é chamado direto
+// `0x104709d58`, `GetActiveEntityCount` `0x104709e14`, `IsOwnedEntity` `0x104709eb0` e um 4º sem nome conhecido —; o destrutor é chamado direto
 // pela soltura do `SharedStorage` (`0x104709894`).
 pub(crate) const COMMUNITY_TEMPLATE_OFF: u64 = 0x38;
 
@@ -3820,7 +3806,7 @@ pub(crate) unsafe fn register_persistency_population_natives(reg: &Registry, pro
         tramp_population_is_spawning,
     );
     crate::log_dev!(
-        "[reg] register_all: cw-75-76-138-139-141-143-vtable (PersistencySystem/PopulationSystem) GetEntityStatus={ok1} IsSpawning={ok2}"
+        "[reg] register_all: vtable (PersistencySystem/PopulationSystem) GetEntityStatus={ok1} IsSpawning={ok2}"
     );
 }
 
@@ -3888,5 +3874,173 @@ pub(crate) unsafe fn register_c82_natives(reg: &Registry, proto: *mut c_void) {
         params_compostos(p) && registro_de_prova!(register_global_composed(reg, proto, p, "BwmsC82Anotar", "BwmsC82Anotar", corpo_de_prova!(tramp_c82_anotar)))
     };
     crate::log_dev!("[reg] register_all: c82 workspot {r:?} BwmsC82Anotar={anotar}");
+}
+
+/// Vetores `B5|npcs|*` de `B5-vetores.txt`. Os estados são globais: cada teste usa ids próprios.
+#[cfg(test)]
+mod vetores_b5 {
+    use super::*;
+
+    fn entidade(holder: u64, pedido: u64, ativa: bool) -> EntidadeDinamica {
+        EntidadeDinamica {
+            stubs: 0x51,
+            pop: 0x52,
+            holder,
+            status: -1,
+            pedido,
+            registrada: false,
+            ativa,
+            record: 0xabcd_0000_1234,
+            posicao: [0.0; 4],
+            orientacao: [0.0; 4],
+            aparencia: 0,
+            sempre: true,
+            na_vista: true,
+        }
+    }
+
+    /// `(holder, status, pedido, registrada, ativa)`.
+    fn resumo(e: &EntidadeDinamica) -> (u64, i32, u64, bool, bool) {
+        (e.holder, e.status, e.pedido, e.registrada, e.ativa)
+    }
+
+    fn estado(id: u64) -> Option<(u64, i32, u64, bool, bool)> {
+        DYNENT_ESTADOS.lock().expect("estados").get(&id).map(resumo)
+    }
+
+    #[test]
+    fn layouts() {
+        assert_eq!((std::mem::size_of::<PedidoStub>(), std::mem::align_of::<PedidoStub>()), (0x40, 16));
+        assert_eq!(std::mem::size_of::<PedidoRegistro>(), 0x28);
+        assert_eq!((std::mem::size_of::<CallbackMotor>(), std::mem::offset_of!(CallbackMotor, tabela)), (0x90, 0x80));
+    }
+
+    #[test]
+    fn soltar_token() {
+        for (forte, depois) in [(0u32, 0u32), (1, 1), (2, 1), (5, 4)] {
+            let bloco = std::sync::atomic::AtomicU32::new(forte);
+            unsafe { dynent_soltar_token([0x1000, &bloco as *const _ as u64]) };
+            assert_eq!(bloco.load(Ordering::Relaxed), depois, "forte {forte}");
+        }
+        unsafe { dynent_soltar_token([0x1000, 0]) };
+    }
+
+    #[test]
+    fn marcar_spawn() {
+        let casos = [
+            ([1.5, -2.25, 100.0, 1.0], [0.0; 4], [196608, -294912, 13107200], [0.0, 0.0, 0.0, 1.0]),
+            ([0.0; 4], [0.1, 0.2, 0.3, 0.9], [0, 0, 0], [0.1, 0.2, 0.3, 0.9]),
+            ([-3.8e-6, 16000.0, -16000.0, 0.0], [0.0, 0.0, 0.0, 1.0], [0, 2097152000, -2097152000], [0.0, 0.0, 0.0, 1.0]),
+        ];
+        for (pos, ori, posicao, orientacao) in casos {
+            let mut e = entidade(0, 0, true);
+            e.posicao = pos;
+            e.orientacao = ori;
+            e.status = 9;
+            let antes = DYNENT_PEDIDOS.load(Ordering::Relaxed);
+            let p = dynent_marcar_spawn(0x42, &mut e);
+            assert_eq!((p.stubs, p.pedido.id, p.pedido._08, p.pedido.posicao, p.pedido._1c), (0x51, 0x42, 0, posicao, 0));
+            assert_eq!((p.pedido.orientacao, p.pedido.record, p.pedido._38), (orientacao, 0xabcd_0000_1234, 0));
+            assert!(p.geracao > antes && e.pedido == p.geracao && e.status == 0);
+        }
+    }
+
+    #[test]
+    fn despawnar() {
+        for (holder, pedido, mesma, ret) in [(0, 0, true, false), (0, 7, true, true), (0, 7, false, true), (0x99, 0, false, true)] {
+            let mut e = entidade(holder, pedido, true);
+            e.registrada = true;
+            assert_eq!(unsafe { dynent_despawnar(0xb51001, &mut e, mesma) }, ret);
+            assert_eq!(resumo(&e), (0, -1, 0, false, true));
+        }
+    }
+
+    #[test]
+    fn cb_invoke() {
+        let id = 0xb51002u64;
+        let mut e = entidade(0, 0, true);
+        let geracao = dynent_marcar_spawn(id, &mut e).geracao;
+        DYNENT_ESTADOS.lock().expect("estados").insert(id, e);
+        let mut token = [0x5555u64, id, 2];
+        let mut buffer = [0u8; 0x80];
+        buffer[..8].copy_from_slice(&id.to_le_bytes());
+        buffer[8..16].copy_from_slice(&geracao.to_le_bytes());
+        let invocar = |token: &mut [u64; 3], buffer: &mut [u8; 0x80]| unsafe {
+            let mut sp = [token.as_mut_ptr() as u64, 0];
+            dynent_cb_invoke(buffer.as_mut_ptr(), &mut sp);
+        };
+        invocar(&mut token, &mut buffer);
+        assert_eq!((estado(id), token[0]), (Some((0, 2, geracao, false, true)), 0x5555), "status 2");
+
+        let mut antigo = buffer;
+        antigo[8..16].copy_from_slice(&(geracao - 1).to_le_bytes());
+        token[2] = 1;
+        invocar(&mut token, &mut antigo);
+        assert_eq!((estado(id), token[0]), (Some((0, 2, geracao, false, true)), 0x5555), "pedido antigo");
+
+        let mut sem_stub = [0u64, id, 1];
+        invocar(&mut sem_stub, &mut buffer);
+        assert_eq!((estado(id), sem_stub[0]), (Some((0, 1, geracao, false, true)), 0), "status 1, stub 0");
+
+        let mut outro = [0x5555u64, id + 1, 1];
+        invocar(&mut outro, &mut buffer);
+        assert_eq!((estado(id), outro[0]), (Some((0, 1, geracao, false, true)), 0x5555), "status 1, id do token diferente");
+
+        unsafe {
+            dynent_cb_invoke(buffer.as_mut_ptr(), std::ptr::null_mut());
+            dynent_cb_invoke(buffer.as_mut_ptr(), &mut [0, 0]);
+        }
+        DYNENT_ESTADOS.lock().expect("estados").remove(&id);
+    }
+
+    #[test]
+    fn ligar() {
+        let id = 0xb51004u64;
+        DYNENT_ESTADOS.lock().expect("estados").insert(id, entidade(0, 7, true));
+        assert!(unsafe { dynent_ligar(id, false) }, "ativa, desligar");
+        assert_eq!(estado(id), Some((0, -1, 0, false, false)));
+        assert!(!unsafe { dynent_ligar(id, false) }, "inativa, desligar de novo");
+        assert_eq!(estado(id), Some((0, -1, 0, false, false)));
+        assert!(!unsafe { dynent_ligar(id, true) }, "inativa, ligar fora da sessão");
+        assert_eq!(estado(id), Some((0, -1, 0, false, true)));
+        assert!(!unsafe { dynent_ligar(0xb5_1fff, true) }, "id desconhecido");
+        DYNENT_ESTADOS.lock().expect("estados").remove(&id);
+    }
+
+    #[test]
+    fn apagar() {
+        let id = 0xb51003u64;
+        DYNENT_ESTADOS.lock().expect("estados").insert(id, entidade(0, 0, true));
+        for tag in [0x71u64, 0x72] {
+            dynent_tags().lock().expect("tags").entry(id).or_default().insert(tag);
+            dynent_by_tag().lock().expect("tags").entry(tag).or_default().insert(id);
+        }
+        DYNENT_MORTOS.lock().expect("mortos").insert(id);
+        assert!(unsafe { dynent_apagar(id) });
+        assert_eq!(estado(id), None);
+        assert!(!dynent_tags().lock().expect("tags").contains_key(&id));
+        assert_eq!(dynent_by_tag().lock().expect("tags").get(&0x71).map(|s| s.contains(&id)), Some(false));
+        let mut apagadas = DYNENT_TAGS_APAGADAS.lock().expect("apagadas").get(&id).cloned().unwrap_or_default();
+        apagadas.sort_unstable();
+        assert_eq!(apagadas, vec![0x71, 0x72]);
+        assert!(!DYNENT_MORTOS.lock().expect("mortos").contains(&id));
+        let eventos: Vec<(u32, Vec<u64>)> = DYNENT_EVENTOS.lock().expect("eventos").iter().filter(|e| e.1 == id).map(|e| {
+            let mut t = e.2.clone();
+            t.sort_unstable();
+            (e.0, t)
+        }).collect();
+        assert_eq!(eventos, vec![(EVENTO_APAGADA, vec![0x71, 0x72])]);
+        assert!(!unsafe { dynent_apagar(0xb5_2fff) }, "id desconhecido");
+    }
+
+    #[test]
+    fn criar_e_sistemas_sem_motor() {
+        let spec = |record| DynamicEntitySpecFields { record_id: record, active: true, tags: vec![0x73], ..Default::default() };
+        let eventos = || DYNENT_EVENTOS.lock().expect("eventos").iter().filter(|e| e.2 == vec![0x73]).count();
+        assert_eq!(unsafe { dynent_criar(&spec(0)) }, 0);
+        assert_eq!(unsafe { dynent_criar(&spec(0x1234)) }, 0);
+        assert_eq!(eventos(), 0);
+        assert!(unsafe { dynent_sistemas() }.is_none());
+    }
 }
 

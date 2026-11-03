@@ -1,7 +1,7 @@
-// bwms-world-node.reds — Codeware `#85` com nome BWMS: instância de nó do mundo e `worldInstancedMeshNode` de setor, só leitura.
+// bwms-world-node.reds — com nome BWMS: instância de nó do mundo e `worldInstancedMeshNode` de setor, só leitura.
 //
-// O Codeware declara `worldINodeInstance` (6 getters) e `worldInstancedMeshNode` (9 campos + 3 arrays) como tipos nativos; aqui nenhum dos dois é declarado
-// (categoria CMesh: o corpus vanilla não declara nenhum deles) e os getters são compostos sobre leitores tipados, como no C#83.
+// `worldINodeInstance` (6 getters) e `worldInstancedMeshNode` (9 campos + 3 arrays) não são declarados como tipos nativos
+// (categoria CMesh: o corpus vanilla não declara nenhum deles) e os getters são compostos sobre leitores tipados, como no `bwms-world-node-setup.reds`.
 // - `BwmsWorldNodeInstance.FromID(id)`: `id` é o hash do GlobalNodeRef (ex.: `BwmsEntityIDToHash(Cast<EntityID>(ResolveNodeRef(ref, raiz)))`);
 //   `FromSectorSetup(setor, i)` usa o GlobalNodeID do setup `i` de um setor no cache. Cada getter acha a instância de novo no registro do mundo, então um nó
 //   que saiu do streaming devolve NaN/0 em vez de lixo. `GetNode` vira `GetNodeClass` (o `worldNode` não é declarável) e o GlobalNodeID sai como Uint64.
@@ -99,7 +99,7 @@ public class BwmsWorldNodeInstance {
         return v;
     }
 
-    // Codeware `#237`: classe da instância (`worldMeshNodeInstance` etc.); `None` se ela saiu do streaming.
+    // Classe da instância (`worldMeshNodeInstance` etc.); `None` se ela saiu do streaming.
     public func GetInstanceClass() -> CName {
         let h: Uint64 = BwmsNodeInstanceInfo(this.m_id, 0);
         let classe: CName = BwmsHashToName(h);
@@ -132,7 +132,7 @@ public class BwmsWorldNodeInstance {
     }
 }
 
-// Codeware `#237` (`Red/WorldNode.hpp`): `what` 0 = hash da classe da instância, 1 = `WorldNodeInstanceNodeState`, 2 = hash da classe do objeto carregado
+// `what` 0 = hash da classe da instância, 1 = `WorldNodeInstanceNodeState`, 2 = hash da classe do objeto carregado
 // (mesh em `worldMeshNodeInstance`/`worldBendedMeshNodeInstance`/`worldFoliageNodeInstance`, material em `worldStaticDecalNodeInstance`, entidade em
 // `worldEntityNodeInstance`); 0 sem instância.
 native func BwmsNodeInstanceInfo(id: Uint64, what: Int32) -> Uint64

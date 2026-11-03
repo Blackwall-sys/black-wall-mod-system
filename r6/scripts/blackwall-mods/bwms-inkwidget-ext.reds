@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------------
-// inkWidget.BwmsAttachController/BwmsGetController — o `AttachController`/`GetController` do Codeware com nome do BWMS
+// inkWidget.BwmsAttachController/BwmsGetController — `AttachController`/`GetController` com nome do BWMS
 // -----------------------------------------------------------------------------
 //
 // `inkWidget.GetController() -> wref<inkLogicController>` já é native VANILLA (`ui/baseWidgets/abstractWidgets.script:8`): um
@@ -8,7 +8,7 @@
 // `new`, a leitura nunca achava o valor; as assinaturas públicas usam `ref<T>`.
 // `GetControllerByType(CName)`/`GetControllers()` também são natives vanilla de `inkWidget`, usáveis direto.
 //
-// Mod que espera `widget.AttachController(...)` do Codeware chama `widget.BwmsAttachController(...)` no BWMS.
+// Mod que espera `widget.AttachController(...)` chama `widget.BwmsAttachController(...)` no BWMS.
 //
 // `module` só pode ser o 1º statement do arquivo (o `scc` recusa no meio) — por isso esta extensão de `inkWidget`, classe vanilla
 // global, mora num arquivo próprio, fora de `module Codeware.UI`.

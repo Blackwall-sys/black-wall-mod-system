@@ -1,8 +1,8 @@
 //! API C-ABI exposta aos plugins Rust (`BwmsApi`). O plugin recebe um `*const BwmsApi`
 //! no entry e chama a vtable pra HOOKAR e REFLETIR sem linkar nada do nosso crate.
 //!
-//! v1 (ALFA): `log` + `vtable_hook`/`vtable_unhook` (o motor de hook = RED4ext, já provado
-//! in-game, COW em __DATA_CONST) + `field_ptr`/`call_method` (reflection por nome = Codeware
+//! v1 (ALFA): `log` + `vtable_hook`/`vtable_unhook` (o motor de hook do BWMS, já provado
+//! in-game, COW em __DATA_CONST) + `field_ptr`/`call_method` (reflection por nome, o mesmo do
 //! getf/setf/callf). As versões seguintes (inline hook, `register_native`, janela no terminal, TweakDB…)
 //! entram SÓ no fim da struct e sobem `abi_version` (ABI estável pra plugins antigos).
 
@@ -40,7 +40,7 @@ pub struct BwmsApi {
     pub inline_hook: unsafe extern "C" fn(target: *mut c_void, repl: *mut c_void) -> *mut c_void,
     /// Desfaz o hook mais recente em `target`, de qualquer dono, com as outras threads paradas.
     pub inline_revert: unsafe extern "C" fn(target: *mut c_void),
-    // --- v3 (abi_version 3): registrar native global no RTTI (Codeware) ---
+    // --- v3 (abi_version 3): registrar native global no RTTI ---
     /// Registra uma native global no RTTI chamável do redscript: `full`=nome completo, `short`=nome
     /// curto, `handler`=`extern "C" fn(ctx, frame, ret, a4)`. Devolve true se re-resolve OK.
     /// (Sem args; com args: `register_native_argful`, v4; método: `register_method`, v7.) PROVADO internamente (register_all/BlackwallPing).
@@ -88,10 +88,9 @@ pub struct BwmsApi {
     ) -> bool,
     // --- v7 (abi_version 7): registrar MÉTODO novo numa classe EXISTENTE (@addMethod-style) ---
     /// Registra um método novo, chamável do redscript, numa classe REAL já existente (ex.:
-    /// GameObject, Entity, gameGodModeSystem — o padrão real do Codeware via `@addMethod`).
+    /// GameObject, Entity, gameGodModeSystem — o padrão de `@addMethod`).
     /// `class`=nome da classe-alvo, `full`=nome completo do método, `short`=nome curto,
-    /// `handler`=`extern "C" fn(ctx, frame, ret, a4)`. Devolve true se registrou OK. Fecha
-    /// `red4ext-register-method-api`: até aqui só `register_native` (função GLOBAL) era exposto
+    /// `handler`=`extern "C" fn(ctx, frame, ret, a4)`. Devolve true se registrou OK. Até aqui só `register_native` (função GLOBAL) era exposto
     /// a plugins — isto fecha o caso "estender classe existente", já provado internamente
     /// (register_method/regmethod_selftest, `gameGodModeSystem.BwmsRegTest`, 2026-07-12).
     /// Classe de SCRIPT (ex.: `PlayerPuppet`) ainda não existe quando o plugin carrega (a carga roda
@@ -105,7 +104,7 @@ pub struct BwmsApi {
         short: *const c_char,
         handler: crate::register::NativeHandler,
     ) -> bool,
-    // --- v8 (abi_version 8): TweakDB — flat escalar por nome + clone com herança (tweakxl-mod-api) ---
+    // --- v8 (abi_version 8): TweakDB — flat escalar por nome + clone com herança ---
     /// Lê o valor escalar (4 bytes crus em `+0x08` do FlatValue) do flat `name` (formato
     /// `Record.campo`, ex. `"Items.GrenadeIncendiarySticky.deepWaterDepth"`). Devolve os bits em
     /// `out_bits` (o plugin reinterpreta como f32/i32 conforme o tipo do campo); true = achou.
@@ -127,14 +126,14 @@ pub struct BwmsApi {
         source: *const c_char,
         new_name: *const c_char,
     ) -> bool,
-    // --- v9 (abi_version 9): logger por nível + SemVer runtime (parte de `red4ext-sdk-plumbing`) ---
-    /// Loga `msg` marcado com `level` (0=Trace 1=Debug 2=Info 3=Warning 4=Error 5=Critical —
-    /// mesma escala do Logger do RED4ext.SDK real). Níveis fora de 0..5 caem em "Info". Parity
+    // --- v9 (abi_version 9): logger por nível + SemVer runtime ---
+    /// Loga `msg` marcado com `level` (0=Trace 1=Debug 2=Info 3=Warning 4=Error 5=Critical).
+    /// Níveis fora de 0..5 caem em "Info". Parity
     /// com o `log` sem-nível (v1), que continua funcionando igual.
     pub log_level: unsafe extern "C" fn(level: u8, msg: *const c_char),
     /// Compara duas versões pela precedência SemVer 2.0 completa (`semver_precedence`): o
     /// pre-release conta (`"1.2.3-rc1"` NÃO satisfaz `"1.2.3"`), o metadado de build (`+…`) não.
-    /// Cobre o caso real de `Codeware.Require("1.2.0")` checando "a versão instalada é >= a
+    /// Cobre o caso real de `Require("1.2.0")` de um plugue de versão checando "a versão instalada é >= a
     /// exigida". Devolve `actual >= required`; componente ausente ou malformado vale 0; ponteiro
     /// nulo ou UTF-8 inválido devolve false. Ex.: `semver_satisfies("1.2.0", "1.3.0") == true`.
     pub semver_satisfies: unsafe extern "C" fn(required: *const c_char, actual: *const c_char) -> bool,
@@ -159,23 +158,23 @@ pub struct BwmsApi {
     /// e a janela que o callback deixou aberta fecha no fim dele.
     pub janela_fechar: unsafe extern "C" fn(),
     // --- v11 (abi_version 11): `scripts.Add(path)` — plugin registra um `.reds` FORA de
-    // r6/scripts pro compilador incluir (`red4ext-scripts-add`) ---
+    // r6/scripts pro compilador incluir ---
     /// Registra `path` (caminho ABSOLUTO de um `.reds` fora de `r6/scripts`) num manifesto
     /// persistente (`~/.bwms-scripts-add.txt`, 1 path por linha, dedup). **NÃO recompila nem
     /// afeta o boot ATUAL** — este processo já carregou o `final.redscripts` que o compile
     /// anterior gerou, ANTES do plugin sequer rodar (redscript não hot-recarrega em runtime,
-    /// diferente de Lua/CET). O efeito aparece no PRÓXIMO ciclo compile+boot: o passo de
+    /// diferente de Lua). O efeito aparece no PRÓXIMO ciclo compile+boot: o passo de
     /// compile (`bwms-fastboot.sh compile`, ou o instalador) lê o manifesto e passa cada path
     /// via `-compilePathsFile` do `scc` (achado nesta rodada — `scc` aceita uma lista de
     /// arquivos AVULSOS, além do diretório `r6/scripts` normal, no MESMO passe de compilação;
     /// verificado num scratch-copy seguro antes de mexer no deploy real). Devolve `true` se
     /// escreveu (ou já estava) no manifesto; `false` só em erro de I/O real.
     pub scripts_add: unsafe extern "C" fn(path: *const c_char) -> bool,
-    // --- v12 (abi_version 12): `GameStates.Add` pragmático (red4ext-gamestates-add) ---
-    /// Registra callbacks de ciclo de vida de estado de jogo (parity com RED4ext `GameStates.Add`).
+    // --- v12 (abi_version 12): callbacks de estado de jogo ---
+    /// Registra callbacks de ciclo de vida de estado de jogo.
     /// `state_type`: 0=BaseInitialization 1=Initialization 2=Running 3=Shutdown (EGameStateType).
     /// Callbacks recebem o `CGameApplication` do jogo (`aApp`, abaixo). **Cobertura completa dos 4 estados (fechado 2026-08-11,
-    /// PENDENCIAS-UNIFICADAS.md `#4`/`#32`/`#36`/`#37`/`#38`)**, todos disparando na ordem real
+    /// PENDENCIAS-UNIFICADAS.md)**, todos disparando na ordem real
     /// `BaseInit→Init→Running→Shutdown`, mapeados nos eventos já detectados:
     ///   BaseInit.OnEnter/OnExit → disparam 1x, cedo no boot (logo após `boot_phase()`, o 1º ponto
     ///                             idempotente onde plugins já tiveram chance de `add_game_state`)
@@ -190,7 +189,7 @@ pub struct BwmsApi {
     ///   Running.OnUpdate → dispara a cada ~180 ticks de gameplay (enquanto player presente)
     ///   Running.OnExit   → dispara quando o player despawna
     ///   Shutdown.OnEnter → dispara quando `exit()` é hookado (clean-exit)
-    /// `aApp` é o `CGameApplication` do jogo (RED4ext `#479`, `aplicacao()`): `states` em `+0x278`, `currState` em `+0x290`, `name` em
+    /// `aApp` é o `CGameApplication` do jogo (`aplicacao()`): `states` em `+0x278`, `currState` em `+0x290`, `name` em
     /// `+0x2A8` ("cpLauncher"); nulo só antes de o `main` gravar o global.
     pub add_game_state: unsafe extern "C" fn(
         state_type: u32,
@@ -198,16 +197,15 @@ pub struct BwmsApi {
         on_update: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
         on_exit: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
     ) -> bool,
-    // --- v13 (abi_version 13): PluginHandle real (RED4ext.SDK `#31`, `Hooking::Detach`) ---
+    // --- v13 (abi_version 13): handle de plugin e posse de hook ---
     /// Handle ÚNICO deste plugin (atribuído sequencialmente em `plugins::load_one`, 1 cópia de
     /// `BwmsApi` por plugin — antes só existia UMA instância `static` compartilhada por todos).
-    /// Guardar este valor e passá-lo pras 2 chamadas abaixo — é o que o RED4ext real exige que
-    /// todo plugin faça com o `PluginHandle` recebido em `Main()`.
+    /// Guardar este valor e passá-lo pras 2 chamadas abaixo.
     pub my_handle: u64,
     /// Igual a `inline_hook`, com os mesmos casos de null, mas REGISTRA `handle` como DONO do hook em `target` — habilita
     /// `inline_detach` a recusar outro plugin tentando soltá-lo.
     pub inline_hook_owned: unsafe extern "C" fn(handle: u64, target: *mut c_void, repl: *mut c_void) -> *mut c_void,
-    /// `Hooking::Detach(handle, target)`: desfaz o hook mais recente de `handle` em `target`, posto
+    /// `inline_detach(handle, target)`: desfaz o hook mais recente de `handle` em `target`, posto
     /// por `inline_hook_owned`, só se ele é o do topo do alvo. Com outro hook empilhado por cima:
     /// recusa, loga e devolve `false`; os dois hooks e a posse continuam, e o detach funciona
     /// depois que o de cima sair. `handle` sem hook próprio em `target` também recusa. Hook do
@@ -216,24 +214,24 @@ pub struct BwmsApi {
     pub inline_detach: unsafe extern "C" fn(handle: u64, target: *mut c_void) -> bool,
     /// Igual a `vtable_hook`, mas REGISTRA `handle` como dono do slot `(vtbl, slot_idx)`.
     pub vtable_hook_owned: unsafe extern "C" fn(handle: u64, vtbl: *mut u64, slot_idx: usize, repl: *const c_void) -> *const c_void,
-    /// `Hooking::Detach` pro caso vtable: restaura o slot original SÓ se `handle` for o dono
+    /// O detach pro caso vtable: restaura o slot original SÓ se `handle` for o dono
     /// (o `orig` fica guardado no registro interno — o plugin não precisa lembrar dele, ao
     /// contrário do `vtable_unhook` cru).
     pub vtable_detach: unsafe extern "C" fn(handle: u64, vtbl: *mut u64, slot_idx: usize) -> bool,
-    // --- v14 (abi_version 14): `CompareSemVerPrerelease` (RED4ext.SDK `#43`) — precedência SemVer
+    // --- v14 (abi_version 14): comparação SemVer com pre-release — precedência SemVer
     // 2.0 COMPLETA (major.minor.patch + identificadores de pre-release), não só o triplet. Fecha
-    // o bug real onde `semver_satisfies`/`Codeware.Require` tratava `1.2.3-rc1` como IGUAL a
+    // o bug real onde `semver_satisfies`/o `Require` dos plugues tratava `1.2.3-rc1` como IGUAL a
     // `1.2.3` (deveria ser MENOR — regra 11.3 da spec: release > pre-release no mesmo triplet).
-    /// `CompareSemVerPrerelease(lhs, rhs) -> int32`: `<0` se `lhs<rhs`, `0` se iguais, `>0` se
+    /// `compare_semver_prerelease(lhs, rhs) -> int32`: `<0` se `lhs<rhs`, `0` se iguais, `>0` se
     /// `lhs>rhs`, pela precedência SemVer 2.0 completa (não só major.minor.patch). Strings
     /// inválidas/nulas comparam como `0.0.0` sem pre-release (nunca crasha).
     pub compare_semver_prerelease: unsafe extern "C" fn(lhs: *const c_char, rhs: *const c_char) -> i32,
-    // --- v15 (abi_version 15): argumentos de lançamento (RED4ext `#458`, `GetLaunchParameters`).
+    // --- v15 (abi_version 15): argumentos de lançamento.
     /// `launch_arg(nome, saida, capacidade) -> int32`: copia o valor do argumento `nome` (sem o `-`; aceita `-nome valor`, `--nome valor`,
     /// `-nome=valor`) pra `saida` com NUL e devolve o tamanho do valor em bytes (0 pra argumento sem valor); `-1` se o argumento não veio. O
     /// valor é cortado em `capacidade - 1` bytes, mas o retorno é o tamanho inteiro (pra quem quiser pedir de novo com mais espaço).
     pub launch_arg: unsafe extern "C" fn(nome: *const c_char, saida: *mut c_char, capacidade: usize) -> i32,
-    // --- v16 (abi_version 16): valor de campo de qualquer tipo pelo próprio tipo do campo (RED4ext `#168`/`#169`/`#232`/`#236`): a cópia, a
+    // --- v16 (abi_version 16): valor de campo de qualquer tipo pelo próprio tipo do campo: a cópia, a
     // comparação e o texto que o motor usa no `=`, no `==` e no `ToString` dos scripts. Os textos voltam como no `launch_arg`: copiados com NUL
     // e cortados em `capacidade - 1`, com o tamanho inteiro no retorno; `-1` sem o campo.
     /// Nome do tipo do campo (`String`, `array:Int32`, `handle:gameObject`…).
@@ -249,31 +247,31 @@ pub struct BwmsApi {
     pub prop_copy: unsafe extern "C" fn(destino: *mut c_void, origem: *mut c_void, field: *const c_char) -> bool,
     /// Compara o campo `field` de dois objetos pelo `IsEqual` do tipo: `1` igual, `0` diferente, `-1` sem o campo ou tipos diferentes.
     pub prop_is_equal: unsafe extern "C" fn(a: *mut c_void, b: *mut c_void, field: *const c_char) -> i32,
-    /// Genealogia dos records criados por mod (TweakXL `#22`): `1` se o record existe e não é de mod, `0` se é de mod, `-1` se não existe.
+    /// Genealogia dos records criados por mod: `1` se o record existe e não é de mod, `0` se é de mod, `-1` se não existe.
     pub tweak_is_original: unsafe extern "C" fn(id: u64) -> i32,
     /// O primeiro ancestral de `id` que não é de mod; `0` sem pai (record original ou criado por `$type`).
     pub tweak_original_parent: unsafe extern "C" fn(id: u64) -> u64,
     /// Os records de mod clonados de `id`, em qualquer geração, copiados pra `saida` (até `capacidade`); devolve quantos são.
     pub tweak_descendants: unsafe extern "C" fn(id: u64, saida: *mut u64, capacidade: usize) -> i32,
-    /// Nome de um id que um mod escreveu (TweakXL `#8`); `-1` se não se sabe.
+    /// Nome de um id que um mod escreveu; `-1` se não se sabe.
     pub tweak_name: unsafe extern "C" fn(id: u64, saida: *mut c_char, capacidade: usize) -> i32,
     /// Guarda o nome e devolve o id dele (`0` com nome vazio ou nulo).
     pub tweak_register_name: unsafe extern "C" fn(nome: *const c_char) -> u64,
-    /// Chama uma função global de script por nome (RED4ext `#243` `ExecuteGlobalFunction`, `#179` `Execute`): argumentos no formato do
+    /// Chama uma função global de script por nome: argumentos no formato do
     /// `call_method_args`, mais `h:0x…` pra passar um objeto vivo como handle; 16 bytes de retorno em `ret16` (pode ser nulo); retorno `ref<T>` segue a regra do `call_method`.
     pub call_global: unsafe extern "C" fn(name: *const c_char, args: *const *const c_char, n_args: usize, ret16: *mut u8) -> bool,
-    /// Tira do TweakDB um record criado por mod (RED4ext `#345`); recusa record do jogo. Os flats ficam, como no SDK.
+    /// Tira do TweakDB um record criado por mod; recusa record do jogo. Os flats ficam.
     pub tweak_remove_record: unsafe extern "C" fn(id: u64) -> bool,
-    /// Classe nativa nova (RED4ext `#77`), instanciável, filha de `mae` (nome nativo ou de script), com `extra` bytes pros campos do plugin.
+    /// Classe nativa nova, instanciável, filha de `mae` (nome nativo ou de script), com `extra` bytes pros campos do plugin.
     /// Devolve o offset onde esses bytes começam (`0` se falhou). Só vale chamada no carregamento do plugin, que roda antes do bind dos
     /// scripts: o `.reds` do plugin declara `public native class <nome> extends <mae>`.
     pub class_create: unsafe extern "C" fn(nome: *const c_char, mae: *const c_char, extra: u32) -> u32,
-    /// Propriedade nativa nova (RED4ext `#159`/`#160`): `tipo` é o nome do tipo no RTTI (`Int32`, `Float`, `CName`, `handle:Classe`,
+    /// Propriedade nativa nova: `tipo` é o nome do tipo no RTTI (`Int32`, `Float`, `CName`, `handle:Classe`,
     /// `whandle:Classe`, `array:Tipo`…) e `offset` a posição do valor no objeto, dentro do tamanho da classe. Também só no carregamento do
     /// plugin; o `.reds` declara `native let` (ou `(Classe) public native let` numa classe do jogo). Nome que já existe com o mesmo
     /// tipo devolve `true` sem criar outro.
     pub class_add_property: unsafe extern "C" fn(classe: *const c_char, nome: *const c_char, tipo: *const c_char, offset: u32) -> bool,
-    /// Screenshot pelo motor (RED4ext `#473`): PNG em `caminho`, no próximo quadro. `false` sem motor pronto.
+    /// Screenshot pelo motor: PNG em `caminho`, no próximo quadro. `false` sem motor pronto.
     pub take_screenshot: unsafe extern "C" fn(caminho: *const c_char) -> bool,
 }
 
@@ -334,8 +332,8 @@ fn take_vtable_owner(vtbl: usize, slot: usize) -> Option<(u64, usize)> {
     None
 }
 
-/// Registry de callbacks de estado de jogo (add_game_state / red4ext-gamestates-add).
-/// Estado do jogo da C-ABI (o `EGameStateType` do RED4ext): o plugin registra callbacks por ele, e na ABI ele vai como `u32`.
+/// Registry de callbacks de estado de jogo (add_game_state).
+/// Estado do jogo da C-ABI (o `EGameStateType`): o plugin registra callbacks por ele, e na ABI ele vai como `u32`.
 #[repr(u32)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum EstadoDoJogo {
@@ -354,15 +352,14 @@ struct GameStateEntry {
 
 static GAME_STATES: std::sync::Mutex<Vec<GameStateEntry>> = std::sync::Mutex::new(Vec::new());
 
-// ===== Janela de registro restrita ao load do plugin (CET item #46, `PENDENCIAS-UNIFICADAS.md`)
-// — CET remove `registerForEvent`/`registerHotkey`/`registerInput` do ambiente Lua logo após
-// `init.lua` terminar: um mod só pode se registrar durante sua PRÓPRIA inicialização, nunca
-// depois. Mesma robustez pro BWMS: `plugins::load_one` abre a janela só durante a chamada
+// ===== Janela de registro restrita ao load do plugin (`PENDENCIAS-UNIFICADAS.md`)
+// — um mod só pode se registrar durante sua PRÓPRIA inicialização, nunca
+// depois: `plugins::load_one` abre a janela só durante a chamada
 // SÍNCRONA de `bwms_plugin_main`, fecha assim que ela retorna — as 5 funções de REGISTRO
 // (register_native/register_native_argful/register_method/add_game_state/
 // register_draw_callback) recusam fora dessa janela. NÃO se aplica a hooks/reflection/TweakDB
 // (chamáveis a qualquer momento por design — só "registrar uma capacidade nomeada nova" é
-// restrito, o mesmo escopo exato do CET real).
+// restrito).
 static REGISTRATION_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn registration_window_open() -> bool {
@@ -387,7 +384,7 @@ pub(crate) fn open_registration_window() -> RegistrationWindowGuard {
     RegistrationWindowGuard
 }
 
-/// O `CGameApplication` do jogo (RED4ext `#479`), o que os callbacks de estado recebem: o `main` o monta na pilha com o nome "cpLauncher"
+/// O `CGameApplication` do jogo, o que os callbacks de estado recebem: o `main` o monta na pilha com o nome "cpLauncher"
 /// (construtor `0x104d6a108`) e guarda o ponteiro no global `0x1099d9360` antes do `Run` (`0x104d6a564`), o laço que chama `OnEnter`,
 /// `OnUpdate` e `OnExit` do estado corrente (`+0x290`) com ele. Conferido pelo nome em `+0x2A8`; nulo antes de o global ser escrito.
 const APP_GLOBAL_VM: u64 = 0x1_099d_9360;
@@ -932,7 +929,7 @@ unsafe fn ler_args(args: *const *const c_char, n: usize) -> Option<Vec<crate::rt
         .collect()
 }
 
-/// `call_global(nome, args, n, ret16)`: função global de script por nome, com os argumentos do [`ler_args`] (RED4ext `#243`/`#179`).
+/// `call_global(nome, args, n, ret16)`: função global de script por nome, com os argumentos do [`ler_args`].
 unsafe extern "C" fn api_call_global(name: *const c_char, args: *const *const c_char, n_args: usize, ret16: *mut u8) -> bool {
     if name.is_null() {
         return false;
@@ -1022,7 +1019,7 @@ unsafe extern "C" fn api_log_level(level: u8, msg: *const c_char) {
 /// Parseia "major.minor.patch" (componentes ausentes/não-numéricos viram 0). Descarta o sufixo de
 /// pre-release/build do SemVer (tudo a partir do 1º `-` ou `+`) ANTES de separar por `.` — senão
 /// `"1.2.3-rc1"` dava `(1,2,0)` (o `"3-rc1"` não parseia como número e o patch caía pra 0). Aceita
-/// também um prefixo `v`/`V` (`"v1.2.3"`). Cobre o caso real de `Codeware.Require` com versão de mod.
+/// também um prefixo `v`/`V` (`"v1.2.3"`). Cobre o caso real do `Require` dos plugues com versão de mod.
 pub(crate) fn parse_semver_triplet(s: &str) -> (u32, u32, u32) {
     let core = s.trim().trim_start_matches(['v', 'V']);
     let core = core.split(['-', '+']).next().unwrap_or(""); // fora pre-release/build
@@ -1248,7 +1245,7 @@ unsafe extern "C" fn api_prop_is_equal(a: *mut c_void, b: *mut c_void, field: *c
     }
 }
 
-/// `RED4ext.SDK` `#43` (`CompareSemVerPrerelease`) — precedência SemVer 2.0 COMPLETA como
+/// `compare_semver_prerelease` — precedência SemVer 2.0 COMPLETA como
 /// `int32` (convenção `strcmp`: `<0`/`0`/`>0`). String nula/inválida em qualquer lado vira
 /// `"0.0.0"` sem pre-release (nunca crasha, nunca panica).
 unsafe extern "C" fn api_compare_semver_prerelease(lhs: *const c_char, rhs: *const c_char) -> i32 {
@@ -1578,7 +1575,7 @@ mod tests {
             );
             assert_eq!(semver_precedence(w[1], w[0]), std::cmp::Ordering::Greater);
         }
-        // release > pre-release no mesmo triplet — o bug original (#43): antes disto,
+        // release > pre-release no mesmo triplet — o bug original: antes disto,
         // "1.2.3-rc1" e "1.2.3" comparavam IGUAIS (o sufixo era descartado antes de comparar).
         assert_eq!(semver_precedence("1.2.3-rc1", "1.2.3"), std::cmp::Ordering::Less);
         assert_eq!(semver_precedence("1.2.3", "1.2.3-rc1"), std::cmp::Ordering::Greater);

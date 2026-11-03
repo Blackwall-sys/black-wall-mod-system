@@ -1,4 +1,4 @@
-// bwms-populationspawner.reds — Codeware `#80` (`PopulationSpawnerWrapper`) com nome BWMS, só leitura.
+// bwms-populationspawner.reds — `PopulationSpawnerWrapper` com nome BWMS, só leitura.
 //
 // `BwmsPopulationSpawner.Get(game, id)` devolve o wrapper quando o `CommunitySystem` tem um spawner com esse id (o `globalNodeID` do nó
 // `worldPopulationSpawnerNode`). O wrapper guarda só o id e resolve o spawner a cada chamada,

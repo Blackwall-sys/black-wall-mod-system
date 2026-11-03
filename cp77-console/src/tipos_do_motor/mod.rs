@@ -10,7 +10,7 @@ use crate::ganchos::install_hook_probe;
 use crate::veiculos::VEHICLE_LIGHT_ARMADO;
 use crate::mods_do_usuario::tramp_require;
 use crate::mods_do_usuario::tramp_version;
-use crate::mods_do_usuario::PLUGUE_CODEWARE;
+use crate::mods_do_usuario::PLUGUE_VERSAO;
 use crate::entidades::*;
 use crate::diagnostico::{global_do_gettype, CLONE_MAIOR};
 use crate::aparencia::*;
@@ -99,7 +99,7 @@ pub(crate) unsafe extern "C" fn tramp_prop_offset(_c: *mut c_void, frame: *mut c
 /// É a via genérica que o `#30` precisava: `mesh` é `RaRef<CMesh>`, e `ResourceAsyncReference`
 /// guarda só um `ResourcePath` (u64). Daí em diante a cadeia hash → mapa no bank `[loader+0x48]` →
 /// `CResource*` já é provada (`#18`). Serve igual pra `chunkMask`, `globalNodeID`, e pros ~1.107
-/// campos que o Codeware expõe por `@addField` e que o Mac não tem como property script-visível.
+/// campos que mods expõem por `@addField` e que o Mac não tem como property script-visível.
 pub(crate) unsafe extern "C" fn tramp_prop_u64(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let (a, strings) = rtti::read_params_consuming_with_strings(current_native_func(), frame);
     let obj = a.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -183,7 +183,7 @@ pub(crate) unsafe extern "C" fn tramp_prop_set_u64(_c: *mut c_void, frame: *mut 
     write_bool_ret(out, ok);
 }
 
-/// A `CProperty` do 2º parâmetro do `IBlackboard.SetVariant` (`value: Variant`), a mesma que as natives de variante já provadas (C#77) usam
+/// A `CProperty` do 2º parâmetro do `IBlackboard.SetVariant` (`value: Variant`), a mesma que as natives de variante já provadas usam
 /// pelo [`compose_params`]. O `Variant` montado pelo nome do tipo não registrou no boot 267.
 pub(crate) unsafe fn cprop_variant(reg: &Registry) -> u64 {
     rtti::resolve_func(reg, "gameIBlackboard", "SetVariant").map_or(0, |sv| rd_u64(compose_params(&[(sv.func, 1)]).0 as *const c_void, 0))
@@ -215,7 +215,7 @@ pub(crate) unsafe extern "C" fn tramp_callmethod(_c: *mut c_void, frame: *mut c_
 }
 
 /// `BwmsCallMethodWithArg(target: ref<IScriptable>, function: CName, arg: ref<IScriptable>) -> Bool` — `BwmsCallMethod` com 1
-/// argumento `ref<>` (2026-09-11, Codeware `#18` `ResourceToken.RegisterCallback`, que chama `listener.function(token)`). O argumento
+/// argumento `ref<>` (2026-09-11, `ResourceToken.RegisterCallback`, que chama `listener.function(token)`). O argumento
 /// vira um `Handle` pela rotina do motor (`make_handle`, +1 na contagem forte) e NÃO é solto depois: o `call_func` grava os 16 bytes
 /// direto nos locals, e se o frame chamado soltar o parâmetro a conta fecha; se não soltar, sobra 1 referência. Nunca solta a mais.
 pub(crate) unsafe extern "C" fn tramp_callmethod_with_arg(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -262,7 +262,7 @@ pub(crate) unsafe fn registrar_pela_via_global(ev_bruto: u64, alvo: u64, fn_hash
     registrar_ouvinte(ev_bruto, alvo as usize, fn_hash, 0)
 }
 
-// ===== `CallbackSystem` NATIVO real (cw-callbacksystem-rtti, 2026-07-13) ============================
+// ===== `CallbackSystem` NATIVO real (CallbackSystem no RTTI, 2026-07-13) ============================
 // Mesmo fix de timing/parent que fechou a Facade (parent-pointer explícito + fullName BARE nos
 // métodos), aplicado a uma classe INSTANCIÁVEL (não abstract) — porque `GetCallbackSystem()`
 // precisa devolver um objeto de verdade. A instância é construída PREGUIÇOSAMENTE (só na 1ª
@@ -313,7 +313,7 @@ pub(crate) unsafe extern "C" fn tramp_resource_class_name(_c: *mut c_void, frame
     write_uint_ret(out, if cls.is_null() { 0 } else { rtti::type_name_hash(cls) }, 8);
 }
 
-/// `BwmsSerializableIsA(obj, className) -> Bool`: o `IsA(GetClass(className))` do `ISerializableEx.hpp:14-17`.
+/// `BwmsSerializableIsA(obj, className) -> Bool`: o `IsA(GetClass(className))`.
 pub(crate) unsafe extern "C" fn tramp_resource_is_a(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let a = rtti::read_params_consuming(current_native_func(), frame);
     let cls = rtti::class_of(recurso_do_script(a.first().map_or(0, |(v, _)| *v)) as *mut c_void);
@@ -330,11 +330,9 @@ pub(crate) unsafe fn register_resource_natives(reg: &Registry, proto: *mut c_voi
     crate::log_dev!("[reg] register_all: BwmsSerializable {}/3 registradas", r.iter().filter(|x| **x).count());
 }
 
-// Codeware `Scripting::GetStackTrace` (item #60, agente de pesquisa 2026-08-11) — fonte real
-// (`App/Scripting/StackTrace.hpp`): anda `frame->parent` (o `CStackFrame*` que TODO native já
+// `Scripting::GetStackTrace` (item #60, agente de pesquisa 2026-08-11): anda `frame->parent` (o `CStackFrame*` que TODO native já
 // recebe automaticamente, aqui é literalmente o parâmetro `frame` desta trampolina), lê `func@
-// +0x08`/`context@+0x40`/`parent@+0x48` (offsets de CAMPO confirmados no header oficial
-// vendorizado `RED4ext.SDK/.../Scripting/Stack.hpp` — offsets de campo são portáveis 1:1
+// +0x08`/`context@+0x40`/`parent@+0x48` (offsets de CAMPO confirmados — offsets de campo são portáveis 1:1
 // Windows↔Mac, regra já estabelecida dezenas de vezes neste projeto). **Divergência consciente
 // de escopo (mais segura que replicar 1:1):** em vez de devolver `array<StackTraceEntry>` (a
 // técnica "array-retorno-de-struct-composto" nunca foi tentada neste projeto — só ponteiros/
@@ -405,7 +403,7 @@ pub(crate) unsafe extern "C" fn tramp_stack_get_frame_class(_c: *mut c_void, fra
     write_uint_ret(out, hash, 8);
 }
 
-// ===== Codeware `#75`/`#76`/`#138`/`#139`/`#141`/`#143` — ângulo NOVO 2026-08-14 (boot dedicado
+// ===== Ângulo NOVO 2026-08-14 (boot dedicado
 // de descoberta, `gisysmapdump 200`): esses 6 itens estavam TODOS catalogados como bloqueados
 // por "singleton nunca localizado"/"interfaces internas nunca portadas" (`gameICommunitySystem`/
 // `gameIPopulationSystem`/`gameIPersistencySystem`/`gameIContainerManager`/`gameIJournalManager`/
@@ -416,8 +414,8 @@ pub(crate) unsafe extern "C" fn tramp_stack_get_frame_class(_c: *mut c_void, fra
 // `gameContainerManager`, `gameJournalManager`, `gamemappinsMappinSystem`, `questQuestsSystem`,
 // `gameDynamicEntityIDSystem`, `gameEntityStubSystem`, `gameEntitySpawnerEventsBroadcasterImpl`,
 // `gameGameTagSystem`, `questWorldStateSystem`, `gameCommunitySystem` — 4 delas CONFIRMADAS ao
-// vivo nesta mesma rodada via `sysbymap` (ponteiro não-nulo, mesmo mecanismo já provado do
-// RED4ext `#472`): `questWorldStateSystem`/`gamePopulationSystem`/`gamePersistencySystem`/
+// vivo nesta mesma rodada via `sysbymap` (ponteiro não-nulo, mesmo mecanismo já provado):
+// `questWorldStateSystem`/`gamePopulationSystem`/`gamePersistencySystem`/
 // `gameContainerManager`. Só `FactManager` (citado pelo item #141) não apareceu no dump — não é
 // um `IGameSystem` do `systemMap`, precisa de outra via.
 //
@@ -464,7 +462,7 @@ pub(crate) unsafe fn register_system_by_name_utils(reg: &Registry, proto: *mut c
     );
 }
 
-// ===== Codeware `#57` — `IScriptable.Clone()` (`bwms-clone.reds`) =====
+// ===== `IScriptable.Clone()` (`bwms-clone.reds`) =====
 //
 // A referência clona pelo serializador do motor (`ISerializable::Clone`, sem endereço nesta build: nem a string nem o símbolo existem). Aqui a cópia sai do
 // `CreateInstance` da classe e cada propriedade de RTTI passa pelo `Assign` do tipo; depois, handle forte vira o clone do objeto apontado (um clone por
@@ -603,9 +601,9 @@ pub(crate) unsafe extern "C" fn tramp_script_source_file_matches(_c: *mut c_void
 }
 
 /// CRUID do 1º componente do player — o dado que faltava pra provar o caminho POSITIVO do
-/// `ComponentTarget.ID` (Codeware `#132`).
+/// `ComponentTarget.ID`.
 ///
-/// O smoke do `#132` só exercitava `Name` com um nome fabricado: prova que o filtro REJEITA, não
+/// O smoke do `ComponentTarget` só exercitava `Name` com um nome fabricado: prova que o filtro REJEITA, não
 /// que ele ACEITA. Filtro que rejeita tudo passaria nesse teste. Com um `id` REAL dá pra registrar
 /// um handler que TEM que disparar, e aí as duas direções ficam cobertas.
 ///
@@ -620,10 +618,10 @@ pub(crate) unsafe extern "C" fn tramp_first_component_id(_c: *mut c_void, frame:
     write_uint_ret(out, id, 8);
 }
 
-// ===== `cw-reflection-class-api` (2026-07-24) — atalho pragmático de reclassificação, achado pela
+// ===== API de reflexão de classe (2026-07-24) — atalho pragmático de reclassificação, achado pela
 // investigação paralela do mesmo nome. Forjar `ReflectionType`/`ReflectionClass`/`ReflectionFunc`/
-// `ReflectionProp`/`ReflectionEnum` como `native class` fiel ao Codeware real seria XL genuíno (a
-// fonte real não tem NENHUM parent vanilla pra herdar — diferente de `cw-localization`). Em vez
+// `ReflectionProp`/`ReflectionEnum` como `native class` seria XL genuíno (essas
+// classes não têm NENHUM parent vanilla pra herdar — diferente da localização). Em vez
 // disso: TODO leaf-primitivo que `Reflection.reds` precisa já está construído e provado in-game há
 // sessões (só exposto hoje via comando de console/uso interno, não pro redscript de mods) —
 // `class_by_name`/`enum_by_name`/`find_property_in_class`/`resolve_in_class`/`call_func`/
@@ -659,15 +657,15 @@ pub(crate) unsafe extern "C" fn tramp_refl_get_class(_c: *mut c_void, frame: *mu
     write_uint_ret(out, cls as u64, 8);
 }
 
-/// `Codeware.Reflection.ReflectionClass.MakeHandle()` (`PENDENCIAS-UNIFICADAS.md` item #51, resto
-/// pendente) — fonte C++ real (`ReflectionClass.hpp`): `if (!IsInstanceOf<ISerializable>(m_class))
+/// `Reflection.ReflectionClass.MakeHandle()` (`PENDENCIAS-UNIFICADAS.md` item #51, resto
+/// pendente) — comportamento esperado: `if (!IsInstanceOf<ISerializable>(m_class))
 /// return {}; return ToHandle(m_class->CreateInstance(true));`. `CreateInstance(true)` já é
 /// EXATAMENTE o que `rtti::new_object` reproduz (GetSize+GetAlignment+Construct via vtable, efeito
 /// idêntico, caminho diferente — já provado em dezenas de forjas deste projeto). `IsInstanceOf
 /// <ISerializable>` vira checagem de `!isAbstract` (via `class_flags`, fechado nesta sessão) — uma
 /// classe abstrata nunca é instanciável, mesmo raciocínio usado pelo `CreateInstance` real
 /// internamente. Devolve o ponteiro OPACO (`Uint64`), mesma convenção do resto do
-/// `cw-reflection-class-api` (nunca um `ref<T>` de verdade — evita RE nova de refcount-block pra
+/// API de reflexão de classe (nunca um `ref<T>` de verdade — evita RE nova de refcount-block pra
 /// caso genérico).
 pub(crate) unsafe extern "C" fn tramp_refl_make_handle(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
@@ -793,7 +791,7 @@ pub(crate) unsafe extern "C" fn tramp_refl_prop_set_value_float(_c: *mut c_void,
     write_bool_ret(out, ok);
 }
 
-// Codeware `#91` — a ROTA DE COMPOSIÇÃO. Medido em 2026-09-07: `inkTextWidget` tem **28**
+// A ROTA DE COMPOSIÇÃO. Medido em 2026-09-07: `inkTextWidget` tem **28**
 // properties de RTTI (`text`, `fontFamily`, `fontStyle`, `fontSize`, `letterCase`, `tracking`,
 // `justification`, alinhamentos, `textOverflowPolicy`, …), `inkImageWidget`/`inkShapeWidget` 19 e
 // `inkMaskWidget` 6 — o que REFUTA a nota do item ("a suposição 'campos NATIVOS JÁ EXISTENTES'
@@ -1055,7 +1053,7 @@ pub(crate) unsafe extern "C" fn tramp_refl_enum_get_value(_c: *mut c_void, frame
     write_uint_ret(out, val, 8);
 }
 
-/// Codeware `#197` (`ReflectionType.GetInnerType()`, 2026-08-10) — `BwmsGetInnerTypeName
+/// `ReflectionType.GetInnerType()` (2026-08-10) — `BwmsGetInnerTypeName
 /// (typeName: CName) -> CName`: resolve o IType por nome (mesmo `get_type` já usado por
 /// `compose_params_from_types`), lê `innerType@+0x10` (campo de dado, sem risco de vtable-shift —
 /// ver nota longa em `rtti::get_inner_type`), resolve o nome do tipo interno.
@@ -1100,7 +1098,7 @@ pub(crate) static NATIVES_DA_REFLEXAO: &[(&str, &[&str], NativeHandler)] = &[
     ("BwmsReflEnumGetValue", &["Uint64", "CName"], tramp_refl_enum_get_value),
     ("BwmsReflMakeHandle", &["Uint64"], tramp_refl_make_handle),
     ("BwmsGetInnerTypeName", &["CName"], tramp_refl_get_inner_type_name),
-    // Codeware `#91` (2026-09-07) — Int32/enum e CName, os tipos que faltavam pra rota de
+    // 2026-09-07 — Int32/enum e CName, os tipos que faltavam pra rota de
     // composição sobre `ref<inkWidget>`.
     ("BwmsReflPropGetValueInt32", &["handle:IScriptable", "Uint64"], tramp_refl_prop_get_value_int32),
     ("BwmsReflPropSetValueInt32", &["handle:IScriptable", "Uint64", "Int32"], tramp_refl_prop_set_value_int32),
@@ -1109,7 +1107,7 @@ pub(crate) static NATIVES_DA_REFLEXAO: &[(&str, &[&str], NativeHandler)] = &[
     ("BwmsReflPropIsSet", &["handle:IScriptable", "Uint64"], tramp_refl_prop_is_set),
 ];
 
-/// Registra as globais de `cw-reflection-class-api` (ver nota longa acima): a tabela `NATIVES_DA_REFLEXAO` por
+/// Registra as globais da API de reflexão de classe (ver nota longa acima): a tabela `NATIVES_DA_REFLEXAO` por
 /// `register_argful_by_types` e as de valor de qualquer tipo (`Variant`) por `register_global_composed`.
 pub(crate) unsafe fn register_reflection_natives(reg: &Registry, proto: *mut c_void) {
     let falhas: Vec<&str> = NATIVES_DA_REFLEXAO
@@ -1125,7 +1123,7 @@ pub(crate) unsafe fn register_reflection_natives(reg: &Registry, proto: *mut c_v
         NATIVES_DA_REFLEXAO.len()
     );
     // RTTI #168/#169/#232/#236: valor de qualquer tipo pelo IType (`Assign`, `IsEqual`, `ToString`).
-    // Uma `CProperty` nova por parâmetro; o `Variant` usa a do `SetVariant` (a das natives C#77) e,
+    // Uma `CProperty` nova por parâmetro; o `Variant` usa a do `SetVariant` (a das natives de variante) e,
     // sem ela, a montada pelo nome do tipo.
     let variante = cprop_variant(reg);
     let cprop = |nome: &str| match nome {
@@ -1154,7 +1152,7 @@ pub(crate) unsafe fn register_reflection_natives(reg: &Registry, proto: *mut c_v
     crate::veredito_dev!("[reg] valor de qualquer tipo pelo IType: {} de {} ({registradas:?}); CProperty do Variant {variante:#x}", registradas.len(), valor.len());
 }
 
-/// Codeware `#9` (2026-08-11): 1º componente REAL do array `entity+0xA0` (mesmo layout já
+/// 2026-08-11: 1º componente REAL do array `entity+0xA0` (mesmo layout já
 /// batalha-testado de `BwmsEntityFindComponentByType`/`GetComponents`) — usado pra testar
 /// `EntityComponentEvent.GetComponent()->wref<IComponent>` com um ponteiro genuíno, não fixture.
 #[cfg(feature = "devtools")]
@@ -1298,7 +1296,7 @@ pub(crate) const PROP_FLAG_SCRIPTED: u64 = 1 << 5;
 
 pub(crate) const PROP_FLAG_NO_HOLDER: u64 = 1 << 21;
 
-/// `isPersistent` (bit `0x1C`) e `isSavable` (bit `0x21`) da `CProperty` (`RED4ext.SDK` `Scripting/CProperty.hpp`): propriedade criada pelo BWMS
+/// `isPersistent` (bit `0x1C`) e `isSavable` (bit `0x21`) da `CProperty`: propriedade criada pelo BWMS
 /// não vai para o save nem para o recurso serializado.
 pub(crate) const PROP_FLAGS_DE_SAVE: u64 = (1 << 0x1C) | (1 << 0x21);
 
@@ -1346,7 +1344,7 @@ pub(crate) unsafe fn flags_de_irma_nativa(classe: *mut c_void) -> u64 {
     0
 }
 
-/// Propriedade nativa nova numa classe (RED4ext `#159`/`#160`, o construtor e o `Create` da `CProperty`): 0x30 bytes do pool de propriedades
+/// Propriedade nativa nova numa classe (o construtor e o `Create` da `CProperty`): 0x30 bytes do pool de propriedades
 /// do RTTI com tipo, nome, dona, offset e as flags de uma propriedade nativa irmã, anexada ao `props` (`+0x28`) da classe. O `GetProperty` do
 /// motor (`0x1010c4c14`), que o bind dos scripts usa pra cada `native let`, cai na busca linear em `props` quando o `propsByName` (`+0xE8`) não
 /// acha, então a propriedade vale pro bind sem mexer no mapa; o bind só confere o nome do tipo contra o do script. Precisa rodar antes do
@@ -1383,7 +1381,7 @@ pub(crate) unsafe fn propriedade_nativa(reg: &Registry, classe: &str, nome: &str
     Ok(p)
 }
 
-/// Classe nativa nova (RED4ext `#77`): instanciável, com a mãe dada, e `extra` bytes depois dos da construção pros campos de quem a criou.
+/// Classe nativa nova: instanciável, com a mãe dada, e `extra` bytes depois dos da construção pros campos de quem a criou.
 /// Devolve a classe e o offset onde os campos começam. A vtable (construtor e tamanho) vem do doador, como nas classes forjadas do
 /// `CallbackSystem`; o tamanho lido pelo `GetSize` é o do campo `+0x68`, então os bytes a mais entram na alocação.
 pub(crate) unsafe fn classe_nativa(reg: &Registry, nome: &str, mae: &str, extra: u32) -> Result<(*mut c_void, u32), String> {
@@ -1410,7 +1408,7 @@ pub(crate) unsafe fn classe_nativa(reg: &Registry, nome: &str, mae: &str, extra:
 /// `inkWidget` (`WeakHandle` em `+0x168`) é o que a API de UI dos mods usa pra subir a árvore.
 pub(crate) const CAMPOS_NATIVOS: &[(&str, &str, &str, u32)] = &[
     ("inkWidget", "parentWidget", "whandle:inkWidget", 0x168),
-    // Codeware 1.21.1, offsets do Mac 2.5 (`proofs/20261027-codeware-121-nativos-25-offline.log`): o mesh que o componente carregou
+    // Offsets do Mac 2.5 (prova offline de 2026-10-27 em `proofs/`): o mesh que o componente carregou
     // (o `LoadResource` grava o Handle em `+0x200`) e o gênero da fala, no buraco de 4 B de `+0xC` da struct de `0x28`.
     ("entSkinnedMeshComponent", "meshResource", "handle:CMesh", 0x200),
     ("audioDialogLineEventData", "gender", "Int32", 0xC),
@@ -1456,8 +1454,8 @@ pub(crate) unsafe fn registrar_tipos_de_mod(reg: &Registry) {
 /// FAZ PushBack de `name`/`value` em `hashList`/`valueList` do `CEnum` recém-construído, nunca
 /// escreve no buffer que passamos (só lê). `aMembers` é um `DynArray<T>` no mesmo layout já usado
 /// no resto deste arquivo (`entries@0x00, capacity@0x08(u32), size@0x0C(u32)`).
-/// `aSize` = tamanho em bytes do enum subjacente (1/2/4/8 — `EInputAction`/enums pequenos do
-/// Codeware real usam 1, mesmo padrão de `EInputKey`).
+/// `aSize` = tamanho em bytes do enum subjacente (1/2/4/8 — `EInputAction`/enums pequenos
+/// usam 1, mesmo padrão de `EInputKey`).
 #[repr(C)]
 pub(crate) struct EnumMemberEntry {
     pub(crate) name: u64,
@@ -1502,9 +1500,8 @@ pub(crate) unsafe fn create_scripted_enum(reg: &Registry, name: &str, size_bytes
 }
 
 /// `IRTTISystem::CreateScriptedBitfield(CName aName, DynArray<uint64_t>& aBits)` (vtbl+0xF0,
-/// `PENDENCIAS-UNIFICADAS.md` RED4ext.SDK item #79) — irmã de `CreateScriptedEnum` (0xE8, acima):
-/// mesmo comentário do header vendorizado ("the bits array is not of type uint64_t, it is a
-/// struct containing the name and the bit"), mesmo layout de entry de 16 bytes já provado
+/// `PENDENCIAS-UNIFICADAS.md` item #79) — irmã de `CreateScriptedEnum` (0xE8, acima):
+/// o array de bits não é de `uint64_t`, é de struct com o nome e o bit; mesmo layout de entry de 16 bytes já provado
 /// (`EnumMemberEntry`), só o campo semântico muda de "value" pra "bit" (índice do bit, não valor
 /// arbitrário) — reuso do MESMO struct Rust (layout idêntico), sem `aSize` (bitfield não tem
 /// tamanho variável como enum).
@@ -1536,8 +1533,7 @@ pub(crate) unsafe fn create_scripted_bitfield(reg: &Registry, name: &str, bits: 
     true
 }
 
-/// Codeware `Reflection.ReflectionEnum::AddConstant(name, value)` real (fonte C++ vendorizada,
-/// `App/Reflection/ReflectionEnum.hpp`): dedup por NOME OU VALOR já existente (`return` sem
+/// `Reflection.ReflectionEnum::AddConstant(name, value)`: dedup por NOME OU VALOR já existente (`return` sem
 /// adicionar), senão `PushBack` em `hashList`(CName)/`valueList`(int64_t) — 2 `DynArray` PARALELAS
 /// de `CEnum` (`hashList@+0x28`/`valueList@+0x38`, mesmo layout já usado por `resolve_enum_value`).
 /// Reusa `dynarray_push_ptr` (grow seguro já provado pra props array) pros 2 PUSH — cap/size ficam
@@ -1571,7 +1567,7 @@ pub(crate) unsafe fn enum_add_constant(en: *mut c_void, name: &str, value: i64) 
 }
 
 // ===== CallbackSystem (lite): registry event→callbacks + RegisterCallback + fire/dispatch =====
-/// É a registry do Codeware CallbackSystem em Rust. O ouvinte entra pelo endereço; a vida dele é seguida em `OUVINTES`.
+/// É a registry do CallbackSystem em Rust. O ouvinte entra pelo endereço; a vida dele é seguida em `OUVINTES`.
 /// (evento, ouvinte, função, handler): o handler que o `RegisterCallback` criou pra esta entrada, 0 no registro sem handler. A mesma função do mesmo
 /// ouvinte registrada 2 vezes vira 2 handlers com alvos próprios, como na referência (boot 180: o redespacho do 2º builder usava os alvos do 1º).
 pub(crate) static CALLBACKS: Mutex<Vec<(u64, usize, u64, usize)>> = Mutex::new(Vec::new());
@@ -1624,13 +1620,13 @@ unsafe fn ouvinte_vivo(alvo: usize) -> bool {
     OUVINTES.lock().is_ok_and(|o| o.iter().find(|e| e.0 == alvo).is_some_and(|e| crate::jogo::objetos::fraco_vivo(e.1)))
 }
 
-// `cw-callbacksystem-rtti` static callbacks: (event_hash, class_name, fn_name)
+// CallbackSystem no RTTI, static callbacks: (event_hash, class_name, fn_name)
 pub(crate) static STATIC_CALLBACKS: Mutex<Vec<(u64, String, String)>> = Mutex::new(Vec::new());
 
-// `cw-callbacksystem-rtti` DispatchEvent: mapa type_cname_hash → event_cname_hash (de RegisterEvent)
+// CallbackSystem no RTTI, DispatchEvent: mapa type_cname_hash → event_cname_hash (de RegisterEvent)
 pub(crate) static EVENT_TYPE_MAP: Mutex<Vec<(u64, u64)>> = Mutex::new(Vec::new());
 
-/// Estado POR-INSTÂNCIA de um `CallbackSystemHandler` real (2026-07-18, `cw-callback-handler`
+/// Estado POR-INSTÂNCIA de um `CallbackSystemHandler` real (2026-07-18, handler de callback
 /// fechado — ver `register_callbacksystemhandler`). Chave = ponteiro da instância (`usize`, o
 /// mesmo padrão de `CALLBACKS`). `targets` = lista de ponteiros de `CallbackSystemTarget`
 /// adicionados via `AddTarget` — o "filtro de target" É essa lista (lista vazia = sem filtro,
@@ -1751,8 +1747,8 @@ pub fn has_listener_for(event_name: &str) -> bool {
 /// têm o CName cru (ex. `CallbackSystem.DispatchEventAs`, que recebe o hash como arg nativo e
 /// evitaria um round-trip hash→string→hash desnecessário se re-chamasse `fire_event_args`).
 pub unsafe fn fire_event_args_by_hash(eh: u64, event_name: &str, args: &[rtti::Arg]) -> usize {
-    // Codeware #5 (`CallbackLifetime.Session`, 2026-08-11, completa a metade que faltou de
-    // `RunMode.Once`): fonte real (`CallbackSystem.cpp::OnAfterWorldDetach`, chamado logo após
+    // `CallbackLifetime.Session` (2026-08-11, completa a metade que faltou de
+    // `RunMode.Once`): no fim da sessão (logo após
     // `Session/End`) varre TODO o registry e remove qualquer handler com `lifetime != Forever`
     // (não só os que dispararam NESTE evento — `Session/End` é o "fim de mundo", todo handler
     // não-sticky perde validade). `SetLifetime` já provado (2026-07-18); mesma lógica de
@@ -1791,9 +1787,9 @@ pub unsafe fn fire_event_args_by_hash(eh: u64, event_name: &str, args: &[rtti::A
         );
     }
     let mut n = 0;
-    // Codeware `#6`/`#134`: tipo do evento pelo objeto do 1º argumento, calculado 1x e só quando algum handler tem alvo.
+    // Tipo do evento pelo objeto do 1º argumento, calculado 1x e só quando algum handler tem alvo.
     let mut tipo_do_evento_cache: Option<TipoDoEvento> = None;
-    // Codeware #5 (`CallbackRunMode.Once`, 2026-08-11): coleta quem precisa ser desregistrado
+    // `CallbackRunMode.Once` (2026-08-11): coleta quem precisa ser desregistrado
     // DEPOIS do loop de disparo (nunca durante — mutar `HANDLER_STATES`/`CALLBACKS` no meio da
     // iteração de `cbs`, um snapshot já clonado do lock, é seguro, mas fazer o unregister real
     // só depois evita qualquer sutileza de reentrância).
@@ -1803,8 +1799,8 @@ pub unsafe fn fire_event_args_by_hash(eh: u64, event_name: &str, args: &[rtti::A
         if target.is_null() || !rtti::sane(target) || !ouvinte_vivo(*target_us) {
             continue;
         }
-        // Codeware `#6`/`#134`: como o `CallbackSystemHandler::operator()` da referência, só contam os alvos cuja família suporta o tipo do evento (o
-        // `AddTarget` de lá recusa o resto); sem nenhum, o handler dispara; com algum, dispara se ALGUM casa. Substitui os filtros por família de
+        // Só contam os alvos cuja família suporta o tipo do evento (o
+        // `AddTarget` recusa o resto); sem nenhum, o handler dispara; com algum, dispara se ALGUM casa. Substitui os filtros por família de
         // 2026-08-12, que exigiam que cada família presente permitisse e deixavam passar quando o dado do evento faltava. Os alvos são os da cópia
         // de `itens_do_disparo`.
         if !handler_targets.is_empty() {
@@ -1899,14 +1895,14 @@ pub(crate) fn evento_mapeado(ev: u64) -> u64 {
 /// Linha de [`GRUPOS_DE_EVENTO`]: eventos, instalação, remoção (`None` = o hook fica) e atômico que o hook lê (`None` = o hook não lê atômico da tabela).
 type GrupoDeEvento = (&'static [&'static str], unsafe fn(), Option<unsafe fn()>, Option<&'static std::sync::atomic::AtomicBool>);
 
-/// Codeware `#118`/`#122`/`#127`/`#128`/`#130`: cada grupo de hooks com os eventos que ele atende, como o `GetMappings` dos controllers da referência:
+/// Cada grupo de hooks com os eventos que ele atende:
 /// o que o registro instala (`ativar_hooks_do_evento`), o que a remoção tira quando nenhum evento da linha tem ouvinte (`desativar_hooks_sem_ouvinte`) e
 /// o atômico que o hook lê (`atualizar_eventos_de_entidade`). Evento fora da tabela não sobe nem derruba hook ao registrar ou remover ouvinte. A ordem
 /// das linhas é a da desativação.
 /// - Os 6 `Entity/*` são um grupo só: o despacho do player em `lib.rs` lê o bit do hook do próprio evento (`HOOKS_DO_CICLO_NO_AR`, `evento_do_player`). O hook
 ///   deles lê o bit de cada evento em `ENTIDADE_EVENTOS_ARMADOS`, não um atômico da tabela.
 /// - O `Resource/Load` liga o despacho por `RESOURCE_LOAD_ATIVO`, dentro do próprio `garantir_hooks_de_recurso`.
-/// - O `Entity/Extract` não tem remoção: o hook do job de componentes do builder é o do ArchiveXL `#51` (`install_job_do_builder_hook`), e o evento ali só
+/// - O `Entity/Extract` não tem remoção: o hook do job de componentes do builder é o do patch de recursos (`install_job_do_builder_hook`), e o evento ali só
 ///   lê o atômico.
 /// - O `InkWidget/Spawn` não tem remoção: os hooks do spawn de widget também trocam o controller do `Item:Controller`, que não tem ouvinte. O atômico diz
 ///   só se há ouvinte; a chave do `BwmsToggleWidgetSpawnEvent` é outro atômico, que o despacho lê junto (`spawn_de_widget::evento_ligado`).
@@ -1941,7 +1937,7 @@ pub(crate) fn ativar_hooks_do_evento(ev: u64) {
 /// o mesmo hook em ordem trocada, nem empilham 2 hooks no mesmo endereço.
 pub(crate) static HOOKS_DE_EVENTO: Mutex<()> = Mutex::new(());
 
-/// Codeware `#118`: depois de uma remoção de ouvinte, cada grupo de [`GRUPOS_DE_EVENTO`] com remoção cujos eventos ficaram todos sem ouvinte cai com as
+/// Depois de uma remoção de ouvinte, cada grupo de [`GRUPOS_DE_EVENTO`] com remoção cujos eventos ficaram todos sem ouvinte cai com as
 /// outras threads paradas, como o `DeactivateEvent` da referência. Os atômicos descem antes: até a remoção, o hook que ainda roda já não despacha.
 pub(crate) fn desativar_hooks_sem_ouvinte() {
     atualizar_eventos_de_entidade();
@@ -1959,14 +1955,13 @@ fn grupos_sem_ouvinte() -> impl Iterator<Item = (usize, unsafe fn())> {
     })
 }
 
-/// Codeware `#118`: tira o hook nosso de `vm` com as outras threads paradas; `None` sem hook no endereço.
+/// Tira o hook nosso de `vm` com as outras threads paradas; `None` sem hook no endereço.
 unsafe fn tirar_com_threads_paradas(vm: u64) -> Option<(bool, u32)> {
     let end = crate::rebase(vm) as *mut c_void;
     (crate::ganchos::ganchos_no_endereco(end) > 0).then(|| crate::ganchos::remover_com_threads_paradas(end))
 }
 
-/// Codeware `#118`: tira os hooks do ciclo de vida com as outras threads paradas quando nenhum evento `Entity/*` tem ouvinte, como o `DeactivateEvent` da
-/// referência.
+/// Tira os hooks do ciclo de vida com as outras threads paradas quando nenhum evento `Entity/*` tem ouvinte.
 pub(crate) unsafe fn desativar_hooks_do_ciclo_de_vida() {
     let (mut estado, mut ocupadas) = (Vec::new(), 0);
     for (k, _, _) in crate::entidades::hooks_do_ciclo() {
@@ -1985,7 +1980,7 @@ pub(crate) unsafe fn desativar_hooks_do_ciclo_de_vida() {
     }
 }
 
-/// Codeware `#118`: tira o hook do `Entity::Assemble` com as outras threads paradas quando o `Entity/Assemble` fica sem ouvinte.
+/// Tira o hook do `Entity::Assemble` com as outras threads paradas quando o `Entity/Assemble` fica sem ouvinte.
 pub(crate) unsafe fn desativar_hook_do_assemble() {
     let end = crate::rebase(crate::entidades::ENTITY_ASSEMBLE_VM) as *mut c_void;
     if crate::ganchos::ganchos_no_endereco(end) == 0 {
@@ -1996,7 +1991,7 @@ pub(crate) unsafe fn desativar_hook_do_assemble() {
     crate::veredito_dev!("[c130c] hook do Entity::Assemble sem ouvinte: {} ({ocupadas} tentativa(s) com PC no trecho)", if ok { "fora" } else { "ficou" });
 }
 
-/// Codeware `#118`: tira os 2 hooks do `Toggle` quando o `Component/Toggle` fica sem ouvinte.
+/// Tira os 2 hooks do `Toggle` quando o `Component/Toggle` fica sem ouvinte.
 pub(crate) unsafe fn desativar_hooks_de_toggle() {
     let (script, cpp) =
         (tirar_com_threads_paradas(crate::aparencia::ICOMP_TOGGLE_VM), tirar_com_threads_paradas(crate::aparencia::ICOMP_TOGGLE_CPP_VM));
@@ -2005,15 +2000,15 @@ pub(crate) unsafe fn desativar_hooks_de_toggle() {
     }
 }
 
-/// Codeware `#118`: tira o hook do `ToggleLights` quando o `Vehicle/ToggleAuxLights` fica sem ouvinte.
+/// Tira o hook do `ToggleLights` quando o `Vehicle/ToggleAuxLights` fica sem ouvinte.
 pub(crate) unsafe fn desativar_hook_de_luz() {
     if let Some(r) = tirar_com_threads_paradas(crate::veiculos::VEHICLE_AUX_VM) {
         crate::veredito_dev!("[luz] hook do vehicleController::ToggleLights sem ouvinte (tirado, tentativas com PC no trecho): {r:?}");
     }
 }
 
-/// Codeware `#122`/`#118`: sem ouvinte de `Resource/Load`, desliga o despacho e tira o hook do `OnDependenciesReady` que o `#122` pôs; com o ArchiveXL
-/// usando o mesmo hook, ele fica.
+/// Sem ouvinte de `Resource/Load`, desliga o despacho e tira o hook do `OnDependenciesReady` que o despacho de recurso pôs; com o patch de
+/// recursos usando o mesmo hook, ele fica.
 pub(crate) unsafe fn desativar_hooks_de_recurso() {
     use crate::arquivos_do_jogo::GANCHO_DEPENDENCIAS_NO_AR;
     crate::arquivos_do_jogo::RESOURCE_LOAD_ATIVO.store(false, Ordering::Relaxed);
@@ -2128,7 +2123,7 @@ pub(crate) unsafe extern "C" fn tramp_cbs_register_static_callback(_c: *mut c_vo
     let func = current_native_func();
     let args = rtti::read_params_consuming(func, frame);
     let ev_hash   = evento_mapeado(args.first().map(|(v, _)| *v).unwrap_or(0));
-    // A declaração do jogo (2.5) passa o alvo como `ref<IScriptable>` e o contexto é a classe dele; a do Codeware anterior, o nome (`CName`).
+    // A declaração do jogo (2.5) passa o alvo como `ref<IScriptable>` e o contexto é a classe dele; a forma anterior, o nome (`CName`).
     let cls_hash  = match args.get(1) {
         Some(&(v, tc)) if tc != cname("CName") => {
             let cls = rtti::class_of(v as *mut c_void);
@@ -2259,7 +2254,7 @@ pub(crate) unsafe extern "C" fn tramp_cbs_register_event(_c: *mut c_void, frame:
 /// `RegisterEvent`, e delega a `fire_event_args_by_hash`. Void. Fallback: loga o tipo
 /// desconhecido (sem crash, sem dispatch silencioso).
 ///
-/// FIX 2026-08-11 (5ª rodada de mineração de candidatos baratos Codeware, achado de
+/// FIX 2026-08-11 (5ª rodada de mineração de candidatos baratos, achado de
 /// bookkeeping/dependência-já-implementada): a versão anterior lia `obj_vtable+0x10`
 /// DIRETO no vtable do OBJETO como se fosse "GetName" — isso não bate com o padrão já
 /// PROVADO e usado em TODO o resto do projeto (`rtti::class_of`/`rtti::type_name_getname`,
@@ -2472,8 +2467,7 @@ pub(crate) unsafe extern "C" fn tramp_csh_unregister(c: *mut c_void, _frame: *mu
     crate::log_dev!("[csh] CallbackSystemHandler.Unregister() on {c:p} — removeu {removed_cb} entrada(s) de CALLBACKS");
 }
 
-/// `HasTarget(target: ref<CallbackSystemTarget>) -> Bool` — BWMS-ONLY (não existe na fonte real do
-/// Codeware; adicionado 2026-07-18 pra tornar o "filtro de target" testável/observável): devolve
+/// `HasTarget(target: ref<CallbackSystemTarget>) -> Bool` — BWMS-ONLY (adicionado 2026-07-18 pra tornar o "filtro de target" testável/observável): devolve
 /// `true` se `target` está na lista adicionada via `AddTarget` (ou se a lista está vazia — "sem
 /// filtro" aceita qualquer alvo, mesmo esquema documentado em `HandlerState`). Prova, por chamada
 /// de método REAL (não só leitura de estado interno), que `AddTarget`/`RemoveTarget` mutam um
@@ -2494,7 +2488,7 @@ pub(crate) unsafe extern "C" fn tramp_csh_has_target(c: *mut c_void, frame: *mut
     write_bool_ret(out, has);
 }
 
-/// Forja `CallbackSystemHandler` — INSTANCIÁVEL de verdade (2026-07-18, `cw-callback-handler`
+/// Forja `CallbackSystemHandler` — INSTANCIÁVEL de verdade (2026-07-18, handler de callback
 /// FECHADO). Histórico: TENTADO 2026-07-15 como classe (métodos com `ref<X>` de classe forjada) —
 /// CRASHOU (SIGTRAP), mesma categoria genérica do crash de `GetService`/`ScriptableServiceContainer`.
 /// Revertido pra placeholder script seguro (`class CallbackSystemHandler extends IScriptable {}`)
@@ -2535,7 +2529,7 @@ pub unsafe fn register_callbacksystemhandler(reg: &Registry) -> String {
 /// public native func GetEventName() -> CName }`, SEM `extends` explícito = parent `IScriptable`
 /// implícito (mesma receita já provada 4x hoje — Facade/ScriptableService/CallbackSystemTarget/
 /// BwmsDefaultService). `GetEventName` devolve um CName FIXO por ora (gap residual — não faz
-/// parte do `proof_needed` de `cw-event-target-classes`, que foca em `KeyInputEvent.GetKey/
+/// parte do `proof_needed` das classes de evento-alvo, que foca em `KeyInputEvent.GetKey/
 /// GetAction`).
 pub(crate) unsafe extern "C" fn tramp_cse_get_event_name(c: *mut c_void, _f: *mut c_void, out: *mut c_void, _rt: i64) {
     let nome = nome_do_evento_na_cauda(c as *const u8).unwrap_or_else(|| cname("KeyInputEvent"));
@@ -2707,11 +2701,11 @@ pub(crate) unsafe fn acessor_e_da_classe(obj: *const u8, nome: &str) -> bool {
 }
 
 pub unsafe fn registrar_fachada_de_versao(reg: &Registry) -> String {
-    register_facade_methods(reg, "Codeware", &[("Version", tramp_version::<PLUGUE_CODEWARE>), ("Require", tramp_require::<PLUGUE_CODEWARE>)])
+    register_facade_methods(reg, "Codeware", &[("Version", tramp_version::<PLUGUE_VERSAO>), ("Require", tramp_require::<PLUGUE_VERSAO>)])
 }
 
 
-/// PRODUTIZAÇÃO 2026-08-17 (RED4ext.SDK `#461`, já ✅ FECHADO no catálogo desde 2026-08-11 —
+/// PRODUTIZAÇÃO 2026-08-17 (já ✅ FECHADO no catálogo desde 2026-08-11 —
 /// isto NÃO reabre RE nova, só promove a capacidade PROVADA de "atrás de marcador de teste
 /// manual" pra "sempre ativa no runtime shipado", mesmo tratamento que `install_pathb_capture()`
 /// já recebeu quando virou base da API Facade). Sem isto, `CallbackSystem.RegisterCallback(n
@@ -2723,8 +2717,8 @@ pub unsafe fn registrar_fachada_de_versao(reg: &Registry) -> String {
 pub(crate) unsafe fn install_pipeline_framebegin_probe() {
     install_hook_probe!(
         UPDATE_REGISTRAR_GROUP_VM, update_registrar_group_probe, ORIG_UPDATE_REGISTRAR_GROUP,
-        &format!("[red4ext-461] UpdateRegistrar::RegisterUpdate(group) probe @ {UPDATE_REGISTRAR_GROUP_VM:#012x} (sempre-ativo)"),
-        "[red4ext-461] FALHA UpdateRegistrar probe"
+        &format!("[registro-de-update] UpdateRegistrar::RegisterUpdate(group) probe @ {UPDATE_REGISTRAR_GROUP_VM:#012x} (sempre-ativo)"),
+        "[registro-de-update] FALHA UpdateRegistrar probe"
     );
 }
 
@@ -2947,7 +2941,7 @@ mod testes {
             assert_eq!(
                 desativar.is_none(),
                 *eventos == ["Entity/Extract"] || *eventos == ["InkWidget/Spawn"],
-                "só o hook do job do builder (ArchiveXL #51) e os do spawn de widget (Item:Controller) ficam sem remoção"
+                "só o hook do job do builder (patch de recursos) e os do spawn de widget (Item:Controller) ficam sem remoção"
             );
         }
         assert_eq!(grupo_do_evento(cname("Bwms/TesteAtivos")), None, "evento sem hook não acha grupo");

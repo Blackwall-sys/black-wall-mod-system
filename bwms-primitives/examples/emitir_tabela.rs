@@ -1,4 +1,4 @@
-//! Mini ferramenta: gera uma tabela de runtime do ArchiveXL a partir de `.xl`, sem o `bwms install` — o mesmo emissor que o install usa.
+//! Mini ferramenta: gera uma tabela de runtime a partir de `.xl`, sem o `bwms install` — o mesmo emissor que o install usa.
 //!
 //!     cargo run -q --example emitir_tabela -- <streaming|questphase|journal|resource-patch> <mod>=<arquivo.xl> [<mod>=<arquivo.xl> ...] > bwms-<tabela>.txt
 //!

@@ -34,6 +34,98 @@ fn aplicado_troca_os_substituidos_e_move_os_anexados() {
     assert_eq!(p1, vec![[2, 22], [0, 0], [5, 55]]);
 }
 
+/// Vetores C de `plano_da_mescla` (B4-vetores, parte C §1).
+#[test]
+fn plano_da_mescla_casa_a_primeira_chave_e_os_anexados_do_mesmo_patch() {
+    use PassoDaMescla::{Anexa as A, Pula as P, Substitui as S};
+    let casos: [(&[Option<(u64, u64)>], &[Option<(u64, u64, bool)>], bool, &[PassoDaMescla]); 16] = [
+        (&[], &[], false, &[]),
+        (&[], &[Some((1, 10, false))], false, &[A]),
+        (&[], &[Some((1, 10, true))], false, &[A]),
+        (&[], &[Some((1, 10, true))], true, &[P]),
+        (&[Some((1, 10))], &[Some((1, 10, true))], true, &[S(0)]),
+        (&[Some((1, 10))], &[Some((1, 11, false))], false, &[A]),
+        (&[Some((1, 10))], &[Some((2, 10, false))], false, &[A]),
+        (&[None, Some((1, 10)), Some((2, 20))], &[Some((2, 20, false)), Some((3, 30, false)), None, Some((1, 11, false))], true, &[S(2), A, P, A]),
+        (&[Some((5, 50))], &[Some((7, 70, true)), Some((5, 50, true))], true, &[P, S(0)]),
+        (&[Some((5, 50))], &[Some((7, 70, true)), Some((5, 50, true))], false, &[A, S(0)]),
+        (&[], &[Some((9, 90, false)), Some((9, 90, false))], true, &[A, S(0)]),
+        (&[], &[Some((9, 90, true)), Some((9, 90, true))], true, &[P, P]),
+        (&[Some((1, 10)), Some((1, 10))], &[Some((1, 10, false))], false, &[S(0)]),
+        (&[None], &[None, None], false, &[P, P]),
+        (&[Some((0, 0))], &[Some((0, 0, false))], false, &[S(0)]),
+        (
+            &[Some((3, 30)), Some((4, 40))],
+            &[Some((4, 40, false)), Some((3, 30, false)), Some((5, 50, false)), Some((5, 50, false)), Some((6, 60, true))],
+            false,
+            &[S(1), S(0), A, S(2), A],
+        ),
+    ];
+    for (r, p, parte, esperado) in casos {
+        assert_eq!(plano_da_mescla(r, p, parte), esperado, "{r:?} + {p:?} parte={parte}");
+    }
+}
+
+/// Vetores C de `arrays_com_o_plano`.
+#[test]
+fn arrays_com_o_plano_trocam_anexam_e_ignoram_o_que_sobra() {
+    use PassoDaMescla::{Anexa as A, Pula as P, Substitui as S};
+    let casos: [(&[[u64; 2]], &[[u64; 2]], &[PassoDaMescla], &[[u64; 2]], &[[u64; 2]]); 6] = [
+        (&[[1, 11], [2, 22]], &[[3, 33], [4, 44], [5, 55]], &[S(1), A, P], &[[1, 11], [3, 33], [4, 44]], &[[2, 22], [0, 0], [5, 55]]),
+        (&[], &[[3, 33]], &[A], &[[3, 33]], &[[0, 0]]),
+        (&[[1, 11]], &[[3, 33]], &[S(5)], &[[1, 11]], &[[3, 33]]),
+        (&[[1, 11]], &[[3, 33], [4, 44]], &[A], &[[1, 11], [3, 33]], &[[0, 0], [4, 44]]),
+        (&[[1, 11]], &[[3, 33]], &[A, A], &[[1, 11], [3, 33]], &[[0, 0]]),
+        (&[[1, 11], [2, 22]], &[[3, 33], [4, 44]], &[S(0), S(0)], &[[4, 44], [2, 22]], &[[1, 11], [3, 33]]),
+    ];
+    for (r, p, plano, er, ep) in casos {
+        let (r1, p1) = arrays_com_o_plano(r, p, plano);
+        assert_eq!((r1.as_slice(), p1.as_slice()), (er, ep), "{r:?} {p:?} {plano:?}");
+    }
+}
+
+/// `DynArray` de teste: ponteiro `+0x00`, capacidade `+0x08`, tamanho `+0x0C`.
+fn dynarray(buffer: &mut [[u64; 2]], tamanho: u32) -> [u64; 2] {
+    let ptr = if buffer.is_empty() { 0 } else { buffer.as_mut_ptr() as u64 };
+    [ptr, buffer.len() as u64 | (u64::from(tamanho) << 32)]
+}
+
+/// Vetores C de `handles_do_dynarray`: lê tudo, nulos inclusive; vazio com ponteiro nulo, tamanho 0 ou acima do teto.
+#[test]
+fn handles_do_dynarray_le_tudo_e_recusa_nulo_vazio_e_teto() {
+    let mut buffer = [[11, 21], [12, 22], [0, 0]];
+    let arr = dynarray(&mut buffer, 3);
+    assert_eq!(unsafe { super::handles_do_dynarray(arr.as_ptr() as *const u8) }, vec![[11, 21], [12, 22], [0, 0]]);
+    let zero = dynarray(&mut buffer, 0);
+    assert!(unsafe { super::handles_do_dynarray(zero.as_ptr() as *const u8) }.is_empty());
+    let nulo = [0u64, 3 | (3 << 32)];
+    assert!(unsafe { super::handles_do_dynarray(nulo.as_ptr() as *const u8) }.is_empty());
+    let teto = dynarray(&mut buffer, 0x4001);
+    assert!(unsafe { super::handles_do_dynarray(teto.as_ptr() as *const u8) }.is_empty());
+    assert!(unsafe { super::handles_do_dynarray(std::ptr::null()) }.is_empty());
+}
+
+/// Sem as classes da mescla guardadas nada é componente: o plano só pula e os dois arrays ficam como estavam; array que não se lê inteiro recusa
+/// sem escrever. Nenhum caso aqui pede o reserve do motor.
+#[test]
+fn mescla_sem_componente_so_pula_e_array_incoerente_recusa() {
+    assert!(crate::arquivos_do_jogo::CLASSE_DE_COMPONENTE.load(std::sync::atomic::Ordering::Relaxed).is_null());
+    let mut br = [[1, 11], [2, 22]];
+    let mut bp = [[3, 33]];
+    let (antes_r, antes_p) = (br, bp);
+    let mut r = dynarray(&mut br, 2);
+    let mut p = dynarray(&mut bp, 1);
+    let plano = unsafe { super::mesclar_componentes(r.as_mut_ptr() as *mut u8, p.as_mut_ptr() as *mut u8, false) };
+    assert_eq!(plano, Some(vec![PassoDaMescla::Pula]));
+    assert_eq!((br, bp, r[1] >> 32), (antes_r, antes_p, 2));
+    let mut vazio = [0u64; 2];
+    assert_eq!(unsafe { super::mesclar_componentes(r.as_mut_ptr() as *mut u8, vazio.as_mut_ptr() as *mut u8, true) }, Some(vec![]));
+    let mut acima = dynarray(&mut bp, 0x4001);
+    assert_eq!(unsafe { super::mesclar_componentes(r.as_mut_ptr() as *mut u8, acima.as_mut_ptr() as *mut u8, false) }, None);
+    assert_eq!(unsafe { super::mesclar_componentes(std::ptr::null_mut(), p.as_mut_ptr() as *mut u8, false) }, None);
+    assert_eq!((br, r[1] >> 32), (antes_r, 2));
+}
+
 #[test]
 fn tabela_de_patch_le_a_mascara_e_pula_cabecalho_e_linha_torta() {
     let t = "# cabeçalho\nm | mod\\p.ent | base\\a.ent | -\nm | mod\\p2.ent | base\\b.ent | 0x4\nm | mod\\q.ent | base\\c.ent | 0x3\nlinha torta\nm |  | base\\d.ent | 0x1\n";
@@ -110,7 +202,7 @@ fn plano_por_nome_substitui_ou_anexa_e_anexado_entra_na_busca() {
 }
 
 #[test]
-fn plano_de_morph_target_segue_o_modifies_da_referencia() {
+fn plano_de_morph_target_muda_prop_escrita_ou_o_que_o_patch_tem() {
     let props = crate::arquivos_do_jogo::linhas_da_tabela_de_patches("m | mod\\p.morphtarget | base\\a.morphtarget | 0x500\n")[0].props;
     assert_eq!(props, crate::arquivos_do_jogo::A17_PROP_BASEMESHAPP | crate::arquivos_do_jogo::A17_PROP_BOUNDINGBOX);
     // Prop escrita: muda mesmo com o valor do patch vazio (menos a caixa inválida); prop ausente não muda.
@@ -157,7 +249,7 @@ fn bitset_do_extrator_liga_os_n_primeiros_objetos() {
 }
 
 #[test]
-fn params_do_extrator_seguem_o_extractpartcomponents() {
+fn params_do_extrator_copiam_o_cabecalho_e_poem_flags_e_bitset() {
     let cab: [u8; 0x70] = core::array::from_fn(|i| i as u8);
     let p = crate::aparencia::params_do_extrator(&cab, 0x1122_3344_5566_7788, [0, 1, 1, 0, 0], 0xdead_beef, 3, 70);
     assert_eq!(&p[0x00..0x18], &cab[0x18..0x30]);
@@ -234,7 +326,7 @@ fn anexados_da_parte_saem_do_patch_lido_antes_da_mescla() {
 }
 
 #[test]
-fn capacidade_do_mapa_cresce_como_o_emplace_do_sdk() {
+fn capacidade_do_mapa_fica_se_cabe_e_cresce_meia_vez_ate_caber() {
     assert_eq!(crate::jogo::mapas::capacidade_para(38114, 38114, 1), 57171);
     assert_eq!(crate::jogo::mapas::capacidade_para(0, 0, 1), 4);
     assert_eq!(crate::jogo::mapas::capacidade_para(10, 20, 5), 20);
@@ -242,7 +334,7 @@ fn capacidade_do_mapa_cresce_como_o_emplace_do_sdk() {
 }
 
 #[test]
-fn proximo_no_livre_segue_o_get_next_avail_node() {
+fn proximo_no_livre_vem_da_sequencia_ou_da_lista_de_livres() {
     let sem_lista = |_: u32| panic!("não devia ler a lista de livres");
     assert_eq!(crate::jogo::mapas::proximo_livre(0, 0, 4, sem_lista), Some((0, 1, 1)));
     assert_eq!(crate::jogo::mapas::proximo_livre(3, 3, 4, sem_lista), Some((3, u32::MAX, 3)));
@@ -251,7 +343,7 @@ fn proximo_no_livre_segue_o_get_next_avail_node() {
 }
 
 #[test]
-fn plano_da_51d_v2_segue_o_modifies_da_referencia() {
+fn plano_do_morph_com_dono_muda_prop_escrita_ou_o_que_o_patch_tem() {
     use crate::arquivos_do_jogo::{A17_PROP_BASEMESH as M, A17_PROP_BASETEXTURE as T, A17_PROP_TARGETS as G};
     assert_eq!(crate::arquivos_do_jogo::plano_do_morph_com_dono(u32::MAX, 0, 0), (false, false, true));
     assert_eq!(crate::arquivos_do_jogo::plano_do_morph_com_dono(u32::MAX, 5, 7), (true, true, true));
@@ -268,7 +360,7 @@ fn parser_le_as_props_de_morph_e_mesh() {
 }
 
 #[test]
-fn blob_do_morph_segue_o_modifies_com_o_alvo_tendo_blob() {
+fn blob_do_morph_muda_pela_prop_ou_so_no_alvo_sem_blob() {
     assert!(crate::aparencia::morph_blob_muda(u32::MAX, true, false));
     assert!(!crate::aparencia::morph_blob_muda(u32::MAX, true, true));
     assert!(crate::aparencia::morph_blob_muda(crate::arquivos_do_jogo::A17_PROP_BLOB, true, true));
@@ -277,7 +369,7 @@ fn blob_do_morph_segue_o_modifies_com_o_alvo_tendo_blob() {
 }
 
 #[test]
-fn blob_do_mesh_segue_o_modifies_com_o_alvo_tendo_blob() {
+fn blob_do_mesh_muda_pela_prop_ou_so_no_alvo_sem_blob() {
     use crate::arquivos_do_jogo::A17_PROP_RENDERBLOB as B;
     assert!(!crate::aparencia::render_blob_muda(u32::MAX, false, false));
     assert!(crate::aparencia::render_blob_muda(u32::MAX, true, false));
@@ -321,21 +413,6 @@ fn process_string_prefere_local_marca_faltando_e_opcional() {
     assert_eq!(super::resolver_nome_dinamico(&globais, &HashMap::new(), "*x_{nada}?"), "");
     assert_eq!(super::resolver_nome_dinamico(&globais, &HashMap::new(), "*x_{nada}"), "x_");
     assert_eq!(super::resolver_nome_dinamico(&globais, &HashMap::new(), "plano"), "plano");
-}
-
-#[test]
-fn condicao_e_snake_case_do_estado() {
-    let semente = bwms_primitives::fnv1a64_seeded(b"=", bwms_primitives::fnv1a64(b"gender"));
-    assert_eq!(super::condicao_do_estado("gender", "w"), bwms_primitives::fnv1a64_seeded(b"w", semente));
-    assert_eq!(crate::texto_e_numeros::para_snake_case("FPP"), "fpp");
-    assert_eq!(crate::texto_e_numeros::para_snake_case("BaseBody"), "base_body");
-    assert_eq!(crate::texto_e_numeros::para_snake_case("Part"), "part");
-    // Os casos que um `to_snake_case` comum erra (`Str.hpp:25`).
-    assert_eq!(crate::texto_e_numeros::para_snake_case("foo_Bar"), "foo_bar", "o `_` não abre divisão: nada de `__`");
-    assert_eq!(crate::texto_e_numeros::para_snake_case("v2Model"), "v2_model", "dígito abre divisão como minúscula");
-    assert_eq!(crate::texto_e_numeros::para_snake_case("çãoFoo"), "ção_foo", "não-ASCII passa intacto");
-    assert_eq!(crate::texto_e_numeros::para_snake_case("ãB"), "ã_b", "não-ASCII abre divisão, como o `split = (c != '_')` da referência");
-    assert_eq!(crate::texto_e_numeros::para_snake_case(""), "");
 }
 
 #[test]

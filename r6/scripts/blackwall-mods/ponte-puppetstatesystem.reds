@@ -1,17 +1,15 @@
-// ponte-puppetstatesystem.reds — ArchiveXL `App::PuppetStateSystem` (item #32; estado de braços e pés pelo #29).
-// `extends ScriptableSystem`, sem native novo. É o `scriptedSystem` dos 4 registros de sufixo que o runtime cria
-// (`registros_de_sufixo_tick`, como o `CreateSuffixRecord` do `OnTweakDBReady` da referência):
+// ponte-puppetstatesystem.reds — `PuppetStateSystem`: o `scriptedSystem` dos 4 registros de sufixo que o runtime cria
+// (`registros_de_sufixo_tick`):
 //
 //   itemsFactoryAppearanceSuffix.BodyType  → GetBodyTypeSuffix
 //   itemsFactoryAppearanceSuffix.ArmsState → GetArmsStateSuffix
 //   itemsFactoryAppearanceSuffix.LegsState → GetFeetStateSuffix
 //   itemsFactoryAppearanceSuffix.FeetState → GetFeetStateSuffix
 //
-// Braços e pés vêm do `PuppetStateHandler` do dono (`ponte-puppetstate-armsdetect.reds`, item #29); dono sem handler devolve os
-// padrões da referência (`BaseArms` e `None`, que vira sufixo vazio). `GetBodyTypeSuffix` devolve sempre `"BaseBody"`: os tipos de corpo
-// vêm do `player.bodyTypes` dos `.xl`, que o runtime não lê.
+// O motor chama as funções pelo NOME, com a assinatura do `EquipmentSystem.GetHairSuffix` vanilla: nomes e assinaturas são contrato.
 
 public class PuppetStateSystem extends ScriptableSystem {
+    // O runtime não lê os tipos de corpo dos arquivos de mod: todo corpo é o base.
     public func GetBodyTypeSuffix(itemID: ItemID, owner: wref<GameObject>, suffixRecord: ref<ItemsFactoryAppearanceSuffixBase_Record>) -> String {
         return "BaseBody";
     }

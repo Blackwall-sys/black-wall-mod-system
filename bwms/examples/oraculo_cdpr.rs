@@ -62,7 +62,7 @@ fn bate(base: &str, v: &FlatValue, t: &str) -> bool {
         }
         FlatValue::Floats(_) if t.starts_with('(') => {
             let red = TWEAK_TYPES.iter().find(|(r, _)| *r == base).map_or(base, |(_, n)| *n);
-            bwms_primitives::tweakxl::tupla_em_posicional(red, t).is_some_and(|p| bate(base, v, &p))
+            bwms_primitives::tweaks::tupla_em_posicional(red, t).is_some_and(|p| bate(base, v, &p))
         }
         // O `.bin` guarda `Roll, Pitch, Yaw`; o texto é `pitch,yaw,roll`.
         FlatValue::Floats(fs) if base == "CEulerAngles" && fs.len() == 3 => bate("CVector3", &FlatValue::Floats(vec![fs[1], fs[2], fs[0]]), t),
@@ -75,10 +75,10 @@ fn bate(base: &str, v: &FlatValue, t: &str) -> bool {
     }
 }
 
-/// O tweak `.json` do carregador nativo (mod do mod.io) na árvore do intérprete: a semântica é a do YAML do TweakXL escrita em JSON.
-fn no_do_json(v: &bwms_primitives::json::Valor) -> bwms_primitives::tweakxl::yaml::Node {
+/// O tweak `.json` do carregador nativo (mod do mod.io) na árvore do intérprete: a semântica é a do `.yaml` de tweak escrita em JSON.
+fn no_do_json(v: &bwms_primitives::json::Valor) -> bwms_primitives::tweaks::yaml::Node {
     use bwms_primitives::json::Valor;
-    use bwms_primitives::tweakxl::yaml::{Kind, Node};
+    use bwms_primitives::tweaks::yaml::{Kind, Node};
     let escalar = |s: String, aspas: bool| Node { aspas, tag: None, kind: Kind::Scalar(s) };
     match v {
         Valor::Nulo => escalar(String::new(), false),
@@ -121,7 +121,7 @@ fn main() {
     // Mod real (`ORACULO_MOD=<arquivo>`): bases e records que o arquivo edita existem no `.bin`? E as atribuições escalares (sem record em
     // linha) que mudam o vanilla (`MUDA`) ou caem em record novo (`NOVO`), para conferir no jogo.
     if let Ok(arq) = std::env::var("ORACULO_MOD") {
-        use bwms_primitives::tweakxl::{interpret_from, template, tweak_source, yaml};
+        use bwms_primitives::tweaks::{interpret_from, template, tweak_source, yaml};
         let texto = std::fs::read_to_string(&arq).unwrap_or_else(|e| panic!("{arq}: {e}"));
         let ops = if arq.ends_with(".tweak") {
             tweak_source::parse(&texto)
@@ -213,7 +213,7 @@ fn main() {
     let mut fontes = Vec::new();
     for p in &lista {
         let Ok(texto) = std::fs::read_to_string(p) else { continue };
-        match bwms_primitives::tweakxl::tweak_source::parse(&texto) {
+        match bwms_primitives::tweaks::tweak_source::parse(&texto) {
             Ok(ops) => fontes.push((p, ops)),
             Err(_) => erros += 1,
         }
@@ -234,8 +234,7 @@ fn main() {
         }
     }
 
-    // Record em linha: a CDPR o chama `<record>_inline<N>` numa ordem própria; o intérprete, `pai$hash` (o `ComposeInlineName` do
-    // TweakXL). O id real de cada um sai do valor do pai no `.bin`, na mesma posição do array, em passadas até nada mudar (o filho só
+    // Record em linha: a CDPR o chama `<record>_inline<N>` numa ordem própria; o intérprete, `pai$hash`. O id real de cada um sai do valor do pai no `.bin`, na mesma posição do array, em passadas até nada mudar (o filho só
     // resolve depois do pai em linha).
     let mut em_linha: HashMap<String, u64> = HashMap::new();
     let id_do_flat = |flat: &str, em_linha: &HashMap<String, u64>| -> Option<u64> {
@@ -310,8 +309,8 @@ fn main() {
             placar.entry(rotulo.clone()).or_default()[3] += 1;
         }
         let base = rotulo.strip_prefix("array:").unwrap_or(rotulo);
-        // Fora do alvo, contados à parte: LocKey sem `LocKey#` (CDPR dá 0; TweakXL `.tweak` dá 0 no vazio e recusa o resto; o
-        // `lockey_chave` dá FNV, TODO F1-30) e inteiro escrito como float (`1.`, o TweakXL recusa).
+        // Fora do alvo, contados à parte: LocKey sem `LocKey#` (CDPR dá 0; o `.tweak` dá 0 no vazio e recusa o resto; o
+        // `lockey_chave` dá FNV, TODO F1-30) e inteiro escrito como float (`1.`, recusado).
         let classe = match (base, v) {
             ("LocKey", FlatValue::Id(0)) if !t.starts_with("LocKey#") => Some("(LocKey sem prefixo)"),
             (_, FlatValue::I32(_) | FlatValue::I64(_) | FlatValue::I16(_) | FlatValue::I8(_)) if num(t).ends_with('.') => Some("(int como float)"),

@@ -36,7 +36,7 @@ mod defaults {
     // Sem const fixa: a raiz vem de env (CP77_CONTENT/CP77_DIR) ou da instalação
     // Steam padrão sob o HOME do usuário (portável, não embute a máquina).
 
-    /// Lista hash→path da comunidade (`usedhashes.kark` do WolvenKit), no projeto.
+    /// Lista hash→path da comunidade (`usedhashes.kark`), no projeto.
     /// Resolvida em tempo de compilação relativa ao crate; usada se existir.
     pub fn hashes_path() -> PathBuf {
         // ao lado do exe se existir; senão relativo (sem env! que embute o path do projeto).
@@ -106,10 +106,10 @@ COMANDOS:
               10 tabelas + string dict + names + chunks). Self-checks: round-trip do
               índice/chunks + crc32 (header+tabelas) + re-pack. Se for localization
               onscreens, extrai as primeiras chaves→texto. (Formato de record interno
-              em Rust puro — porte WolvenKit, leitura E escrita/re-pack.)
+              em Rust puro, leitura E escrita/re-pack.)
     locedit   EDITA a localização (onscreens/subtitles) e RE-EMPACOTA em Rust puro:
               troca o texto de entradas por chave, recomputa offsets/tamanhos/crc32 e
-              grava um CR2W válido pra dropar num .archive de mod (tradução ArchiveXL).
+              grava um CR2W válido pra dropar num .archive de mod (tradução).
               Sem <out> = só a prova offline (no-op byte-idêntico + edição verificada).
     pack      Empacota UM recurso CR2W num .archive RDAR NÃO-COMPRIMIDO (sem Kraken
               encode). <game-path> = path REDengine (ex.: base\\localization\\en-us\\...)
@@ -757,7 +757,7 @@ fn cmd_pack(args: &[String]) -> Result<(), String> {
     std::fs::write(out_path, &archive).map_err(|e| format!("não gravou '{out_path}': {e}"))?;
     println!("gravou {} ({} bytes)", out_path, archive.len());
 
-    // AUTO-VERIFICAÇÃO: re-abre pelo reader (porte fiel do WolvenKit) e confere tudo.
+    // AUTO-VERIFICAÇÃO: re-abre pelo reader e confere tudo.
     let ar = crate::archive::archive::Archive::open(std::path::Path::new(out_path))
         .map_err(|e| format!("reabrir falhou: {e}"))?;
     let entry = ar.entries.iter().find(|e| e.name_hash == hash)
@@ -784,7 +784,7 @@ fn cmd_pack(args: &[String]) -> Result<(), String> {
 }
 
 /// `tira-campos <cr2w> <out> <campo>...`: grava uma cópia do recurso sem os campos nomeados no chunk-raiz (chunk 0). Campo ausente no CR2W vale o padrão do
-/// construtor, então tirar `descriptors` e `index` de um `worldStreamingBlock` dá um block vazio (teste da parte 51e do ArchiveXL #51). Relê a saída e
+/// construtor, então tirar `descriptors` e `index` de um `worldStreamingBlock` dá um block vazio. Relê a saída e
 /// confere os campos que ficaram e o crc32 do header.
 fn cmd_tira_campos(args: &[String]) -> Result<(), String> {
     let entrada = args.first().ok_or("uso: archive-tool tira-campos <cr2w> <out> <campo>...")?;
@@ -825,8 +825,8 @@ fn cmd_tira_campos(args: &[String]) -> Result<(), String> {
 }
 
 /// `cr2wall <resource-file> [--type <ClassName>]`: dump COMPLETO de todos os chunks/campos (sem
-/// `.take()` de amostra) — ferramenta de dev pra RE de appearance/entity (`axl-cr2w-appearance-
-/// schema`, 2026-07-15). `--type` filtra só chunks dessa classe (ex.: appearanceAppearanceDefinition).
+/// `.take()` de amostra) — ferramenta de dev pra RE de appearance/entity (esquema de appearance
+/// no CR2W, 2026-07-15). `--type` filtra só chunks dessa classe (ex.: appearanceAppearanceDefinition).
 fn cmd_imports(args: &[String]) -> Result<(), String> {
     let path = args.first().ok_or("uso: archive-tool imports <resource-file>")?;
     let data = std::fs::read(path).map_err(|e| format!("não leu '{path}': {e}"))?;
@@ -920,15 +920,15 @@ fn cmd_cr2w(args: &[String]) -> Result<(), String> {
     // self-check do writer do índice: re-serializa o envelope (160B) e compara.
     let idx_bytes = crate::archive::cr2w::write_cr2w_index(&idx);
     println!("  índice round-trip: {}", if data.get(..idx_bytes.len()) == Some(&idx_bytes[..]) { "byte-exato ✓" } else { "DIFERE ✗" });
-    // self-check do crc32 do HEADER: recomputa exatamente como CalculateHeaderCRC32 (0xDEADBEEF no
-    // lugar do campo). Se bater, meu crc32 + a montagem do header estão bit-exatos com o WolvenKit.
+    // self-check do crc32 do HEADER: recomputa com 0xDEADBEEF no lugar do campo. Se bater, o crc32 +
+    // a montagem do header estão bit-exatos com o arquivo do jogo.
     {
         let hc = crate::archive::cr2w::header_crc32(h, &idx.tables);
         println!("  header crc32={:#010x} (calc {hc:#010x} {})", h.crc32, if hc == h.crc32 { "✓" } else { "≠" });
     }
     for (i, t) in idx.tables.iter().enumerate() {
         if t.item_count > 0 {
-            // self-check do crc32: por-tabela = CRC32 dos bytes crus da tabela (WolvenKit CR2WWriter.File.cs).
+            // self-check do crc32: por-tabela = CRC32 dos bytes crus da tabela.
             let computed = crate::archive::cr2w::crc32(crate::archive::cr2w::table_bytes(&data, t, i));
             let ok = if computed == t.crc32 { "✓" } else { "≠" };
             println!("  tabela[{i}]  offset={} itens={} crc32={:#010x} (calc {computed:#010x} {ok})", t.offset, t.item_count, t.crc32);
@@ -1122,17 +1122,17 @@ fn load_base_dict(hashes: Option<&Path>) -> Result<PathDictionary, String> {
     Ok(dict)
 }
 
-/// Adiciona ao dicionário os paths embutidos no LxrsFooter do archive (corretos
+/// Adiciona ao dicionário os paths embutidos no rodapé de paths do archive (corretos
 /// globalmente: são mapeamentos hash→path, válidos para qualquer archive).
 fn add_archive_paths(dict: &mut PathDictionary, ar: &Archive) {
     for p in &ar.custom_paths {
         dict.insert_path(p);
     }
     if !ar.custom_paths.is_empty() {
-        eprintln!("dicionário: +{} paths embutidos do LxrsFooter", ar.custom_paths.len());
+        eprintln!("dicionário: +{} paths embutidos do rodapé de paths", ar.custom_paths.len());
     }
     if ar.custom_paths_need_kraken {
-        eprintln!("aviso: LxrsFooter comprimido; nomes embutidos exigem Kraken para ler.");
+        eprintln!("aviso: rodapé de paths comprimido; nomes embutidos exigem Kraken para ler.");
     }
 }
 

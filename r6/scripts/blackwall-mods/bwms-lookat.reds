@@ -82,9 +82,9 @@ public abstract class BwmsLookAt {
         return BwmsNPC.GangName(BwmsLookAt.Gang(observer));
     }
 
-    // ── RAIO ARBITRÁRIO (item Codeware `#210`) ──────────────────────────────────────────────
+    // ── RAIO ARBITRÁRIO ──────────────────────────────────────────────
     //
-    // O que o Codeware faz (`TraceResultEx.hpp`): lê um campo `resultID` ESCONDIDO dentro do
+    // O caminho nativo: lê um campo `resultID` ESCONDIDO dentro do
     // `TraceResult` e chama `Raw::PhysicsTraceResult::GetHitObject(obj, resultID, i)` para
     // i=0,1 — dois slots, devolvendo o primeiro não-nulo. No BWMS isso é o `bwms-traceresult-hit.reds`.
     //

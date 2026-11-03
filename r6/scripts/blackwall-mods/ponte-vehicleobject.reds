@@ -1,10 +1,9 @@
-// ponte-vehicleobject.reds — Codeware `Vehicle/VehicleObject.reds` (item #71): os 5 campos de telemetria do veículo.
+// ponte-vehicleobject.reds — os 5 campos de telemetria do veículo.
 //
-// O Codeware os expõe com `@addField(VehicleObject) public native let X`, uma property RTTI que só existe no Windows porque o C++ dele a
-// registra (`src/App/Entity/VehicleObjectEx.hpp`: `RTTI_EXPAND_CLASS(Red::vehicleBaseObject, { RTTI_PROPERTY(isOnGround); ... })`).
+// `@addField(VehicleObject) public native let X` exigiria uma property RTTI registrada em C++.
 // No Mac ninguém registra essa property, e declará-la como `native let` é a categoria do `CMesh`, que derruba o bind. Aqui são GETTERS
-// por função nativa que lê o campo direto do objeto. Offsets do header vendorizado (`RED4ext.SDK/include/RED4ext/Scripting/Natives/
-// vehicleBaseObject.hpp`, `RED4EXT_ASSERT_OFFSET`), campo de dado sem deslocamento de vtable; o `isOnGround` foi conferido no
+// por função nativa que lê o campo direto do objeto. Offsets do header gerado (`Scripting/Natives/
+// vehicleBaseObject.hpp`), campo de dado sem deslocamento de vtable; o `isOnGround` foi conferido no
 // registrador de propriedade do RTTI do Mac e ao vivo, em carros no chão:
 //   isOnGround   : bool  @ +0x25C
 //   acceleration : float @ +0x264

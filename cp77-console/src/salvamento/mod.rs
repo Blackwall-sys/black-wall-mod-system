@@ -17,13 +17,13 @@ pub(crate) const RECURSO_CLASSE_SCRIPT: &str = "BwmsSerializable";
 
 pub(crate) const RECURSO_CAMPO_SCRIPT: &str = "object";
 
-/// Codeware `#153`: `BwmsEntidadesPersistentes() -> Int32` — quantas entidades persistentes a sessão
+/// `BwmsEntidadesPersistentes() -> Int32` — quantas entidades persistentes a sessão
 /// tem agora. Serve ao teste e a quem quiser conferir no jogo.
 pub(crate) unsafe extern "C" fn tramp_entidades_persistentes(_c: *mut c_void, _f: *mut c_void, out: *mut c_void, _rt: i64) {
     write_uint_ret(out, crate::salvamento::entidades_persistentes::quantas() as u64, 4);
 }
 
-/// Codeware `#153`: `BwmsGravarEntidadesDoSave(save: String) -> Bool` — grava os specs no arquivo do
+/// `BwmsGravarEntidadesDoSave(save: String) -> Bool` — grava os specs no arquivo do
 /// save dado, sem esperar o vigia. O teste usa pra fechar o ciclo na hora do save.
 pub(crate) unsafe extern "C" fn tramp_gravar_entidades(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
@@ -33,7 +33,7 @@ pub(crate) unsafe extern "C" fn tramp_gravar_entidades(_c: *mut c_void, frame: *
     write_bool_ret(out, ok);
 }
 
-/// Codeware `#153`: `BwmsRecriarEntidades() -> Int32` — recria agora as entidades do save corrente.
+/// `BwmsRecriarEntidades() -> Int32` — recria agora as entidades do save corrente.
 pub(crate) unsafe extern "C" fn tramp_recriar_entidades(_c: *mut c_void, _f: *mut c_void, out: *mut c_void, _rt: i64) {
     crate::salvamento::entidades_persistentes::esquecer_a_geracao();
     write_uint_ret(out, crate::salvamento::entidades_persistentes::recriar() as u64, 4);
@@ -55,7 +55,7 @@ pub(crate) unsafe extern "C" fn tramp_persistentid_hash(_c: *mut c_void, frame: 
     write_uint_ret(out, h, 8);
 }
 
-/// Codeware `#252`: `BwmsObjectSave(obj, path) -> Bool` — ver `selftest::c252_gravar_arquivo`.
+/// `BwmsObjectSave(obj, path) -> Bool` — ver `selftest::c252_gravar_arquivo`.
 pub(crate) unsafe extern "C" fn tramp_object_save(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let (args, strings) = rtti::read_params_consuming_with_strings(current_native_func(), frame);
     let obj = recurso_do_script(args.first().map_or(0, |(v, _)| *v));
@@ -65,7 +65,7 @@ pub(crate) unsafe extern "C" fn tramp_object_save(_c: *mut c_void, frame: *mut c
     write_bool_ret(out, r.is_ok());
 }
 
-/// Codeware `#252`: `BwmsObjectLoad(path) -> ref<IScriptable>` — a referência forte da instância lida passa pro retorno.
+/// `BwmsObjectLoad(path) -> ref<IScriptable>` — a referência forte da instância lida passa pro retorno.
 pub(crate) unsafe extern "C" fn tramp_object_load(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let (_args, strings) = rtti::read_params_consuming_with_strings(current_native_func(), frame);
     let rel = strings.first().cloned().flatten().unwrap_or_default();
@@ -95,24 +95,22 @@ pub(crate) unsafe fn register_object_serializer_natives(reg: &Registry, proto: *
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#75`/`#76`/`#138`/`#139`/`#141`/`#143` — continuação direta do achado do systemMap
+// Continuação direta do achado do systemMap
 // (2026-08-14, bloco `BwmsGetSystemByName` acima): aquele achado destravou o PONTEIRO de
 // `gamePersistencySystem`/`gamePopulationSystem`/`gameContainerManager`/`questWorldStateSystem`,
 // mas `funclistdump` confirmou (2 dos 4 testados: `questWorldStateSystem`/`gamePopulationSystem`)
 // que essas classes não expõem API própria pro redscript — mesma categoria de `MappinSystem`/
 // `CommunitySystem` acima, precisam de dispatch por SLOT DE VTABLE (RE por classe), não de
 // reflection. Esta rodada ataca o item de MENOR risco/MAIOR valor da lista: `IPersistencySystem`/
-// `IPopulationSystem` (RED4ext.SDK vendorizado, `Scripting/Natives/gameIPersistencySystem.hpp`/
-// `gameIPopulationSystem.hpp`, headers com nomes de método REAIS documentados — ao contrário de
-// `IContainerManager`, cujo header "gerado da reflection real" (`Generated/game/
-// IContainerManager.hpp`) NÃO lista nenhum método além de `IGameSystem`, zero offset disponível
+// `IPopulationSystem` (nomes de método REAIS, gerados da reflection do jogo — ao contrário de
+// `IContainerManager`, cuja reflection NÃO lista nenhum método além de `IGameSystem`, zero offset disponível
 // pra essa classe nesta rodada, descartada por falta de dado) — 2 GETTERS PUROS (sem mutação),
 // mesmo shift Itanium Mac=Windows+0x08 já estabelecido:
 //
 //   IPersistencySystem::GetEntityStatus(EntityID) -> EntityPersistenceStatus   // Windows 0x1E8
 //   IPopulationSystem::IsSpawning(EntityID) -> bool                            // Windows 0x1C8
 //
-// `EntityID` é `{hash: u64}` (RED4ext.SDK `entEntityID.hpp`, já confirmado/usado por
+// `EntityID` é `{hash: u64}` (já confirmado/usado por
 // `entity_id_hash`/`#133`) — POD trivial, sem ctor/dtor não-trivial, passado POR VALOR em x1 na
 // ABI Itanium (mesma convenção já usada pra `CommunityIdEntryFn` acima). `EntityPersistenceStatus`
 // é `enum class : uint64_t` (NotPersisted=0/CanBePersisted=1/Persisted=2) — POD trivial, devolvido
@@ -167,10 +165,9 @@ pub(crate) unsafe fn register_entidades_persistentes(reg: &Registry, proto: *mut
     crate::log_dev!("[reg] register_all: cw-153 SaveCarregado={ok1} Quantas={ok2} Gravar={ok3} Recriar={ok4}");
 }
 
-/// Núcleo PURO de `RED4ext::game::PersistentID::GetHash()` (`RED4ext.SDK/Scripting/Natives/
-/// gamePersistentID.hpp`, header "generated from the Game's Reflection data" — confiança MÁXIMA,
+/// Núcleo PURO de `game::PersistentID::GetHash()` (gerado da reflection do jogo — confiança MÁXIMA,
 /// mesma categoria já usada pra fechar o `#132`/ComponentTarget): algoritmo REAL de hash do
-/// motor, nunca replicado antes neste projeto (item `#31`, catálogo Codeware — a nota antiga
+/// motor, nunca replicado antes neste projeto (item `#31` do catálogo — a nota antiga
 /// "não replica o algoritmo interno real de hash do PersistentID, que nunca foi RE'd" fica
 /// desatualizada com este achado). Caso ENTITY-only (`componentName` == CName "None", hash==0
 /// nesta convenção — mesmo sentinela já usado pra `EInputKey.IK_None`/`#136`): devolve
@@ -192,9 +189,8 @@ pub(crate) fn persistent_id_hash(entity_hash: u64, component_hash: u64) -> u64 {
 }
 
 
-// ===== Codeware `#252` — `ObjectSerializer::SaveToFile`/`ReadFromFile` (2026-09-14) =====
-// A referência grava um `Handle<ISerializable>` pelo `ObjectSerializer::WriteToBuffer` (com hook no `Prepare` pra tirar o limite de tamanho) e lê de volta
-// pelo `ReadFromStream` com um `BaseStream` sobre o buffer. No Mac o par está em `0x1048852d8` (`x0` = handle, `w1` = flags, `w2` = limite, `x8` = `DataBuffer`:
+// ===== `ObjectSerializer::SaveToFile`/`ReadFromFile` (2026-09-14) =====
+// No Mac o par está em `0x1048852d8` (`x0` = handle, `w1` = flags, `w2` = limite, `x8` = `DataBuffer`:
 // escritor de pacote `0x101085f28`, prepare `0x101086858` com flags e limite dos argumentos, add `0x101086ae8`, finalize `0x101086ed8`) e `0x10488518c`
 // (`x0` = stream, `x1` = classe, `x8` = handle: lê o `DataBuffer` do stream, leitor padrão, cabeçalho, instância pela classe e leitura do objeto). A gravação
 // chama o `0x1048852d8` com o limite como argumento, sem hook. A leitura faz o miolo do `0x10488518c` sobre os bytes do arquivo, sem `BaseStream`: leitor

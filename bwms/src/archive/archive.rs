@@ -1,9 +1,8 @@
 //! Leitor do formato RDAR (`.archive`) do Cyberpunk 2077.
 //!
-//! Port fiel do codec de leitura do WolvenKit (`WolvenKit.RED4/Archive`):
-//! `Header`, `Index`, `FileEntry`, `Index.FileSegment`/`Dependency`, `LxrsFooter`.
+//! Lê o cabeçalho, o índice (recursos, segmentos, dependências) e o rodapé de paths.
 //! Só lê o **índice**, que é sempre **não-comprimido** — logo não precisa de
-//! Kraken/Oodle. A descompressão do payload mora em [`crate::archive::kraken`].
+//! Kraken. A descompressão do payload mora em [`crate::archive::kraken`].
 //!
 //! Layout (little-endian em todo o formato):
 //!
@@ -17,7 +16,7 @@
 //!         debug_size     u32
 //!         filesize       u64
 //! 0x28  custom_data_length u32        (logo após o header)
-//! 0xAC  LxrsFooter (se custom_data_length != 0)   — paths embutidos (ArchiveXL/mods)
+//! 0xAC  rodapé de paths (se custom_data_length != 0) — paths embutidos (mods)
 //! ...   payload dos segmentos (em offsets arbitrários)
 //! @index_position  Index (index_size bytes):
 //!         file_table_offset u32
@@ -39,15 +38,15 @@ use std::path::{Path, PathBuf};
 // Magic e tamanhos do cabeçalho: os do `bwms_primitives::rdar`, o mesmo leitor que o runtime usa antes de entregar um `.archive` ao motor.
 pub use bwms_primitives::rdar::RDAR_MAGIC;
 pub const HEADER_SIZE: u64 = bwms_primitives::rdar::TAMANHO_DO_CABECALHO as u64;
-pub const EXTENDED_SIZE: u64 = 0xAC; // 172 — onde começa o LxrsFooter
+pub const EXTENDED_SIZE: u64 = 0xAC; // 172 — onde começa o rodapé de paths
 pub const INDEX_HEADER_SIZE: usize = bwms_primitives::rdar::TAMANHO_DO_CABECALHO_DO_INDICE;
 pub const FILE_ENTRY_SIZE: usize = bwms_primitives::rdar::TAMANHO_DO_RECURSO;
 pub const FILE_SEGMENT_SIZE: usize = 16;
 pub const DEPENDENCY_SIZE: usize = 8;
-pub const LXRS_MAGIC: u32 = 0x4C58_5253; // bytes "SRXL" em disco (LxrsFooter)
+pub const LXRS_MAGIC: u32 = 0x4C58_5253; // bytes "SRXL" em disco (rodapé de paths)
 pub use crate::archive::kraken::KARK_MAGIC;
 
-/// CRC-64/XZ (= `Crc64` do WolvenKit, crc do índice RDAR) + SHA-1 (FileEntry) — fonte única
+/// CRC-64/XZ (crc do índice RDAR) + SHA-1 (FileEntry) — fonte única
 /// `bwms-primitives`. Verificado contra o índice de .archive REAIS do jogo (ver `Archive::open`).
 pub use bwms_primitives::{crc64, sha1};
 
@@ -96,7 +95,7 @@ pub struct Header {
     pub custom_data_length: u32,
 }
 
-/// Um segmento (Index 2 / OffsetTable no WolvenKit): uma fatia contígua do
+/// Um segmento (Index 2): uma fatia contígua do
 /// arquivo em `offset`, ocupando `zsize` bytes em disco e expandindo para
 /// `size` bytes ao descomprimir.
 #[derive(Debug, Clone, Copy)]
@@ -154,10 +153,10 @@ pub struct Archive {
     pub entries: Vec<FileEntry>,
     pub segments: Vec<FileSegment>,
     pub dependencies: Vec<u64>,
-    /// Paths embutidos no LxrsFooter (ArchiveXL/mods). Vazio se ausente ou se
+    /// Paths embutidos no rodapé (mods). Vazio se ausente ou se
     /// estava comprimido e o Kraken não estava disponível.
     pub custom_paths: Vec<String>,
-    /// `true` se havia um LxrsFooter comprimido que não pôde ser lido sem Kraken.
+    /// `true` se havia um rodapé de paths comprimido que não pôde ser lido sem Kraken.
     pub custom_paths_need_kraken: bool,
     /// `true` se o crc64 recomputado do índice bate com o armazenado (índice íntegro).
     pub crc_ok: bool,
@@ -200,7 +199,7 @@ impl Archive {
             ));
         }
 
-        // --- LxrsFooter (paths embutidos), best-effort ---
+        // --- Rodapé de paths embutidos, best-effort ---
         let mut custom_paths = Vec::new();
         let mut custom_paths_need_kraken = false;
         if header.custom_data_length != 0 {
@@ -314,7 +313,7 @@ impl Archive {
             }
         }
 
-        // crc64 do índice = Crc64.Compute sobre tudo APÓS o campo crc (counts + as 3 tabelas),
+        // crc64 do índice = CRC-64/XZ sobre tudo APÓS o campo crc (counts + as 3 tabelas),
         // i.e. index[16..]. Valida a integridade e prova o algoritmo contra dado real do jogo.
         let crc_ok = crc64(&index[16..]) == crc;
 
@@ -356,50 +355,51 @@ impl Archive {
     }
 }
 
+/// Resultado da leitura do rodapé de paths: a lista, ou o aviso de que ela está comprimida e o build não descomprime.
 enum LxrsResult {
     Paths(Vec<String>),
     NeedsKraken,
 }
 
-/// Lê o LxrsFooter (lista de paths embutida). Em disco: magic/version/size/
-/// zsize/count + blob de `zsize` bytes. O blob é um stream Kraken **cru** (sem
-/// header KARK) quando `size != zsize`; aí precisamos do Kraken. Quando
-/// `size == zsize` os bytes já são os strings ISO-8859-1 terminados em NUL.
+/// Cabeçalho do rodapé de paths: magic, versão, tamanho descomprimido, tamanho em disco, nº de paths.
+const RODAPE_CABECALHO: u64 = 20;
+
+/// Lê o rodapé de paths (em `EXTENDED_SIZE`, `custom_len` bytes). Erro = rodapé ignorado pelo `open`.
 fn read_lxrs_footer(file: &mut File, custom_len: u32, file_len: u64) -> Result<LxrsResult> {
     let custom_len = u64::from(custom_len);
-    if EXTENDED_SIZE + custom_len > file_len || custom_len < 20 {
-        return format_err("LxrsFooter fora dos limites do arquivo");
+    if EXTENDED_SIZE + custom_len > file_len {
+        return format_err(format!("rodapé de paths ({custom_len} B) passa do fim do arquivo ({file_len} B)"));
+    }
+    if custom_len < RODAPE_CABECALHO {
+        return format_err(format!("rodapé de paths de {custom_len} B menor que o cabeçalho dele"));
     }
     file.seek(SeekFrom::Start(EXTENDED_SIZE))?;
-    let mut head = [0u8; 20];
-    file.read_exact(&mut head)?;
-    if read_u32(&head, 0)? != LXRS_MAGIC {
-        return format_err("magic do LxrsFooter inválido");
+    let mut cab = [0u8; RODAPE_CABECALHO as usize];
+    file.read_exact(&mut cab)?;
+    let magic = read_u32(&cab, 0)?;
+    if magic != LXRS_MAGIC {
+        return format_err(format!("magic do rodapé de paths {magic:#010x}"));
     }
-    let size = read_u32(&head, 8)? as usize;
-    let zsize = read_u32(&head, 12)? as usize;
-    let count = read_u32(&head, 16)? as usize;
-    if 20 + zsize as u64 > custom_len {
-        return format_err("blob do LxrsFooter maior que custom_data_length");
+    let size = read_u32(&cab, 8)?;
+    let zsize = read_u32(&cab, 12)?;
+    let count = read_u32(&cab, 16)? as usize;
+    if RODAPE_CABECALHO + u64::from(zsize) > custom_len {
+        return format_err(format!("blob do rodapé ({zsize} B) não cabe nos {custom_len} B declarados"));
     }
-
-    let mut blob = vec![0u8; zsize];
+    // Tamanho descomprimido menor que o gravado não existe num rodapé válido: lista vazia, sem erro.
+    if size < zsize {
+        return Ok(LxrsResult::Paths(Vec::new()));
+    }
+    // `zsize` já foi limitado pelo tamanho real do arquivo, então a alocação é segura.
+    let mut blob = vec![0u8; zsize as usize];
     file.read_exact(&mut blob)?;
-
-    // Três ramos, fiéis ao `LxrsFooter.Read` do WolvenKit:
-    //   size > zsize  -> blob comprimido (stream Kraken cru) -> descomprime
-    //   size < zsize  -> footer malformado: o WolvenKit ignora (lista vazia)
-    //   size == zsize -> sem compressão
-    let plain = match size.cmp(&zsize) {
-        std::cmp::Ordering::Greater => match crate::archive::kraken::decompress(&blob, size) {
-            Ok(out) => out,
-            Err(_) => return Ok(LxrsResult::NeedsKraken),
-        },
-        std::cmp::Ordering::Less => return Ok(LxrsResult::Paths(Vec::new())),
-        std::cmp::Ordering::Equal => blob,
-    };
-
-    Ok(LxrsResult::Paths(decode_null_terminated_latin1(&plain, count)))
+    if size == zsize {
+        return Ok(LxrsResult::Paths(decode_null_terminated_latin1(&blob, count)));
+    }
+    match crate::archive::kraken::decompress(&blob, size as usize) {
+        Ok(cru) => Ok(LxrsResult::Paths(decode_null_terminated_latin1(&cru, count))),
+        Err(_) => Ok(LxrsResult::NeedsKraken),
+    }
 }
 
 /// Decodifica até `count` strings ISO-8859-1 (Latin-1) terminadas em NUL.

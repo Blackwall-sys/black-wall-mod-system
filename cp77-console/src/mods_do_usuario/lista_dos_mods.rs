@@ -296,20 +296,20 @@ pub(crate) mod exemplos {
     }
 
     pub(crate) fn um() -> ListaDosMods {
-        montar(Some(Path::new(RAIZ)), &mods_da_pasta(&[("Virtual Atelier", CorDoMod::Verde, "")]), &ModsDoModIo::vazio(), &[])
+        montar(Some(Path::new(RAIZ)), &mods_da_pasta(&[("Loja Virtual", CorDoMod::Verde, "")]), &ModsDoModIo::vazio(), &[])
     }
 
     /// 1 de cada cor na `Mods/`: verde, amarelo (archive recusado) e vermelho (só `.dll`).
     pub(crate) fn tres_cores() -> ListaDosMods {
         let e = mods_da_pasta(&[
-            ("Equipment-EX", CorDoMod::Verde, ""),
+            ("Guarda-Roupa", CorDoMod::Verde, ""),
             ("JB", CorDoMod::Amarelo, "recusado / refused: archive/pc/mod/jb.archive — não é um .archive válido; baixe o mod de novo / not a valid .archive; download the mod again"),
-            ("input_loader", CorDoMod::Vermelho, "fora / left out: .lua (mod de CET) ou .dll (plugin de Windows) não carregam no Mac / .lua (CET mod) or .dll (Windows plugin) do not load on a Mac"),
+            ("input_loader", CorDoMod::Vermelho, "fora / left out: .dll (plugin de Windows) não carrega no Mac / Windows plugin, does not load on a Mac"),
         ]);
         montar(Some(Path::new(RAIZ)), &e, &ModsDoModIo::vazio(), &[])
     }
 
-    /// A `Mods/` de teste do roteiro e os 2 do mod.io do dono, com a cópia do FairerCourierTimers na `Mods/` vencendo o do mod.io.
+    /// A `Mods/` de teste do roteiro e os 2 do mod.io do dono, com a cópia de um deles na `Mods/` vencendo o do mod.io.
     pub(crate) fn dois_caminhos() -> ListaDosMods {
         let c = Conflito {
             vence: "BWMS Teste ModIO".into(),
@@ -320,11 +320,11 @@ pub(crate) mod exemplos {
         };
         let e = mods_da_pasta(&[
             ("BWMS Teste ModIO", CorDoMod::Verde, ""),
-            ("Equipment-EX", CorDoMod::Verde, ""),
+            ("Guarda-Roupa", CorDoMod::Verde, ""),
             ("JB", CorDoMod::Verde, ""),
+            ("Loja Virtual", CorDoMod::Verde, ""),
             ("Quadra Turbo R", CorDoMod::Verde, ""),
-            ("Virtual Atelier", CorDoMod::Verde, ""),
-            ("input_loader", CorDoMod::Vermelho, "fora / left out: .lua (mod de CET) ou .dll (plugin de Windows) não carregam no Mac / .lua (CET mod) or .dll (Windows plugin) do not load on a Mac"),
+            ("input_loader", CorDoMod::Vermelho, "fora / left out: .dll (plugin de Windows) não carrega no Mac / Windows plugin, does not load on a Mac"),
         ]);
         let m = modio(&[
             ("Immersive Rippers (mod.io 6383233)", ModStatus::Ok, ""),
@@ -438,7 +438,7 @@ mod tests {
         let v = veredito();
         let p = crate::mods_do_usuario::contagem_dos_plugins();
         assert!(v.starts_with(&format!("[modslista] selo ok={} aviso={} erro={} inativo={}", 6 + p[0], 1 + p[1], 1 + p[2], p[3])), "{v}");
-        assert!(v.contains("| Mods/ 6: BWMS Teste ModIO=verde; Equipment-EX=verde; JB=verde; Quadra Turbo R=verde; Virtual Atelier=verde; input_loader=vermelho |"), "{v}");
+        assert!(v.contains("| Mods/ 6: BWMS Teste ModIO=verde; Guarda-Roupa=verde; JB=verde; Loja Virtual=verde; Quadra Turbo R=verde; input_loader=vermelho |"), "{v}");
         assert!(v.contains("| mod.io 2: Immersive Rippers (mod.io 6383233)=verde; Longer Car Delivery Timers (mod.io 6428265)=amarelo |"), "{v}");
         assert!(v.ends_with("| conflitos 1: BWMS Teste ModIO (Mods) vence Longer Car Delivery Timers (mod.io 6428265) (mod.io): 1 recurso(s) em comum | MODSLISTA OK"), "{v}");
         publicar(ListaDosMods::vazia());

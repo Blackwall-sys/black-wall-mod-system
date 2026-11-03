@@ -10,16 +10,13 @@
 //! uint32_t capacity; // 0x08
 //! uint32_t size;     // 0x0C
 //! ```
-//! Duas evidências independentes: a DECLARAÇÃO em
-//! `RED4ext.SDK/include/RED4ext/Containers/DynArray.hpp:564-566`, e o disassembly do validador de
+//! Evidência: o disassembly do validador de
 //! script do motor (`0x1021fcd58`), que lê a contagem de `ScriptClass::functions` (array em `0x48`)
-//! em `[x20+0x54]` = `0x48 + 0x0C`. A lista de inicialização do construtor do header é
-//! `entries, size, capacity` e induz exatamente a leitura contrária; C++ inicializa na ordem de
-//! declaração.
+//! em `[x20+0x54]` = `0x48 + 0x0C`.
 //!
 //! **O erro de ordem é mudo.** Com os rótulos trocados, `size <= capacity` vira `capacity <= size`,
-//! falso para todo array com folga: o crivo recusa o array lido certo e quem chama vê "vazio" (o
-//! `params=0` do Codeware `#43`). Onde `capacity == size` (dado desserializado de disco) as duas
+//! falso para todo array com folga: o crivo recusa o array lido certo e quem chama vê "vazio"
+//! (`params=0`). Onde `capacity == size` (dado desserializado de disco) as duas
 //! leituras dão o mesmo número, e é por isso que o erro passou despercebido.
 
 /// Bytes do cabeçalho na memória.

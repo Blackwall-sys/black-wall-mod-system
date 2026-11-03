@@ -20,7 +20,7 @@ pub(crate) fn ja_passou(desde: u64, agora: u64, intervalo: u64) -> bool {
     agora.saturating_sub(desde) >= intervalo
 }
 
-/// RED4ext `#460`: `BwmsFrameDeltaTime() -> Float` e `BwmsFrameTimeDilation() -> Float`, do `FrameInfo` do frame corrente (guardado pelos
+/// `BwmsFrameDeltaTime() -> Float` e `BwmsFrameTimeDilation() -> Float`, do `FrameInfo` do frame corrente (guardado pelos
 /// ganchos dos estágios do pipeline). Consomem o frame mesmo sem parâmetro: chamadas inline (`BwmsFrameDeltaTime() * BwmsFrameTimeDilation()`)
 /// deixariam o ParamEnd para a próxima native (boot 233).
 pub(crate) unsafe extern "C" fn tramp_frame_delta(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -34,15 +34,15 @@ pub(crate) unsafe extern "C" fn tramp_frame_dilatacao(_c: *mut c_void, frame: *m
 }
 
 
-// RED4ext.SDK #461 (`UpdateRegistrar::RegisterUpdate`, overload GROUP) — RE offline 2026-08-11
+// `UpdateRegistrar::RegisterUpdate`, overload GROUP — RE offline 2026-08-11
 // (agente dedicado): string-xref+ABI cruzada contra 5 call-sites reais cujo argumento de enum bate
 // semanticamente com a string de debug-name daquele call-site (ex. "CameraSystem/PlayerAimUpdateTick"
-// passa W1=7=PlayerAimUpdate). Assinatura real (`SystemUpdate.hpp`): `RegisterUpdate(UpdateTickGroup
+// passa W1=7=PlayerAimUpdate). Assinatura real: `RegisterUpdate(UpdateTickGroup
 // aGroup, IScriptable* aSystem, const char* aName, GroupUpdateCallback&& aCallback)` — this=X0,
 // group(u8)=X1, system=X2, name(cstr)=X3, callback(ponteiro, é referência)=X4. Hook OBSERVE-ONLY
 // (captura só o `this`/UpdateRegistrar* na 1ª chamada vanilla real, nunca chama RegisterUpdate de
 // volta ainda — categoria de risco BAIXA, mesmo padrão de passthrough já provado dezenas de vezes
-// nesta sessão). `UpdateRegistrar` é struct VAZIA no header oficial — não tem layout próprio pra ler,
+// nesta sessão). `UpdateRegistrar` não tem layout próprio pra ler,
 // só serve pra REUSAR o ponteiro capturado numa chamada futura de `RegisterUpdate`.
 pub(crate) const UPDATE_REGISTRAR_GROUP_VM: u64 = 0x104d74ab0;
 
@@ -50,7 +50,7 @@ pub(crate) static UPDATE_REGISTRAR_CAPTURE_CNT: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static ORIG_UPDATE_REGISTRAR_GROUP: AtomicU64 = AtomicU64::new(0);
 
-// ===== RED4ext.SDK #461: UpdateRegistrar::RegisterUpdate(group) OBSERVE-ONLY =====
+// ===== UpdateRegistrar::RegisterUpdate(group) OBSERVE-ONLY =====
 // Captura o `this`(UpdateRegistrar*) real na 1ª chamada vanilla (acontece naturalmente no boot,
 // confirmado por 5 call-sites reais na RE offline) — NÃO chama RegisterUpdate de volta ainda, só
 // loga+guarda o ponteiro pra uma etapa futura (construir Callback<> + registrar nosso próprio
@@ -77,7 +77,7 @@ pub(crate) unsafe extern "C" fn update_registrar_group_probe(
         } else {
             String::from("(ilegível)")
         };
-        // Opção A do plano `RED4EXT-461-VIA-CARA-PLANO.md` (2026-08-11): dereferencia o `Callback<>`
+        // Opção A do plano de 2026-08-11: dereferencia o `Callback<>`
         // real (`callback` já chega como ponteiro — tipo não-trivial >16B, passado por referência
         // invisível no AAPCS64) pra descobrir qual dos 3 formatos (`UnboundFunctionTarget`/
         // `ClosureTarget`/`MemberFunctionTarget`) o jogo usa de verdade nesta build. Leitura pura,
@@ -105,15 +105,15 @@ pub(crate) unsafe extern "C" fn update_registrar_group_probe(
             };
         let matches_system = buf0 == (system as u64);
         crate::log_dev!(
-            "[red4ext-461] RegisterUpdate(group)#{n} this={this:p} group={group} system={system:p} name='{name_str}' | callback={callback:p} buf0={buf0:#x} matches_system={matches_system} handler={handler_ptr:#x} invoke={h_invoke:#x} copy={h_copy:#x} move={h_move:#x} destruct={h_destruct:#x}"
+            "[registro-de-update] RegisterUpdate(group)#{n} this={this:p} group={group} system={system:p} name='{name_str}' | callback={callback:p} buf0={buf0:#x} matches_system={matches_system} handler={handler_ptr:#x} invoke={h_invoke:#x} copy={h_copy:#x} move={h_move:#x} destruct={h_destruct:#x}"
         );
     }
     let f: RegisterUpdateGroupFn = std::mem::transmute(crate::ganchos::original_publicado(&ORIG_UPDATE_REGISTRAR_GROUP));
     f(this, group, system, name, callback, ordem);
 }
 
-// ===== RED4ext.SDK #461 Opção A: hook no `invoke` REAL do callback já registrado pelo motor =====
-// (ver `cp77-symbols/notes/RED4EXT-461-VIA-CARA-PLANO.md`). Em vez de tocar em qualquer estrutura do
+// ===== Opção A: hook no `invoke` REAL do callback já registrado pelo motor =====
+// Em vez de tocar em qualquer estrutura do
 // `UpdateRegistrar` (categoria que já CROU, ver `register_bwms_update_tick` acima), instala um
 // inline-hook comum direto no CÓDIGO do callback que `AnimationSystem_FrameBeginReset` registra — execução ordenada num ponto real do
 // pipeline (grupo FrameBegin). O alvo é estático no binário 2.5 (`z036/relatorios/P.md`: o `Callback` da 2.5 tem o handler em `+0x40` e o
@@ -129,8 +129,8 @@ pub(crate) static ORIG_ANIM_FRAMEBEGIN_INVOKE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) type AnimInvokeFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
 
-// RED4ext `#459`/`#460`: mais dois estágios do frame pelo mesmo caminho do `FrameBegin` — o `invoke` do 1º callback vanilla registrado em
-// cada grupo (`UpdateTickGroup` do SDK: 3 = `PreBuckets`, antes dos buckets de entidades; 11 = `PreRenderUpdate`, antes do render) — e o
+// Mais dois estágios do frame pelo mesmo caminho do `FrameBegin` — o `invoke` do 1º callback vanilla registrado em
+// cada grupo (`UpdateTickGroup`: 3 = `PreBuckets`, antes dos buckets de entidades; 11 = `PreRenderUpdate`, antes do render) — e o
 // `FrameInfo` (`deltaTime` em `+0x00`, `details` em `+0x08` com a `timeDilation` em `+0x04`) guardado a cada frame pras natives de leitura.
 pub(crate) const ESTAGIOS: [(u32, &str); 2] = [(3, "Pipeline/PreBuckets"), (11, "Pipeline/PreRenderUpdate")];
 
@@ -232,15 +232,15 @@ pub(crate) unsafe extern "C" fn bwms_anim_framebegin_hook(target: *mut c_void, f
     let n = ANIM_FRAMEBEGIN_HOOK_CNT.fetch_add(1, Ordering::Relaxed);
     if n < 5 || a_cada(n, 600) {
         crate::log_dev!(
-            "[red4ext-461-optA] AnimationSystem_FrameBeginReset invoke interceptado #{n} target={target:p} frame_info={frame_info:p} job_queue={job_queue:p}"
+            "[registro-de-update-invoke] AnimationSystem_FrameBeginReset invoke interceptado #{n} target={target:p} frame_info={frame_info:p} job_queue={job_queue:p}"
         );
     }
-    // O despacho (`resolve_in_class` + `call_func`, RTTI numa thread de job, provado no RED4ext `#461`) só roda nos frames com ouvinte; a pergunta é o
+    // O despacho (`resolve_in_class` + `call_func`, RTTI numa thread de job, já provado) só roda nos frames com ouvinte; a pergunta é o
     // bit do estágio, sem trava nem varredura de `CALLBACKS` a cada frame.
     if estagio_armado(0) {
         let sent = crate::tipos_do_motor::fire_event_args(EVENTOS_DO_PIPELINE[0], &[]);
         if n < 5 || a_cada(n, 600) {
-            crate::log_dev!("[red4ext-461-optA] fire_event_args('Pipeline/FrameBegin') dentro do hook #{n} -> despachado pra {sent} listener(s)");
+            crate::log_dev!("[registro-de-update-invoke] fire_event_args('Pipeline/FrameBegin') dentro do hook #{n} -> despachado pra {sent} listener(s)");
         }
     }
     let f: AnimInvokeFn = std::mem::transmute(crate::ganchos::original_publicado(&ORIG_ANIM_FRAMEBEGIN_INVOKE));
@@ -272,14 +272,14 @@ pub(crate) unsafe fn install_anim_framebegin_hook_if_ready() -> bool {
         }
         None => {
             ANIM_FRAMEBEGIN_HOOK_INSTALLED.store(false, Ordering::Relaxed);
-            crate::log_dev!("[red4ext-461-optA] FALHA ao instalar hook no invoke do FrameBegin");
+            crate::log_dev!("[registro-de-update-invoke] FALHA ao instalar hook no invoke do FrameBegin");
             false
         }
     }
 }
 
 
-/// `red4ext-461` Opção A: latch local barato pra parar de rechecar o marcador/estado a cada tick
+/// Opção A: latch local barato pra parar de rechecar o marcador/estado a cada tick
 /// depois que `install_anim_framebegin_hook_if_ready()` (selftest.rs) já confirmou instalado.
 pub(crate) static ANIM_FRAMEBEGIN_HOOK_INSTALLED_TICK: AtomicBool = AtomicBool::new(false);
 

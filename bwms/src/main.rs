@@ -79,7 +79,7 @@ fn cmd_classify(args: &[String]) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// `xl <arquivo.xl>` — parseia um `.xl` do ArchiveXL e imprime o resumo tipado (via `bwms_primitives::instalacao::xl`).
+/// `xl <arquivo.xl>` — parseia um `.xl` e imprime o resumo tipado (via `bwms_primitives::instalacao::xl`).
 fn cmd_xl(args: &[String]) -> ExitCode {
     let Some(path) = args.first() else {
         eprintln!("uso: bwms xl <arquivo.xl>");
@@ -150,7 +150,7 @@ fn usage() {
     println!("  Mods (in-process, via bwms-primitives):");
     println!("    classify <pasta>    analisa um mod (classe, compat, arquivos, tema, deps, riscos)");
     println!("    suggest  <pasta>    sugere o tema (Roupas/Veículos/LUT/...)");
-    println!("    xl       <arq.xl>   le um .xl do ArchiveXL (factories/patch/link/...) e resume");
+    println!("    xl       <arq.xl>   le um .xl (factories/patch/link/...) e resume");
     println!("    mods checar [jogo]  compila os scripts do jogo sem tocar no cache e aponta native func sem registro");
     println!();
     println!("  Ferramentas de dados:");

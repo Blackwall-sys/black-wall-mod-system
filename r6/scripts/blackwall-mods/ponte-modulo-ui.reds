@@ -4,7 +4,7 @@ module Codeware.UI
 // `SimpleButton`, `HubTextInput` e o popup de menu (`InMenuPopup`, `InMenuPopupContent`, `InMenuPopupFooter`, `PopupButton`).
 //
 // Do Windows vem só a forma do plugue (nome, assinatura, ordem das chamadas que os mods fazem); o corpo é do BWMS, escrito a partir do uso
-// em Equipment-EX e Virtual Atelier. Cada controller é controller do motor: `BwmsWidgetAttachController` (C#175) o liga à raiz como
+// pelos mods. Cada controller é controller do motor: `BwmsWidgetAttachController` o liga à raiz como
 // `logicController`, a árvore de widgets o segura vivo, o motor chama `OnInitialize` quando a raiz entra numa árvore na tela, e
 // `QueueEvent`, `PlaySound`, `SpawnFromExternal` e os callbacks globais são as natives vanilla do `inkLogicController`.
 //
@@ -148,40 +148,46 @@ public class SimpleButton extends inkCustomController {
         this.CreateWidgets();
     }
 
+    // Raiz interativa com fundo, moldura e rótulo por cima; os filhos não recebem ponteiro, então o alvo do clique é sempre a raiz.
     protected func CreateWidgets() -> Void {
         let raiz: ref<inkCanvas> = new inkCanvas();
         raiz.SetName(n"button");
-        raiz.SetSize(Vector2(360.0, 80.0));
+        raiz.SetSize(Vector2(360.0, 72.0));
         raiz.SetInteractive(true);
 
-        let fundo: ref<inkImage> = SimpleButton.BwmsCamada(n"bg", n"cell_bg", n"MainColors.Fullscreen_PrimaryBackgroundDarkest", 0.8);
+        // Repouso = o que `BwmsBotaoFora` restaura.
+        let fundo: ref<inkImage> = SimpleButton.BwmsCamadaDoBotao(n"bg", n"cell_bg", n"MainColors.Fullscreen_PrimaryBackgroundDarkest", 0.8);
         fundo.Reparent(raiz);
-        let moldura: ref<inkImage> = SimpleButton.BwmsCamada(n"frame", n"cell_fg", n"MainColors.Red", 1.0);
+        let moldura: ref<inkImage> = SimpleButton.BwmsCamadaDoBotao(n"frame", n"cell_fg", n"MainColors.Red", 0.6);
         moldura.Reparent(raiz);
 
         let rotulo: ref<inkText> = new inkText();
         rotulo.SetName(n"label");
-        rotulo.SetFontFamily("base\\gameplay\\gui\\fonts\\raj\\raj.inkfontfamily");
+        // Sem família de fonte o texto não mede nem desenha.
+        rotulo.SetFontFamily(BwmsTextMeasurer.DefaultFont());
         rotulo.SetFontStyle(n"Medium");
         rotulo.SetFontSize(38);
+        rotulo.SetLetterCase(textLetterCase.UpperCase);
         rotulo.SetStyle(r"base\\gameplay\\gui\\common\\main_colors.inkstyle");
         rotulo.BindProperty(n"tintColor", n"MainColors.Red");
         rotulo.SetAnchor(inkEAnchor.Centered);
         rotulo.SetAnchorPoint(Vector2(0.5, 0.5));
         rotulo.SetHorizontalAlignment(textHorizontalAlignment.Center);
         rotulo.SetVerticalAlignment(textVerticalAlignment.Center);
+        rotulo.SetInteractive(false);
         rotulo.Reparent(raiz);
 
         this.m_root = raiz;
         this.m_bg = fundo;
         this.m_frame = moldura;
         this.m_label = rotulo;
-        this.SetRootWidget(raiz);
         raiz.RegisterToCallback(n"OnHoverOver", this, n"BwmsBotaoSobre");
         raiz.RegisterToCallback(n"OnHoverOut", this, n"BwmsBotaoFora");
+        this.SetRootWidget(raiz);
     }
 
-    private static func BwmsCamada(nome: CName, parte: CName, cor: CName, opacidade: Float) -> ref<inkImage> {
+    // Uma camada de imagem do botão: parte do atlas de formas dos menus, cor pelo estilo do jogo (o hover troca por `BindProperty`).
+    private static func BwmsCamadaDoBotao(nome: CName, parte: CName, cor: CName, opacidade: Float) -> ref<inkImage> {
         let imagem: ref<inkImage> = new inkImage();
         imagem.SetName(nome);
         imagem.SetAtlasResource(r"base\\gameplay\\gui\\common\\shapes\\atlas_shapes_sync.inkatlas");
@@ -189,6 +195,8 @@ public class SimpleButton extends inkCustomController {
         imagem.SetStyle(r"base\\gameplay\\gui\\common\\main_colors.inkstyle");
         imagem.BindProperty(n"tintColor", cor);
         imagem.SetAnchor(inkEAnchor.Fill);
+        imagem.SetInteractive(false);
+        // As mesmas margens da janela do popup: as partes `cell_*` são as mesmas e o canto cortado fica igual.
         let noveFatias: Bool = BwmsImageNineSlice(imagem, 50.0, 30.0, 100.0, 30.0);
         imagem.SetOpacity(opacidade);
         return imagem;
@@ -206,7 +214,7 @@ public class SimpleButton extends inkCustomController {
         return IsDefined(rotulo) ? rotulo.GetText() : "";
     }
 
-    // Desabilitado só muda a cara e o `IsEnabled`: o clique ainda chega, e o mod filtra (Virtual Atelier, `SearchEngineComponent`).
+    // Desabilitado só muda a cara e o `IsEnabled`: o clique ainda chega, e o mod filtra.
     public func SetDisabled(disabled: Bool) -> Void {
         this.m_bwmsDesabilitado = disabled;
         let raiz: ref<inkWidget> = this.m_root;

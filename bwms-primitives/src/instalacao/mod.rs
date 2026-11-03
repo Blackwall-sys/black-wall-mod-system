@@ -1,7 +1,7 @@
 //! Motor de mods do BWMS na lib-folha que o runtime (`cp77-console`) e a CLI (`bwms`) usam: o linker só leva para o dylib o que o runtime
 //! chama.
 //!
-//! - `xl`: o `.xl` do ArchiveXL no modelo tipado; o YAML é lido pelo `tweakxl::yaml`, o mesmo dos tweaks do TweakXL.
+//! - `xl`: o `.xl` no modelo tipado; o YAML é lido pelo `tweaks::yaml`, o mesmo dos tweaks declarativos.
 //! - `tabelas_de_runtime`: as tabelas `red4ext/bwms-*.txt` que o runtime lê, emitidas dos `.xl`.
 //! - `localizacao`: os códigos de idioma que o `.xl` pode declarar.
 //! - `xl_no_jogo`: a parte dos `.xl` da `Mods/` que o próprio jogo aplica, em `.json` na pasta que ele lê.

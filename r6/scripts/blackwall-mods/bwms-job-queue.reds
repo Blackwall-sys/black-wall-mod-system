@@ -1,4 +1,4 @@
-// bwms-job-queue.reds — Codeware `#204` (`JobQueue`): roda o método `Handle` de um objeto de script como job no pool de threads do motor, pela fila
+// bwms-job-queue.reds — `JobQueue`: roda o método `Handle` de um objeto de script como job no pool de threads do motor, pela fila
 // (`JobQueue`) e pelo despachante que o `MeshComponent::LoadResource` usa. Sem tamanho, `Handle()` roda uma vez; com tamanho, `Handle(from: Int32, to: Int32)`
 // roda em lotes que cobrem [0, size) e `Finish(size: Int32)` uma vez, depois de todos os lotes. O último parâmetro `group: Uint64`, opcional nos dois,
 // recebe o grupo do job, e `Create(group)` abre uma fila nele pra despachar de dentro do job. `DispatchWait` faz os próximos jobs da fila esperarem o job

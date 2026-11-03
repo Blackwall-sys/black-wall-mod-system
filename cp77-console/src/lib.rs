@@ -2,7 +2,7 @@
 //! carregado pelo Cyberpunk 2077 do macOS via LC_LOAD_DYLIB.
 //!
 //! Os ganchos são Rust próprio (`ganchos`) e a leitura segura de memória está em `memoria`. Cobre o
-//! console/RTTI, cheats, TweakDB, NativeSettings e o self-boot nativo.
+//! console/RTTI, cheats, TweakDB, a página de configurações e o self-boot nativo.
 #![allow(dead_code)] // esqueleto: vários itens só passam a ser usados com os hooks
 
 mod cname;
@@ -82,7 +82,7 @@ mod selftest;
 mod selftest;
 mod tweakdb;
 #[cfg(feature = "lua")]
-mod cet;
+mod mods_lua;
 mod localizacao;
 
 use crate::tempo::*;
@@ -140,7 +140,7 @@ pub(crate) fn game_base() -> usize {
 ///
 /// Os offsets estáticos do projeto são da build STEAM 2.5.0: no Steam, identidade. Fora do Steam 2.5.0 o `on_load` não instala gancho
 /// (`build_supported`); se algo chama o `rebase` mesmo assim, o endereço é traduzido pela tabela de assinaturas resolvida na imagem da memória
-/// (`enderecos`, RED4ext `#447`) e, sem tradução, volta nulo, que todo call-site trata como "não instala". Nunca o endereço Steam cru num binário de
+/// (`enderecos`) e, sem tradução, volta nulo, que todo call-site trata como "não instala". Nunca o endereço Steam cru num binário de
 /// outro layout: em 2026-07-31 um vmaddr Steam no binário GOG caiu em bytes que pareciam um prólogo e o gancho corrompeu código real.
 pub(crate) fn rebase(vmaddr: u64) -> *mut c_void {
     // Endereço fora da imagem (literal com dígito a mais, constante que não é endereço) vira nulo em vez de um salto pra lixo.
@@ -667,17 +667,17 @@ extern "C" fn on_load() {
     // F4 (Facade/CallbackSystem/Reflection): hook de produção no validador de classe nativa (RE 2026-07-12,
     // ver inicio/boot.rs): forja a classe do BWMS que o validador visita, antes da original. Sem marcador.
     unsafe { inicio::boot::install_class_validate_probe() };
-    // Codeware `#251`: espelho do `ScriptBundle` — lê o bundle no `ScriptValidator::Validate` e guarda contagens e arquivo/linha das funções.
+    // Espelho do `ScriptBundle` — lê o bundle no `ScriptValidator::Validate` e guarda contagens e arquivo/linha das funções.
     unsafe { inicio::boot::install_script_validate_hook() };
     // F2d: a recarga dos scripts dos mods do mod.io dá endereço novo às funções de script; o BWMS esquece as que guardou.
     unsafe { inicio::boot::install_recarga_de_scripts_dos_mods() };
-    // ArchiveXL #63/#101: aparência do record no spawn por template (patch sempre ligado, como na referência).
+    // Aparência do record no spawn por template (patch sempre ligado).
     unsafe { aparencia::do_record::instalar() };
-    // TweakXL #7: stats novos de mod (enum, `statRecords` e os getters de faixa e flags sem o teto do jogo).
+    // Stats novos de mod (enum, `statRecords` e os getters de faixa e flags sem o teto do jogo).
     unsafe { tweakdb::stats::instalar() };
     // F2d: a recarga do TweakDB que o motor faz ao instalar mod do mod.io com o jogo aberto reaplica os tweaks da sessão.
     unsafe { tweakdb::instalar_recarga() };
-    // ArchiveXL #102: sem o teto de 10 world widgets atualizando.
+    // Sem o teto de 10 world widgets atualizando.
     unsafe { interface::ink_mundo::instalar() };
     // Overlay (janela in-game) — swizzle do present do Metal numa thread própria.
     terminal::overlay::start();
@@ -687,49 +687,49 @@ extern "C" fn on_load() {
     // Pasta `Mods/`: varre, regrava as tabelas de `red4ext/` com os `.xl` dela e grava o relatório. Antes do gancho do `InitializeArchives`
     // (que carrega os `.archive` desta varredura) e de quem lê as tabelas (o `PostLoad` de setor abaixo e a carga do 1º tick).
     mods_do_usuario::pasta_mods::preparar_no_boot();
-    // `axl-pathb-injection-arbitrary` + `ArchiveXL.RegisterArchive`/`RegisterDir`: instala o hook no
+    // Injeção de archive arbitrário (rota B) + `RegisterArchive`/`RegisterDir` da fachada de recursos: instala o hook no
     // InitializeArchives AQUI, no `on_load` SÍNCRONO (thread principal, na carga pelo dyld, mais cedo possível — ANTES do
     // InitializeArchives/LoadGlobs do boot). Instalar hook de CÓDIGO da nossa thread de heartbeat NÃO
     // efetivou a escrita (v2 não capturou nada); o copy-test que funciona instala do cp77_tick, dentro do
     // executor. **Sempre instalado** (antes só sob `~/.bwms-pathbtest`) — base da API Facade shipada,
     // não mais só probe de dev. Ver `install_pathb_capture`.
     unsafe { install_pathb_capture() };
-    // RED4ext.SDK `#461` (`CallbackSystem.RegisterCallback(n"Pipeline/FrameBegin",...)`, ✅ FECHADO
+    // `CallbackSystem.RegisterCallback(n"Pipeline/FrameBegin",...)` (✅ FECHADO
     // 2026-08-11): **Sempre instalado** (antes só sob `dev_mode()`+`~/.bwms-updateregistrar-probe`
     // dentro de `install_postload_hooks()`) — mesma promoção de "probe de dev" pra "base shipada"
     // já dada ao `install_pathb_capture()` acima. Passthrough observe-only puro, zero mudança de
     // comportamento do jogo. Ver `install_pipeline_framebegin_probe` (tipos_do_motor/mod.rs).
     unsafe { crate::tipos_do_motor::install_pipeline_framebegin_probe() };
-    // Codeware `#142` (`OpenWorldTracker`): hook no `PointOfInterestMappin::SetPhase`, com `openworldtracker = true` no `bwms.toml` (no dev, também
+    // `OpenWorldTracker`: hook no `PointOfInterestMappin::SetPhase`, com `openworldtracker = true` no `bwms.toml` (no dev, também
     // com `~/.bwms-hook-openworldtracker`).
     unsafe { crate::missoes_e_mapa::install_openworldtracker() };
-    // Codeware `#176` 176a: `inkSystem::ProcessCharacterEvent` só observando, com `~/.bwms-hook-c176a-teste`.
+    // `inkSystem::ProcessCharacterEvent` só observando, com `~/.bwms-hook-c176a-teste`.
     unsafe { crate::interface::tecla_no_widget::install_c176_pce_probe() };
-    // Codeware `#175`: hooks do `Reparent`, do `AddChildWidget` e do `OnInitialize` com `bwms-widget-building.reds` no bundle ou `~/.bwms-hook-c175-teste`.
+    // Hooks do `Reparent`, do `AddChildWidget` e do `OnInitialize` com `bwms-widget-building.reds` no bundle ou `~/.bwms-hook-c175-teste`.
     unsafe { crate::interface::install_c175_widget_building() };
-    // Codeware 1.21.1: `inkWidget.AttachController` do jogo registra o controller na camada viva e chama o `OnInitialize` (sempre).
+    // `inkWidget.AttachController` do jogo registra o controller na camada viva e chama o `OnInitialize` (sempre).
     unsafe { crate::interface::install_anexar_controller() };
-    // ArchiveXL/Codeware: `Item:Controller` no spawn de widget de biblioteca e o evento `InkWidget/Spawn` (`#123`/`#135`), hooks do
+    // `Item:Controller` no spawn de widget de biblioteca e o evento `InkWidget/Spawn`, hooks do
     // `SpawnFromLocal`/`SpawnFromExternal`, do `AsyncSpawnFromLocal`/`AsyncSpawnFromExternal` e da entrega do spawn assíncrono (`0x104368f34`)
     // sempre no ar.
     unsafe { crate::interface::spawn_de_widget::instalar() };
-    // Codeware `#122`: sonda do `ReadSoundBanksJson` (quando roda e com quantos bancos), com `~/.bwms-hook-c122som-teste`.
+    // Sonda do `ReadSoundBanksJson` (quando roda e com quantos bancos), com `~/.bwms-hook-c122som-teste`.
     unsafe { crate::som::install_read_soundbanks_json_hook() };
-    // Codeware `#239`/`#82`: hook do job `CGameFramework/GameInstance`, que grava o framework da `RuntimeScene` lido pelo C#82; o do job
+    // Hook do job `CGameFramework/GameInstance`, que grava o framework de onde sai a `RuntimeScene`; o do job
     // `GameSession/Initialize_GameInstance` só no dev.
     unsafe { crate::inicio::boot::install_jobs_de_estado() };
     // Os `Session/*` que o `game::CallbackSystem` do jogo dispara, repassados aos ouvintes do BWMS (`inicio::sessao_do_jogo`).
     unsafe { crate::inicio::sessao_do_jogo::instalar() };
-    // ArchiveXL `#11`: `ChangeAppearance`/`ChangeAppearances` com o `ApplyAppOverride` (sempre; o teste com `~/.bwms-hook-a11-teste`).
+    // `ChangeAppearance`/`ChangeAppearances` com o `ApplyAppOverride` (sempre; o teste com `~/.bwms-hook-a11-teste`).
     unsafe { crate::aparencia::install_app_overrides() };
-    // ArchiveXL 1.27 `{nails_color}`: hook do `CollectStateData` da aparência dinâmica nativa da 2.5 (sempre).
+    // `{nails_color}`: hook do `CollectStateData` da aparência dinâmica nativa da 2.5 (sempre).
     unsafe { crate::aparencia::install_cor_da_unha() };
-    // ArchiveXL 1.27 nome composto de material (`{material.N}`): hook do construtor dos locais do `ExpandResourcePath` nativo da 2.5 (sempre).
+    // Nome composto de material (`{material.N}`): hook do construtor dos locais do `ExpandResourcePath` nativo da 2.5 (sempre).
     unsafe { crate::aparencia::install_material_composto() };
-    // ArchiveXL `#47` 47a: `ApplyAppOverride` nos 6 `Get*Appearances` do estado de customização (sempre); `Initialize*Option` observados com
+    // `ApplyAppOverride` nos 6 `Get*Appearances` do estado de customização (sempre); `Initialize*Option` observados com
     // `~/.bwms-hook-a47a-teste`.
     unsafe { crate::corpo_e_rosto::install_a47a() };
-    // Codeware `#129`: hook do `OnPlayerMainObjectSpawned` (produto) e, com o marcador, o callback estático do teste.
+    // Hook do `OnPlayerMainObjectSpawned` (produto) e, com o marcador, o callback estático do teste.
     unsafe { crate::inicio::boot::install_player_spawned_hook() };
     if marcador_individual("a34-teste") {
         unsafe { crate::missoes_e_mapa::install_a34() };
@@ -737,13 +737,13 @@ extern "C" fn on_load() {
     if marcador_individual("a55-teste") || marcador_individual("a35-teste") {
         unsafe { crate::missoes_e_mapa::install_questsys_ongamerestored() };
     }
-    // ArchiveXL `#49` parte 4b: `worldStreamingSector::PostLoad` só observando, com `~/.bwms-hook-wssector-postload-c2`.
+    // `worldStreamingSector::PostLoad` só observando, com `~/.bwms-hook-wssector-postload-c2`.
     unsafe { crate::mundo::install_wssector_postload_probe() };
-    // ArchiveXL `#35` parte c: rota de carga de fase `0x1029e8c48` só observando, com `~/.bwms-hook-questphase-carga`.
+    // Rota de carga de fase `0x1029e8c48` só observando, com `~/.bwms-hook-questphase-carga`.
     unsafe { crate::missoes_e_mapa::install_questphase_carga_probe(false) };
     // Hooks de teste e sondas do dev, cada um atrás do próprio marcador.
     #[cfg(feature = "devtools")] unsafe { crate::selftest::instalar() };
-    // ArchiveXL: offsets de roupa vazios com `DisableGarmentOffsets`, o padrão.
+    // Offsets de roupa vazios com `DisableGarmentOffsets`, o padrão.
     unsafe { crate::roupas_e_armas::install_offsets_de_roupa() };
     // HEARTBEAT de boot (diagnóstico do early-stick intermitente): thread que loga a cada 2s ONDE o boot
     // está, até chegar na gameplay. Se travar, a ÚLTIMA linha [hb] crava o ponto exato (t + fase). Custo ~0,
@@ -880,7 +880,7 @@ extern "C" fn on_load() {
             std::thread::sleep(std::time::Duration::from_secs(2));
         }
     });
-    // `cw-inkget-autoretry` (2026-08-16, engenharia de robustez pro item Codeware `#120`): 9
+    // Nova tentativa automática do `InkSystem::Get` (2026-08-16, engenharia de robustez): 9
     // tentativas MANUAIS seguidas (ver HISTORICO.md) confirmaram que a janela em que o canal do
     // EXECUTOR fica vivo pós-gameplay é curta e IMPREVISÍVEL (às vezes fecha em 1-2s, às vezes
     // nem isso, dependendo de quando a 2ª rajada de `OnGameAttached` do autocontinue domina o
@@ -1030,7 +1030,7 @@ impl Drop for TickGuard {
 }
 
 /// Versão do BWMS — escrita no splash de boot. Bumpar a cada release pro Nexus.
-pub const BWMS_VERSION: &str = "0.1.5";
+pub const BWMS_VERSION: &str = "0.1.5b";
 
 /// Chamado de dentro do hook do executor (`inicio::boot::exec_replacement`) a cada `TICK_EVERY` chamadas, na thread que fez a chamada: na
 /// prática um worker `redDispatcherN`, não a GameThread (`proofs/20260912-boot108-crash-a51f-tick-class-of.ips`). Chamar a VM vale por estar
@@ -1045,7 +1045,7 @@ pub extern "C" fn cp77_tick() {
         return;
     }
     let _tg = TickGuard;
-    // Codeware `#118`: as filas de tecla do AppKit esvaziam aqui, uma vez por tick, acima das saídas sem registry e sem
+    // As filas de tecla do AppKit esvaziam aqui, uma vez por tick, acima das saídas sem registry e sem
     // player. O overlay enfileira em menu, load e gameplay, com ou sem ouvinte; sem este ponto a fila retém as 64 teclas
     // mais velhas e um ouvinte de `Input/Key` registrado depois recebe todas num tick só. Toda saída antecipada descarta
     // o lote no drop; o despacho fica no fim do tick (`TeclasDoTick::despachar`).
@@ -1080,7 +1080,7 @@ pub extern "C" fn cp77_tick() {
     // TweakDB runtime: dump observe-only do singleton (gated ~/.bwms-tdbdump) p/ confirmar
     // o records-map in-vivo antes de registrar record novo (PASSO 0 do clone-runtime).
     unsafe { crate::tweakdb::dump_once_if_marked() };
-    // TweakXL clone runtime-reg (PASSO final): registra Items.BwmsCloneTest no TweakDB vivo
+    // Clone com registro em runtime (PASSO final): registra Items.BwmsCloneTest no TweakDB vivo
     // via a nativa CreateRecord (gated ~/.bwms-tdbcreate). RecordExists antes/depois = prova.
     unsafe { crate::tweakdb::create_once_if_marked() };
     // IA Fase 0: poll non-blocking da resposta do processo externo (throttled). Loga/exibe. Só no dev: no
@@ -1098,18 +1098,18 @@ pub extern "C" fn cp77_tick() {
     }
     let (player, tx) = (current_player(), current_tx());
     unsafe { diagnostico::criar_no_fantasma(reg) };
-    // Mods CET (`cet`): carga, Observe pedidos e teclas em todo tick; `onUpdate` só com o V e o tx no mundo.
+    // Mods Lua (`mods_lua`): carga, Observe pedidos e teclas em todo tick; `onUpdate` só com o V e o tx no mundo.
     #[cfg(feature = "lua")]
     unsafe {
-        crate::cet::tick(reg, !player.is_null() && !tx.is_null())
+        crate::mods_lua::tick(reg, !player.is_null() && !tx.is_null())
     };
-    // Pipeline unificado de carga de mods (6 serem 1): ArchiveXL resource.link,
-    // RED4ext plugins. Idempotente — roda só na 1ª iteração.
+    // Pipeline unificado de carga de mods (6 serem 1): resource.link de recursos,
+    // plugins. Idempotente — roda só na 1ª iteração.
     mods_do_usuario::pipeline::boot_phase();
-    // ArchiveXL `#44` 7e-6b-1: carga antecipada dos journals da tabela e plano pro `Initialize` da raiz, com `~/.bwms-hook-journal-menu`. Roda em todo tick: o
+    // Carga antecipada dos journals da tabela e plano pro `Initialize` da raiz, com `~/.bwms-hook-journal-menu`. Roda em todo tick: o
     // menu já tem o player do menu, e no boot 87, com o gate de player nulo, a carga foi pedida e o plano nunca ficou pronto antes do `Initialize`.
     #[cfg(feature = "devtools")] unsafe { mundo::journal_mods_menu_tick() };
-    // RED4ext.SDK #32/#36/#37/#38 (2026-08-11): cobertura completa de `EGameStateType` —
+    // 2026-08-11: cobertura completa de `EGameStateType` —
     // `BaseInitialization`(0)/`Initialization`(1) NUNCA disparavam antes (só `Running`(2, via
     // heartbeat phase-tracking) e `Shutdown`(3, via exit hook)). `boot_phase()` (acima) é o
     // 1º ponto idempotente ONDE plugins já tiveram chance de `add_game_state` (carregados
@@ -1134,7 +1134,7 @@ pub extern "C" fn cp77_tick() {
             crate::mods_do_usuario::api::call_game_state_update(EstadoDoJogo::Initialization);
         }
     }
-    // `red4ext-reloc-universal` one-shot NO MENU: gated por `~/.bwms-relocreal`. Roda AQUI (antes do
+    // Relocador universal one-shot NO MENU: gated por `~/.bwms-relocreal`. Roda AQUI (antes do
     // gate de player) porque o alvo é um dtor de IA de NPC — dormente no menu (mundo não carregado),
     // colisão ~zero; em gameplay ele dispararia. Consome o marcador e roda 1×. Ver `prove_relocreal`.
     // Nos 3 one-shots abaixo o flag vem antes do marcador: depois de rodar, o tick não paga mais `env::var` + `stat`.
@@ -1146,7 +1146,7 @@ pub extern "C" fn cp77_tick() {
             }
         }
     }
-    // `red4ext-attach-detach-contract`: idem, one-shot no menu (2 hooks empilhados no MESMO alvo,
+    // Contrato de attach/detach: idem, one-shot no menu (2 hooks empilhados no MESMO alvo,
     // LIFO, Detach único). Ver `prove_attach_detach`.
     if !ATTACHDETACH_DONE.load(Ordering::Relaxed) {
         if let Some(m) = crate::caminho_de_marcador(".bwms-attachdetach") {
@@ -1156,7 +1156,7 @@ pub extern "C" fn cp77_tick() {
             }
         }
     }
-    // `tweakxl-registername`: derive nativo PURO (roda no MENU, não precisa player). Ver `prove_derive`.
+    // Registro de nome de tweak: derive nativo PURO (roda no MENU, não precisa player). Ver `prove_derive`.
     if !DERIVETEST_DONE.load(Ordering::Relaxed) {
         if let Some(m) = crate::caminho_de_marcador(".bwms-derivetest") {
             if m.exists() && !DERIVETEST_DONE.swap(true, Ordering::Relaxed) {
@@ -1165,7 +1165,7 @@ pub extern "C" fn cp77_tick() {
             }
         }
     }
-    // `red4ext-461`: hookar o `invoke` REAL do callback já registrado pelo `AnimationSystem_FrameBeginReset` vanilla, capturado pelo probe
+    // Item 461: hookar o `invoke` REAL do callback já registrado pelo `AnimationSystem_FrameBeginReset` vanilla, capturado pelo probe
     // observe-only de `UpdateRegistrar::RegisterUpdate`. Só com ouvinte de `Pipeline/*` (`PIPELINE_ARMADOS`): os 3 ganchos rodam a cada quadro
     // desde o boot, e sem ouvinte não há o que despachar — o jogo de quem não usa esses eventos fica sem eles (boot de 2026-10-25 00:09 travou
     // antes da engagement com os 3 no ar, causa não fechada). Rechecado todo tick até instalar — idempotente, barato.
@@ -1175,7 +1175,7 @@ pub extern "C" fn cp77_tick() {
     {
         ANIM_FRAMEBEGIN_HOOK_INSTALLED_TICK.store(true, Ordering::Relaxed);
     }
-    // `axl-copy-makeexist`: redirect de path inexistente (roda no MENU). Máquina de estados dirigida
+    // Redirect de path inexistente (roda no MENU). Máquina de estados dirigida
     // pelo tick (captura o depot real → golden) — ver `prove_copy_tick`. Arma no 1º achado do marcador.
     if !COPYTEST_DONE.load(Ordering::Relaxed) {
         if let Some(m) = crate::caminho_de_marcador(".bwms-copytest") {
@@ -1197,7 +1197,7 @@ pub extern "C" fn cp77_tick() {
     cpvr_ingame_marker(!player.is_null() && !tx.is_null());
     // CallbackSystem: controller STATE-DRIVEN de presença do player. "Player/Spawned" na 1ª presença (player+tx) do processo, que é a do
     // puppet do menu; a presença latcha (abaixo), então o ramo do "Player/Despawned" não roda: o fim de sessão sai do `OnWorldDetached`
-    // (`inicio::sessao_do_jogo`) e do `Session/End` do C#129 (`inicio::natives::session_ready_tick`). Fica ANTES do gate de player. Mecanismo = fire_event
+    // (`inicio::sessao_do_jogo`) e do `Session/End` do hook do spawn (`inicio::natives::session_ready_tick`). Fica ANTES do gate de player. Mecanismo = fire_event
     // (provado + GUARDADO: o dispatch valida rtti::sane+class_of → alvo liberado é PULADO, sem o
     // crash de [[cp77-crash-callbacksystem-devreds]]; sem listener = no-op). SEM offset novo.
     {
@@ -1220,14 +1220,14 @@ pub extern "C" fn cp77_tick() {
         // 2026-08-20 (madrugada, sessão 2, retomada pós-compactação): 4/4 crashes SIGSEGV reproduzidos
         // nesta sessão (mesma assinatura de sempre, `EXC_BAD_ACCESS`/zero frame nosso na pilha) sempre
         // IMEDIATAMENTE APÓS `mods_do_usuario::pipeline::session_phase` (scan RTTI de ~27800 tipos procurando
-        // `ScriptableTweak`, `[tweakxl] GetAllTypes`) terminar de rodar no MESMO tick dos 4
+        // `ScriptableTweak`, `GetAllTypes`) terminar de rodar no MESMO tick dos 4
         // `fire_event_args` acima — nunca durante os 4 eventos em si, sempre logo depois do scan+
-        // dispatch do TweakXL completar. Candidato de fix já listado em sessões anteriores, testado
-        // agora pela 1ª vez: dar ao scan TweakXL um tick-alvo PRÓPRIO, mais tarde que os 4 eventos
+        // dispatch dos tweaks completar. Candidato de fix já listado em sessões anteriores, testado
+        // agora pela 1ª vez: dar ao scan de tweaks um tick-alvo PRÓPRIO, mais tarde que os 4 eventos
         // (não junto no mesmo tick) — reduz a chance de o scan pesado colidir com a mesma janela de
         // fila-de-eventos do motor que os 4 `fire_event_args` já ocupam. Ver memória
         // `bwms-t82s-crash-vs-887pct-hang` (Atualização 10).
-        static PENDING_SESSION_PHASE_AT: AtomicU64 = AtomicU64::new(0); // tick-alvo p/ o scan TweakXL; 0 = nada pendente
+        static PENDING_SESSION_PHASE_AT: AtomicU64 = AtomicU64::new(0); // tick-alvo p/ o scan de tweaks; 0 = nada pendente
         const SESSION_PHASE_EXTRA_DELAY_TICKS: u64 = 120; // ~2-4s DEPOIS dos 4 eventos (soma a HANDLE_EVENTS_DELAY_TICKS)
         // Presença latcha: o player e o tx nulos da troca de mundo (`inicio::boot::trocar_de_mundo`) não são despawn. Disparar o ramo do
         // despawn ali poria `call_func` de ouvinte e `Entity/Detach` com o puppet do mundo que sai (`LAST_ENTITY_PTR`) dentro da carga.
@@ -1242,7 +1242,7 @@ pub extern "C" fn cp77_tick() {
                 // de PHASE_REACHED_5 — não instala). Latcha.
                 inicio::boot::POST_SAVELOAD.store(true, Ordering::Relaxed);
                 LAST_ENTITY_PTR.store(player as usize, Ordering::Relaxed);
-                // RED4ext.SDK `#32`/`#36`/`#37`/`#38` (2026-08-11, fix desta sessão): `Initialization.
+                // 2026-08-11, fix desta sessão: `Initialization.
                 // OnExit` (type=1) TEM que disparar ANTES de `Running.OnEnter` — mesma transição, mesmo
                 // instante, mesmo mecanismo (presença do player, já provado confiável pro Running) em
                 // vez do byte de fase lido pela thread de heartbeat (flaky, ver `GS1_EXITED` acima).
@@ -1254,7 +1254,7 @@ pub extern "C" fn cp77_tick() {
                 inicio::sessao_do_jogo::abrir_sessao_na_presenca();
                 #[cfg(feature = "devtools")]
                 unsafe { inicio::sessao_do_jogo::sonda::na_gameplay() };
-                // red4ext-gamestates-add: Running.OnEnter (type=2) — player spawnando = estado Running
+                // Running.OnEnter (type=2) — player spawnando = estado Running
                 crate::mods_do_usuario::api::call_game_state_enter(EstadoDoJogo::Running);
                 // NÃO dispara Session/Start/Entity/Attach aqui — agenda pra N ticks depois (bloco
                 // fora do `if`, abaixo), fora da janela de flood do save-load real.
@@ -1264,19 +1264,19 @@ pub extern "C" fn cp77_tick() {
                     "[cbs] Session/Start+Entity/Attach AGENDADOS pra tick>={target} (delay anti-crash, atual={})",
                     TICKS.load(Ordering::Relaxed)
                 );
-                // session_phase (scan TweakXL) agendado num tick DEPOIS dos 4 eventos acima —
+                // session_phase (scan de tweaks) agendado num tick DEPOIS dos 4 eventos acima —
                 // ver comentário de `SESSION_PHASE_EXTRA_DELAY_TICKS` acima.
                 let sp_target = target + SESSION_PHASE_EXTRA_DELAY_TICKS;
                 PENDING_SESSION_PHASE_AT.store(sp_target, Ordering::Relaxed);
                 crate::log_dev!(
-                    "[cbs] session_phase (scan TweakXL) AGENDADO pra tick>={sp_target} (separado dos 4 eventos, +{SESSION_PHASE_EXTRA_DELAY_TICKS} ticks)"
+                    "[cbs] session_phase (scan de tweaks) AGENDADO pra tick>={sp_target} (separado dos 4 eventos, +{SESSION_PHASE_EXTRA_DELAY_TICKS} ticks)"
                 );
             } else {
                 // Despawn/End: sem o padrão de flood conhecido (mundo saindo, não entrando) — mantém
                 // imediato, e também cancela qualquer disparo pendente de uma sessão anterior.
                 PENDING_HANDLE_EVENTS_AT.store(0, Ordering::Relaxed);
                 PENDING_SESSION_PHASE_AT.store(0, Ordering::Relaxed);
-                // red4ext-gamestates-add: Running.OnExit (type=2) — player despawnando = saindo do Running
+                // Running.OnExit (type=2) — player despawnando = saindo do Running
                 crate::mods_do_usuario::api::call_game_state_exit(EstadoDoJogo::Running);
                 // Reserva do `Session/End`: desliga na 1ª entrega do `OnWorldDetached` do jogo (`inicio::sessao_do_jogo`); sai só se nenhuma
                 // fonte entregou o `End` desta sessão.
@@ -1284,14 +1284,14 @@ pub extern "C" fn cp77_tick() {
                     let n2 = unsafe { inicio::natives::disparar_evento_de_sessao("Session/End", false, true) };
                     crate::veredito_dev!("[sessao-reserva] Session/End (despawn do jogador) → {n2} callback(s)");
                 }
-                // Codeware `#73c`: o mundo saiu, as entidades dinâmicas, as tags e os ouvintes vão junto.
+                // O mundo saiu, as entidades dinâmicas, as tags e os ouvintes vão junto.
                 unsafe { npcs::dynent_fim_de_sessao() };
                 unsafe { entidades::statent_fim_de_sessao() };
-                // `cw-controller-entity` sub-evento: "Entity/Detach" (EntityDetachHook.hpp) —
+                // Controller de entidade sub-evento: "Entity/Detach" —
                 // usa LAST_ENTITY_PTR pq player já é null aqui na transição de despawn.
                 let last = LAST_ENTITY_PTR.load(Ordering::Relaxed) as *mut c_void;
-                // Codeware `#118`: sem ouvinte, nem lê o ponteiro nem constrói o evento.
-                // Codeware `#130` 130b: com o hook do `Detach` no ar, o `Entity/Detach` do player já sai dele.
+                // Sem ouvinte, nem lê o ponteiro nem constrói o evento.
+                // Com o hook do `Detach` no ar, o `Entity/Detach` do player já sai dele.
                 if let Some(ev) = entidades::evento_do_player(present, last, entidades::HOOKS_DO_CICLO_NO_AR.load(Ordering::Relaxed), tipos_do_motor::tem_ouvinte) {
                     let nd = unsafe { entidades::disparar_evento_de_entidade(ev, last) };
                     crate::log_dev!("[cbs] {ev} (EntityLifecycleEvent real) → {nd} callback(s)");
@@ -1306,23 +1306,23 @@ pub extern "C" fn cp77_tick() {
         if pending != 0 && TICKS.load(Ordering::Relaxed) >= pending && !player.is_null() {
             PENDING_HANDLE_EVENTS_AT.store(0, Ordering::Relaxed);
             if PLAYER_PRESENT.load(Ordering::Relaxed) && present {
-                // `cw-controller-session`: "Session/Start" (nome REAL do Codeware,
+                // Controller de sessão: "Session/Start" (nome REAL,
                 // `CallbackSystem::SessionStartEventName`). `restored=true` (auto-continue SEMPRE
                 // carrega save) / `pregame=false` (player só presente pós-char-creation).
-                // Codeware `#118`: sem ouvinte, nem constrói o `GameSessionEvent`.
+                // Sem ouvinte, nem constrói o `GameSessionEvent`.
                 // Reserva do `Session/Start`: desliga na 1ª entrega do `OnGamePrepared` do jogo (`inicio::sessao_do_jogo`).
                 if inicio::sessao_do_jogo::pela_reserva(inicio::sessao_do_jogo::INICIO_DA_SESSAO, "Session/Start") {
                 let n2 = unsafe { inicio::natives::disparar_evento_de_sessao("Session/Start", false, true) };
                 crate::veredito_dev!("[sessao-reserva] Session/Start (atrasado {HANDLE_EVENTS_DELAY_TICKS} ticks) → {n2} callback(s)");
                 }
-                // `cw-entity-builder` (2026-07-24): "Entity/Assemble" (nome REAL,
-                // `EntityAssembleHook.hpp`) — achado da investigação paralela: carrega o MESMO
+                // Construtor de entidade (2026-07-24): "Entity/Assemble" (nome REAL)
+                // — achado da investigação paralela: carrega o MESMO
                 // `EntityLifecycleEvent` que "Entity/Attach" (não `EntityBuilderEvent`, esse é
                 // específico de "Entity/Extract"), então dispara pelo MESMO mecanismo já provado,
                 // zero RE nova. Ordem real do motor: Assemble roda ANTES de Attach — disparado
                 // primeiro aqui pelo mesmo motivo (um `Entity.AddComponent` feito no handler de
                 // Assemble deveria já estar no array quando o Attach nativo roda de verdade).
-                // Codeware `#118` (ativação preguiçosa, 2026-09-05): a construção do
+                // Ativação preguiçosa (2026-09-05): a construção do
                 // `EntityLifecycleEvent` é um objeto RTTI de verdade e acontecia SEMPRE — mesmo
                 // sem ninguém escutando, quando `fire_event_args` descobre isso lá dentro e volta.
                 // A pergunta barata vem antes do trabalho caro.
@@ -1330,31 +1330,31 @@ pub extern "C" fn cp77_tick() {
                     let n0 = unsafe { entidades::disparar_evento_de_entidade("Entity/Assemble", player) };
                     crate::log_dev!("[cbs] Entity/Assemble (EntityLifecycleEvent real, atrasado {HANDLE_EVENTS_DELAY_TICKS} ticks) → {n0} callback(s)");
                 }
-                // `cw-controller-entity`: "Entity/Attach" (nome REAL, `EntityAttachHook.hpp`) com
+                // Controller de entidade: "Entity/Attach" (nome REAL) com
                 // `EntityLifecycleEvent` real (`GetEntity()->ref<Entity>`, "raw"/sem dono).
-                // Codeware `#130` 130b: com o hook do `Attach` no ar, o `Entity/Attach` do player já sai dele; aqui repetiria.
+                // Com o hook do `Attach` no ar, o `Entity/Attach` do player já sai dele; aqui repetiria.
                 if let Some(ev) = entidades::evento_do_player(present, player, entidades::HOOKS_DO_CICLO_NO_AR.load(Ordering::Relaxed), tipos_do_motor::tem_ouvinte) {
                     let n3 = unsafe { entidades::disparar_evento_de_entidade(ev, player) };
                     crate::log_dev!("[cbs] {ev} (EntityLifecycleEvent real, atrasado {HANDLE_EVENTS_DELAY_TICKS} ticks) → {n3} callback(s)");
                 }
-                // Codeware `#127`: `Component/Toggle` sai só do `IComponent::Toggle` de verdade (hooks instalados pelo `RegisterCallback`), como a referência;
+                // `Component/Toggle` sai só do `IComponent::Toggle` de verdade (hooks instalados pelo `RegisterCallback`);
                 // o disparo com o 1º componente do player que vivia aqui entregava o evento sem toggle nenhum.
             }
         }
-        // session_phase (scan TweakXL/GetAllTypes) — tick-alvo PRÓPRIO, separado dos 4 eventos
+        // session_phase (scan de tweaks/GetAllTypes) — tick-alvo PRÓPRIO, separado dos 4 eventos
         // acima (ver `SESSION_PHASE_EXTRA_DELAY_TICKS`).
         let sp_pending = PENDING_SESSION_PHASE_AT.load(Ordering::Relaxed);
         if sp_pending != 0 && TICKS.load(Ordering::Relaxed) >= sp_pending {
             PENDING_SESSION_PHASE_AT.store(0, Ordering::Relaxed);
             if PLAYER_PRESENT.load(Ordering::Relaxed) && present {
-                // Pipeline TweakXL Session/Start: ScriptableTweak dispatch + YAML auto-apply dos mods.
+                // Pipeline de tweaks no Session/Start: ScriptableTweak dispatch + YAML auto-apply dos mods.
                 if let Some(reg) = unsafe { rtti::Registry::obtain() } {
                     unsafe { mods_do_usuario::pipeline::session_phase(&reg) };
                 }
             }
         }
     }
-    // `cet-lifecycle-events`: onOverlayOpen/onOverlayClose — a borda é sinalizada na thread do render
+    // Eventos de ciclo de vida: onOverlayOpen/onOverlayClose — a borda é sinalizada na thread do render
     // (overlay.rs::desenhar_terminal, via presentDrawable) e consumida AQUI (cp77_tick, dentro do executor) pra
     // disparar o fire_event com segurança (chamar a VM fora do executor é arriscado). Roda ANTES
     // do gate de player (o overlay abre/fecha tanto no menu quanto em gameplay).
@@ -1366,26 +1366,24 @@ pub extern "C" fn cp77_tick() {
         let n = unsafe { tipos_do_motor::fire_event("Overlay/Close") };
         crate::log_dev!("[cbs] Overlay/Close → {n} callback(s)");
     }
-    // `cw-controller-misc`: "Resource/Load" — edge-triggered (MESMO padrão seguro de Player/
+    // Controller de recurso: "Resource/Load" — edge-triggered (MESMO padrão seguro de Player/
     // Spawned/Overlay acima, roda ANTES do gate de player pq streaming de recurso acontece desde
     // o boot). O hook `resource.link` (já instalado, zero-crash provado) marca `WATCH_RES_SEEN`
     // quando o path armado por `watchres <path>` é de fato construído pelo jogo.
     if crate::arquivos_do_jogo::WATCH_RES_SEEN.swap(false, Ordering::Relaxed) {
         let h = crate::arquivos_do_jogo::WATCH_RES_HASH.load(Ordering::Relaxed);
-        // Codeware `#118`: sem ouvinte, nem constrói o `ResourceEvent`.
+        // Sem ouvinte, nem constrói o `ResourceEvent`.
         if tipos_do_motor::tem_ouvinte("Resource/Load") {
         let n = unsafe { arquivos_do_jogo::disparar_resource_load_do_caminho(h) };
         crate::log_dev!("[cbs] Resource/Load (ResourceEvent real, path_hash={h:#018x}) → {n} callback(s)");
         }
     }
-    // ArchiveXL `#47` (`CustomizationExtension`, 2026-08-14): drena os 3 edge flags marcados por
+    // Customização (2026-08-14): drena os 3 edge flags marcados por
     // `BwmsCustomizationEdge` (chamado sincronamente pelos wraps em `characterCreationBodyMorphMenu`)
     // — MESMO padrão seguro de "Resource/Load" acima (edge setado por native chamado por bytecode
     // → dispatch de verdade só aqui, fora de qualquer nesting de call_func).
     unsafe { corpo_e_rosto::drain_customization_edges() };
-    // ArchiveXL `#20` 20c-1: campos do RTTI pros hooks de item do montador, antes da carga (`~/.bwms-hook-a20c-teste`).
-    #[cfg(feature = "devtools")] crate::selftest::a20c_campos_cedo();
-    // Codeware `#129`: `Session/Ready` dos spawns do jogador contados pelo hook, no mundo do menu também (antes do gate de player).
+    // `Session/Ready` dos spawns do jogador contados pelo hook, no mundo do menu também (antes do gate de player).
     unsafe { inicio::natives::session_ready_tick() };
     // Estado do VR pro painel: o transporte carimba um arquivo quando um headset está em sessão.
     // A cada ~32 ticks (~1 s) — é o que a aba precisa pra acender e apagar sozinha.
@@ -1401,12 +1399,12 @@ pub extern "C" fn cp77_tick() {
             crate::vr::cabeca::atualizar();
         }
     }
-    // Codeware #153: save novo na pasta → grava os specs das entidades persistentes (fora do save).
+    // Save novo na pasta → grava os specs das entidades persistentes (fora do save).
     crate::salvamento::entidades_persistentes::vigia_de_saves_tick();
     crate::salvamento::entidades_persistentes::fila_tick();
     crate::salvamento::entidades_persistentes::sessao_tick();
     #[cfg(feature = "devtools")] crate::salvamento::entidades_persistentes::teste_tick();
-    // RED4ext #97: o vigia recompila os `.reds` do modder (ligado por red4ext/bwms-recarga-de-scripts) e a troca de corpo aplica a quente —
+    // O vigia recompila os `.reds` do modder (ligado por red4ext/bwms-recarga-de-scripts) e a troca de corpo aplica a quente —
     // antes do gate de player, porque nenhum dos dois lê o jogador.
     crate::scripts::carregador::vigia_tick();
     crate::scripts::carregador::aplicar_tick();
@@ -1423,10 +1421,10 @@ pub extern "C" fn cp77_tick() {
     }
     // runtime vivo (player/tx ok): pulsa o heartbeat que o badge do overlay lê.
     TICKS.fetch_add(1, Ordering::Relaxed);
-    // Codeware `#18` `ResourceToken.RegisterCallback` (2026-09-11): avisa os ouvintes dos tokens que terminaram. Sem vigia registrado
+    // `ResourceToken.RegisterCallback` (2026-09-11): avisa os ouvintes dos tokens que terminaram. Sem vigia registrado
     // (registro só vem de script em gameplay) não chama nada — longe da janela do load.
     unsafe { crate::arquivos_do_jogo::vigiar_tokens() };
-    // `cet-thirdparty-mod-api`: chama a native registrada por um PLUGIN de 3o ("BwmsPluginOnUpdate",
+    // API para plugin de terceiro: chama a native registrada por um PLUGIN de 3o ("BwmsPluginOnUpdate",
     // se existir) A CADA TICK — prova lifecycle onUpdate contínuo pós-boot via BwmsApi (não só a
     // chamada 1x de bwms_plugin_main). MESMA via de resolução/chamada do comando `callg`
     // (register::get_function + rtti::call_func) — nenhum offset/ABI novo.
@@ -1516,12 +1514,12 @@ pub extern "C" fn cp77_tick() {
             }
         }
     }
-    // `axl-puppet-state-apply` (2026-08-02, iteração 2): dispara a recuperação ATRASADA do
+    // Estado do puppet (2026-08-02, iteração 2): dispara a recuperação ATRASADA do
     // soft-lock do espelho, se `BwmsPuppetStateArmRecovery` armou uma (ver register.rs). Roda
     // todo tick, é um no-op de load quando nada está pendente (checa 1 AtomicU64).
     #[cfg(feature = "devtools")]
     unsafe { diagnostico::puppetstate_recovery_tick(reg) };
-    // `axl-garment-apply` (2026-08-02): teste da hipótese do agente de RE do crash de `equiponce`
+    // Garment (2026-08-02): teste da hipótese do agente de RE do crash de `equiponce`
     // (`EquipmentSystem::QueueRequest` crasha porque `CClassFunction::GetInvokable()` retorna null —
     // possível dependência de contexto/thread, não de cache-warmup). Em vez de disparar na hora que o
     // comando chega (thread arbitrária, pode ser reentrante numa chamada nativa qualquer do motor),
@@ -1559,22 +1557,21 @@ pub extern "C" fn cp77_tick() {
             }
         }
     }
-    // `tweakxl-hot-reload`: poll de mtime a cada ~10s; re-aplica yamls se algum mudou.
+    // Recarga a quente dos tweaks: poll de mtime a cada ~10s; re-aplica yamls se algum mudou.
     if !in_crash_window {
         unsafe { mods_do_usuario::pipeline::hot_reload_tick() };
     }
-    // Codeware `#142` (`OpenWorldTracker`): aplica no journal os PoIs que chegaram na fase 0. Fica fora do `in_crash_window`, que
+    // `OpenWorldTracker`: aplica no journal os PoIs que chegaram na fase 0. Fica fora do `in_crash_window`, que
     // depois do 1º player fica ligado pra sempre; a função só age em gameplay real e com fila cheia (por evento, não periódica).
     unsafe { crate::missoes_e_mapa::aplicar_openworld_concluidos(reg, player) };
-    // TweakXL `ScriptableTweak.OnApply`: uma vez por processo, no 1º tick em que dá.
+    // `ScriptableTweak.OnApply`: uma vez por processo, no 1º tick em que dá.
     // - No menu (o caminho normal): o load do save ainda não começou (nenhum phase 5), o TweakDB está carregado (o mesmo critério dos
-    //   registros de sufixo do A#29, que gravam no menu e valem no gameplay) e os arquivos de tweak da sessão do menu já foram aplicados.
-    //   O TweakXL de referência chama no `TweakDB_TryLoad`, antes de qualquer save; o guarda-roupa do Equipment-EX aberto logo depois do
-    //   load lê o `placementSlots` que o `OnApply` grava.
+    //   registros de sufixo, que gravam no menu e valem no gameplay) e os arquivos de tweak da sessão do menu já foram aplicados.
+    //   Um guarda-roupa de mod aberto logo depois do load lê o `placementSlots` que o `OnApply` grava.
     // - Em gameplay (reserva, o load começou antes disso): 30 s depois da última leitura de phase 5, fora da janela do load.
     // A queda de 2026-09-11 (`+0x1afd4`, 5/11 com o `OnApply` no menu) seguiu com ele em gameplay (boot 42, 2/4 até o boot 51) e acabou com a
     // AL-2: era a subclasse reds estourando a forja de 0x40 B (HISTORICO 2026-09-12 e 2026-09-25); o despacho confere a AL-2 antes de rodar.
-    // Depois dele, o `OnApply` que a recarga do TweakXL pede sai daqui, com as threads de arquivo terminadas.
+    // Depois dele, o `OnApply` que a recarga dos tweaks pede sai daqui, com as threads de arquivo terminadas.
     {
         static SCRIPTABLE_TWEAKS_DISPARADOS: AtomicBool = AtomicBool::new(false);
         // No dev, um boot de diagnóstico pode atrasar o dispatch pela chave `onapply_atraso_s` do `~/.bwms-modconfig.txt` (lida uma vez), pra
@@ -1608,7 +1605,7 @@ pub extern "C" fn cp77_tick() {
         if no_menu || em_gameplay {
             SCRIPTABLE_TWEAKS_DISPARADOS.store(true, Ordering::Relaxed);
             crate::veredito_dev!(
-                "[tweakxl] VEREDITO-ONAPPLY-MOMENTO {}: phase 5 visto {}, gameplay real {}, t={} s do boot, TweakDB {:?}; antes-do-load={} = {}",
+                "[tweaks] VEREDITO-ONAPPLY-MOMENTO {}: phase 5 visto {}, gameplay real {}, t={} s do boot, TweakDB {:?}; antes-do-load={} = {}",
                 if no_menu { "no menu, antes do load do save" } else { "em gameplay (reserva: o load começou antes)" },
                 inicio::boot::PHASE5_AT.get().is_some(),
                 inicio::boot::gameplay_real(),
@@ -1633,13 +1630,13 @@ pub extern "C" fn cp77_tick() {
                 let agora = unsafe { crate::tweakdb::singleton() }.map_or(0, |t| t as usize);
                 let mesmo = do_onapply != 0 && do_onapply == agora;
                 crate::veredito_dev!(
-                    "[tweakxl] VEREDITO-ONAPPLY-TWEAKDB TweakDB do OnApply {do_onapply:#x}, do gameplay {agora:#x}; mesmo-tweakdb={mesmo} = {}",
+                    "[tweaks] VEREDITO-ONAPPLY-TWEAKDB TweakDB do OnApply {do_onapply:#x}, do gameplay {agora:#x}; mesmo-tweakdb={mesmo} = {}",
                     mesmo as u8
                 );
             }
         }
     }
-    // ArchiveXL `#44` 7e-2: journals de mod da tabela `bwms-journal.txt` — carga e mescla na árvore viva com o load assentado (o mesmo teto do
+    // Journals de mod da tabela `bwms-journal.txt` — carga e mescla na árvore viva com o load assentado (o mesmo teto do
     // `OnApply`) e nunca com o executor aninhado; sem tabela, a função sai na 1ª checagem.
     let journal_assentado = !inicio::boot::exec_nested()
         && inicio::boot::carga_do_save_terminou()
@@ -1647,9 +1644,7 @@ pub extern "C" fn cp77_tick() {
     if journal_assentado {
         unsafe { mundo::journal_mods_tick(reg, player) };
     }
-    #[cfg(feature = "devtools")] crate::arquivos_do_jogo::psd_sonda_tick();
-    #[cfg(feature = "devtools")] crate::arquivos_do_jogo::psd_teste_tick();
-    // ArchiveXL `#29`: registros de sufixo do `PuppetStateSystem` (sempre, 1º tick com TweakDB carregado).
+    // Registros de sufixo do `PuppetStateSystem` (sempre, 1º tick com TweakDB carregado).
     crate::aparencia::registros_de_sufixo_tick();
     #[cfg(feature = "devtools")] crate::aparencia::do_record::teste_tick();
     #[cfg(feature = "devtools")] crate::jogo::motor::teste_tick();
@@ -1661,35 +1656,36 @@ pub extern "C" fn cp77_tick() {
     #[cfg(feature = "devtools")] crate::tweakdb::teste::tick_buffer();
     #[cfg(feature = "devtools")] crate::tweakdb::teste::tick_padroes();
     #[cfg(feature = "devtools")] crate::tweakdb::teste::tick_remover();
+    #[cfg(feature = "devtools")] crate::tweakdb::teste::tick_updaterecord();
     #[cfg(feature = "devtools")] crate::mods_do_usuario::log_de_mod::tick_teste();
     crate::localizacao::tick();
     #[cfg(feature = "devtools")] crate::localizacao::teste::tick();
     #[cfg(feature = "devtools")] crate::localizacao::teste::tick_mod();
     #[cfg(feature = "devtools")] crate::localizacao::teste::tick_xl_nativo();
-    // Codeware `#122`: veredito da sonda do `ReadSoundBanksJson` (`~/.bwms-hook-c122som-teste`).
+    // Veredito da sonda do `ReadSoundBanksJson` (`~/.bwms-hook-c122som-teste`).
     #[cfg(feature = "devtools")] crate::som::c122som_teste_tick();
-    // Codeware `#122` (áudio): reenvio dos soundbanks pedido por um `RegisterCallback` de `Resource/Load` (produção).
+    // Áudio: reenvio dos soundbanks pedido por um `RegisterCallback` de `Resource/Load` (produção).
     crate::som::bancos_de_som_tick();
-    // Codeware `#176`: diagnóstico da entrega ligada no boot (`~/.bwms-hook-c176diag-teste`).
+    // Diagnóstico da entrega ligada no boot (`~/.bwms-hook-c176diag-teste`).
     #[cfg(feature = "devtools")] crate::interface::tecla_no_widget::c176diag_teste_tick();
-    // Codeware `#73c`: eventos do `DynamicEntitySystem` enfileirados (criação, remoção e os do broadcaster do motor) pros ouvintes de script.
+    // Eventos do `DynamicEntitySystem` enfileirados (criação, remoção e os do broadcaster do motor) pros ouvintes de script.
     unsafe { crate::npcs::dynent_vigiar_mortes() };
     unsafe { crate::npcs::dynent_despachar() };
-    // Codeware `#75`: entidades estáticas descartadas que chegaram ao status 7 saem do registry e têm o handle solto.
+    // Entidades estáticas descartadas que chegaram ao status 7 saem do registry e têm o handle solto.
     unsafe { crate::entidades::statent_tick() };
-    // ArchiveXL `#51` 51f-2: carga do `compiledData` das definições dos `.app` de patch.
+    // Carga do `compiledData` das definições dos `.app` de patch.
     crate::aparencia::cargas_de_definicao_tick();
-    // Telas do Equipment-EX e do Virtual Atelier (comando `telasmod`): nada sem pedido; daqui sai o agendamento de cada passo no DelaySystem
+    // Telas de mods de terceiro (comando `telasmod`): nada sem pedido; daqui sai o agendamento de cada passo no DelaySystem
     // e a leitura do retorno, e o passo roda no `Call`, chamado pelo motor (a thread do `Call` é [UNCONFIRMED]).
     #[cfg(feature = "devtools")] crate::interface::teste_telas_de_mod::tick();
     // Testes in-game do dev, depois dos ticks de produto do frame; o 17b recebe a condição dos journals acima.
     #[cfg(feature = "devtools")] unsafe { crate::selftest::tick(journal_assentado) };
     // breadth Reflection: probe de CProperty num objeto VIVO (gated ~/.bwms-reflection-test), 1x.
     #[cfg(feature = "devtools")] unsafe { diagnostico::reflection_live_once(player) };
-    // breadth RED4ext/CET: valida trocar_slot_da_vtable/unhook na vtable real do player (gated ~/.bwms-vtable-test), 1x.
+    // breadth de ganchos: valida trocar_slot_da_vtable/unhook na vtable real do player (gated ~/.bwms-vtable-test), 1x.
     #[cfg(feature = "devtools")] unsafe { ganchos::testar_troca_de_slot_uma_vez(player) };
     // Entrada no jogo (produto): uma vez por player de gameplay real, o disparador `BwmsAoEntrarNoJogo(game)` dos scripts, que cria o
-    // PuppetStateHandler do ArchiveXL #29 e devolve o God Mode da config externa. A GameInstance vai por valor, pela receita do
+    // `PuppetStateHandler` e devolve o God Mode da config externa. A GameInstance vai por valor, pela receita do
     // `PlayerPuppet.GetGame` (a do `GetGameInstance()` de dentro de um `call_func` cru volta morta). Sem a função no bundle, marca e não
     // procura de novo a cada tick.
     {
@@ -1830,7 +1826,7 @@ pub extern "C" fn cp77_tick() {
             }
         }
     }
-    // red4ext-gamestates-add: Running.OnUpdate (type=2) a cada 180 ticks de gameplay, com o app (RED4ext `#479`). Fora do bloco
+    // Running.OnUpdate (type=2) a cada 180 ticks de gameplay, com o app. Fora do bloco
     // `!in_crash_window` abaixo, que liga na primeira presença do player e não desliga: lá dentro os plugins nunca recebiam o OnUpdate em
     // gameplay. O callback é nativo, sem `call_func` periódico (o que a janela suprime).
     if TICKS.load(Ordering::Relaxed) % 180 == 90 && crate::inicio::boot::gameplay_real() {
@@ -1900,18 +1896,18 @@ pub extern "C" fn cp77_tick() {
         }
     }
     // CallbackSystem RawInput controller: emite "Input/Key" com um `ref<KeyInputEvent>` REAL
-    // pra CADA tecla capturada no sendEvent durante gameplay (2026-07-18, `cw-rawinput-realname`
+    // pra CADA tecla capturada no sendEvent durante gameplay (2026-07-18, input cru com nome real
     // — antes era o keycode cru como Int32; agora constrói+despacha o objeto real via
-    // `Arg::Handle`, mesmo nome de evento REAL do Codeware, `Input/Key`).
-    // CET `VKBindings` (2026-08-11): metade que faltava — emite "Input/KeyUp" com o MESMO
+    // `Arg::Handle`, mesmo nome de evento REAL, `Input/Key`).
+    // Tecla solta (2026-08-11): metade que faltava — emite "Input/KeyUp" com o MESMO
     // `ref<KeyInputEvent>` real (reuso puro do construtor já provado), pra CADA tecla solta
     // capturada no sendEvent durante gameplay. Nome de evento distinto (não reaproveita
     // "Input/Key") segue o padrão já estabelecido no projeto de sinalizar fases por NOME
     // (`Session/Start`/`Session/End`, `Overlay/Open`/`Overlay/Close`) em vez de um campo
     // extra no evento.
-    // Codeware `#118`: `teclas` já saiu das filas no topo do tick, com ou sem ouvinte; `despachar` só constrói um
+    // `teclas` já saiu das filas no topo do tick, com ou sem ouvinte; `despachar` só constrói um
     // `KeyInputEvent` por tecla para o evento que tem ouvinte, e o resto do lote cai no drop.
-    // Codeware `#120` parte 3a: com o hook do `ProcessInputEvents`, a tecla vem da fila do motor e o caminho do AppKit fica mudo (senão
+    // Com o hook do `ProcessInputEvents`, a tecla vem da fila do motor e o caminho do AppKit fica mudo (senão
     // cada tecla dispararia 2x); as teclas do AppKit deste tick caem no drop.
     let rawinput_motor = crate::selftest::rawinput_hook_ativo();
     if rawinput_motor {
@@ -1973,12 +1969,12 @@ fn parse_cmd_arg(s: &str) -> rtti::Arg {
     }
 }
 
-/// Codeware `#16`/`#198` (`PENDENCIAS-UNIFICADAS.md`) — `ResourceDepot.ResourceExists(path)`,
-/// a API redscript-facing que um mod chamaria via `import Codeware.Depot.*`. Composição de 2
+/// `ResourceDepot.ResourceExists(path)` (`PENDENCIAS-UNIFICADAS.md`),
+/// a API redscript-facing que um mod chamaria pelo import do módulo de depósito. Composição de 2
 /// peças JÁ PROVADAS, zero RE nova: `PATHB_DEPOT` (o depot real, capturado 1x em
 /// `InitializeArchives`, sempre instalado desde o Facade — mesma fonte que `RegisterArchive`
 /// já usa) + `ResourceDepot::CheckResource@0x10151aa2c` (achado 2026-07-16, PROVADO via
-/// `axl-copy-makeexist`: `bool(depot*, ResourcePath hash)`). Chamada DIRETA (sem hook/replace —
+/// redirect de path inexistente; `bool(depot*, ResourcePath hash)`). Chamada DIRETA (sem hook/replace —
 /// só invoca o endereço como função pura), zero mutação, zero side-effect.
 pub unsafe fn resource_exists(path: &str) -> bool {
     let depot = PATHB_DEPOT.load(Ordering::Relaxed);
@@ -1998,7 +1994,7 @@ pub unsafe fn resource_exists(path: &str) -> bool {
     r
 }
 
-/// `ResourceDepot::ResourceExists` pelo hash do caminho, sem log (roda em thread de job no `OnResolveDefinition` do ArchiveXL `#20` 20e). `None` com o
+/// `ResourceDepot::ResourceExists` pelo hash do caminho, sem log (roda em thread de job no `OnResolveDefinition`). `None` com o
 /// depot ainda não capturado ou o `CheckResource` ilegível.
 pub(crate) unsafe fn resource_exists_hash(hash: u64) -> Option<bool> {
     let depot = PATHB_DEPOT.load(Ordering::Relaxed);
@@ -2100,7 +2096,7 @@ mod inksystem_shape_tests {
         let (mut storage, base) = build_valid_candidate();
         unsafe {
             // instance != 0 mas refCount == 0 — nunca acontece num WeakHandle/SharedPtrBase real
-            // (todo construtor seta os 2 juntos, `RED4ext.SDK/Memory/SharedPtr.hpp`).
+            // (todo construtor seta os 2 juntos).
             write_unaligned((storage.as_mut_ptr() as *mut u8).add(0x2E8 + 8) as *mut u64, 0);
         }
         assert!(
@@ -2173,45 +2169,45 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
     // Eco do que foi digitado, ANTES de qualquer rota. É o que transforma "a tela não mostra nada" em
     // "o mod recebeu o comando": vale pra todos, sem precisar tocar em cada um.
     crate::resposta!("> {cmd}");
-    // `cetshot <caminho>`: screenshot do quadro do jogo pelo motor (prova visual de lane, sem captura de tela do sistema).
+    // `foto <caminho>`: screenshot do quadro do jogo pelo motor (prova visual de lane, sem captura de tela do sistema).
     #[cfg(all(feature = "devtools", feature = "lua"))]
-    if let Some(caminho) = cmd.strip_prefix("cetshot ") {
+    if let Some(caminho) = cmd.strip_prefix("foto ") {
         let ok = unsafe { crate::jogo::motor::screenshot(caminho.trim(), crate::jogo::motor::MODO_NORMAL) };
-        crate::veredito_dev!("[cet] cetshot {}: pedido={ok}", caminho.trim());
+        crate::veredito_dev!("[lua] foto {}: pedido={ok}", caminho.trim());
         return;
     }
-    // `cetobserve <classe> <método>`: `Observe` de prova num método que o jogo chama sozinho.
+    // `luaobserva <classe> <método>`: `Observe` de prova num método que o jogo chama sozinho.
     #[cfg(all(feature = "devtools", feature = "lua"))]
-    if let Some(args) = cmd.strip_prefix("cetobserve ") {
+    if let Some(args) = cmd.strip_prefix("luaobserva ") {
         let mut p = args.split_whitespace();
         let ok = match (p.next(), p.next()) {
-            (Some(c), Some(m)) => unsafe { crate::cet::observar_de_prova(c, m) },
+            (Some(c), Some(m)) => unsafe { crate::mods_lua::observar_de_prova(c, m) },
             _ => false,
         };
-        crate::veredito_dev!("[cet] cetobserve {args}: registrado={ok}");
+        crate::veredito_dev!("[lua] luaobserva {args}: registrado={ok}");
         return;
     }
-    // `cetdraw`: quadros com o `onDraw` dos mods CET rodado e pulado (trava do Lua ocupada).
+    // `luadraw`: quadros com o `onDraw` dos mods Lua rodado e pulado (trava do Lua ocupada).
     #[cfg(all(feature = "devtools", feature = "lua"))]
-    if cmd == "cetdraw" {
-        let [r, p] = &crate::cet::QUADROS_DO_ONDRAW;
-        crate::veredito_dev!("[cet] onDraw: rodou {} quadro(s), pulou {}", r.load(Ordering::Relaxed), p.load(Ordering::Relaxed));
+    if cmd == "luadraw" {
+        let [r, p] = &crate::mods_lua::QUADROS_DO_ONDRAW;
+        crate::veredito_dev!("[lua] onDraw: rodou {} quadro(s), pulou {}", r.load(Ordering::Relaxed), p.load(Ordering::Relaxed));
         return;
     }
-    // `cetrun <arquivo>`: roda um `.lua` de diagnóstico no estado dos mods CET, com o V em cena. O arquivo fica fora do repositório.
+    // `luarun <arquivo>`: roda um `.lua` de diagnóstico no estado dos mods Lua, com o V em cena. O arquivo fica fora do repositório.
     #[cfg(all(feature = "devtools", feature = "lua"))]
-    if let Some(arquivo) = cmd.strip_prefix("cetrun ") {
+    if let Some(arquivo) = cmd.strip_prefix("luarun ") {
         match std::fs::read_to_string(arquivo.trim()) {
-            Ok(codigo) => unsafe { crate::cet::run_code(&codigo) },
-            Err(e) => crate::veredito_dev!("[cet] cetrun {}: {e}", arquivo.trim()),
+            Ok(codigo) => unsafe { crate::mods_lua::run_code(&codigo) },
+            Err(e) => crate::veredito_dev!("[lua] luarun {}: {e}", arquivo.trim()),
         }
         return;
     }
-    // `cethotkey <id>`: o `registerHotkey` de um mod CET pelo id, sem tecla (prova de lane).
+    // `luatecla <id>`: o `registerHotkey` de um mod Lua pelo id, sem tecla (prova de lane).
     #[cfg(all(feature = "devtools", feature = "lua"))]
-    if let Some(id) = cmd.strip_prefix("cethotkey ") {
-        let ok = unsafe { crate::cet::disparar_hotkey(id.trim()) };
-        crate::veredito_dev!("[cet] cethotkey {}: disparou={ok}", id.trim());
+    if let Some(id) = cmd.strip_prefix("luatecla ") {
+        let ok = unsafe { crate::mods_lua::disparar_hotkey(id.trim()) };
+        crate::veredito_dev!("[lua] luatecla {}: disparou={ok}", id.trim());
         return;
     }
     // `clear` (ou `cls`): limpa o scrollback do console (trunca o log) — estilo terminal.
@@ -2260,7 +2256,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // `cet-hooks-shippable` — os 3 modos (Observe/Override/Suppress) num método REAL do jogo
+    // Hooks de produção — os 3 modos (Observe/Override/Suppress) num método REAL do jogo
     // (`HasGodMode`, read-only), caminho NÃO-Lua. Override+Suppress já provados via `ovcallreal`
     // (2026-07-13); aqui fecha a perna OBSERVE que faltava (`RUST_OBS_CNAME`, inicio/boot.rs): o
     // callback dispara (log + contador) e a original AINDA roda (sem suprimir).
@@ -2306,7 +2302,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         crate::diagnostico::aba_cheats_armar();
         return;
     }
-    // `cet-lifecycle-events`: força o toggle do overlay (sem HID) — o cp77_tick do próximo tick
+    // Eventos de ciclo de vida: força o toggle do overlay (sem HID) — o cp77_tick do próximo tick
     // dispara onOverlayOpen/Close pela borda real (mesmo caminho que o backtick real usa).
     if cmd == "overlaytoggle" {
         let now = !terminal::overlay::is_shown();
@@ -2326,7 +2322,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         terminal::overlay::pedir_onde(rotulo);
         return;
     }
-    // `cw-player-scheduling-vehicle`: chama a extensão REAL do Codeware `DelaySystem.DelayEvent`.
+    // Player, agendamento e veículo: chama a extensão REAL `DelaySystem.DelayEvent`.
     #[cfg(feature = "devtools")]
     if cmd == "delaytest" {
         unsafe {
@@ -2566,8 +2562,8 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // enumcomp: axl-fullbody-torso (cont.41) — enumera DIRETO os componentes reais do player
-    // (Entity+0xA0, offset ground-truth já usado em cw-entity-builder) e conta quantos são
+    // enumcomp: corpo inteiro/torso (cont.41) — enumera DIRETO os componentes reais do player
+    // (Entity+0xA0, offset ground-truth já usado no construtor de entidade) e conta quantos são
     // SkinnedMeshComponent, logando enabled/res_ptr de cada um. Observe-only, zero mutação.
     #[cfg(feature = "devtools")]
     if cmd == "enumcomp" {
@@ -2576,7 +2572,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // toggle <cname>: axl-fullbody-torso (cont.41) — ACHADO: 'torso'/'legs'/'shoes' existem como
+    // toggle <cname>: corpo inteiro/torso (cont.41) — ACHADO: 'torso'/'legs'/'shoes' existem como
     // entSkinnedMeshComponent reais do player, mesh carregado (res_ptr válido), mas enabled=0.
     // Este comando escreve enabled=1 no componente com o CName pedido (offset +0x8b, já usado
     // com segurança em IComponent::Toggle desde 2026-07-28). ESCRITA REAL — não gated por
@@ -2589,7 +2585,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // togglerebuild <cname>: axl-fullbody-torso (cont.41) — `toggle` sozinho persiste mas não
+    // togglerebuild <cname>: corpo inteiro/torso (cont.41) — `toggle` sozinho persiste mas não
     // muda o visual (confirmado por screenshot); esta variante TAMBÉM chama o método virtual
     // "rebuild render proxy" (vtable+0x288, já observado seguro) na mesma instância, testando
     // se a reconstrução do proxy é o passo que falta pro mesh aparecer.
@@ -2601,7 +2597,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // togglefull <cname>: axl-fullbody-torso (cont.42) — RE offline achou 2 leitores reais de
+    // togglefull <cname>: corpo inteiro/torso (cont.42) — RE offline achou 2 leitores reais de
     // `enabled` (vtable+0x2d0/0x2d8, não o wrapper já testado); notificação de render exige
     // +0x24a==1 E +0x253 bit2, ambos falsos no torso por padrão. Seta os 3 campos + rebuild.
     #[cfg(feature = "devtools")]
@@ -2612,7 +2608,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // dissolve <cname>: axl-fullbody-torso (cont.42) — `+0x24a` é enum de estado (0/1/2), não
+    // dissolve <cname>: corpo inteiro/torso (cont.42) — `+0x24a` é enum de estado (0/1/2), não
     // bool; simula a progressão 1→dispatch→2→dispatch que o sistema de dissolve/fade faria.
     #[cfg(feature = "devtools")]
     if let Some(rest) = cmd.strip_prefix("dissolve ") {
@@ -2622,7 +2618,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // forceopacity <cname>: axl-fullbody-torso (cont.42, 4ª rodada) — bypassa o gate de dissolve
+    // forceopacity <cname>: corpo inteiro/torso (cont.42, 4ª rodada) — bypassa o gate de dissolve
     // inteiro: lê o proxy real (componente+0x1d8), força os 2 bits de +0x23 + SetOpacity flag
     // em +0x21, chama a função de commit (`0x104fe4710`) DIRETO.
     #[cfg(feature = "devtools")]
@@ -2633,7 +2629,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // dumpcomp <cname>: axl-fullbody-torso (cont.41) — dump hex bruto (0x300 bytes) do componente
+    // dumpcomp <cname>: corpo inteiro/torso (cont.41) — dump hex bruto (0x300 bytes) do componente
     // achado por CName, pra comparação offline contra um componente sabidamente visível (ex.
     // pescoço FPP) e achar o offset real do gate de visibilidade (chunkMask ou equivalente).
     #[cfg(feature = "devtools")]
@@ -2710,9 +2706,9 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // axl-29-equipcyber (2026-08-14): mesmo padrão de equiprawv7, mas equipa `Items.MantisBlades`
-    // (cyberware de braço REAL) em vez da T-shirt — teste DECISIVO do item ArchiveXL #29
-    // (`ComputePuppetArmsState`). Precisa de `give Items.MantisBlades` antes (posse real).
+    // Item 29, equipcyber (2026-08-14): mesmo padrão de equiprawv7, mas equipa `Items.MantisBlades`
+    // (cyberware de braço REAL) em vez da T-shirt — teste DECISIVO do
+    // `ComputePuppetArmsState`. Precisa de `give Items.MantisBlades` antes (posse real).
     #[cfg(feature = "devtools")]
     if cmd == "equipcyber" {
         unsafe {
@@ -2748,8 +2744,8 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // axl-29-drawcyber (2026-08-18): teste DECISIVO #2 do item ArchiveXL #29 — achado honesto de
-    // 2026-08-14 (proofs/2026-08-14-archivexl-29-armsdetect-DECISIVO-tentado-INCONCLUSIVO.log)
+    // Item 29, drawcyber (2026-08-18): teste DECISIVO #2 do estado dos braços — achado honesto de
+    // 2026-08-14 (prova da detecção dos braços, inconclusiva)
     // confirmou que `equipcyber` move o item pra posse real (RightArm) mas não popula
     // `AttachmentSlots.WeaponRight` (a arma precisa estar DESEMBAINHADA/em uso). Mesmo padrão de
     // `equipcyber`, mas chama `BwmsDrawCyberwareAndCheckArms` (bwms-tppcam.reds) — despacha
@@ -2792,7 +2788,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // axl-transmog-apply (2026-08-05): mesmo padrão de equiprawv7, com BwmsVisualEquipViaQuery
+    // Transmog (2026-08-05): mesmo padrão de equiprawv7, com BwmsVisualEquipViaQuery
     // (EquipVisualsRequest em vez de EquipRequest) — testa se ChangeAppearanceToItem dispara sem
     // precisar da UI de Wardrobe/espelho. O fix de GetInvokable já é global pra QUALQUER request
     // que passe por QueueRequest, então não precisa reinstalar se equiprawv7 já rodou nesta boot,
@@ -2854,7 +2850,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
                             let ps_ptr = usize::from_le_bytes(h[..8].try_into().unwrap()) as *mut c_void;
                             crate::log_dev!("[cw-player] GameInstance.GetPlayerSystem(game) -> {ps_ptr:p}");
                             if !ps_ptr.is_null() {
-                                // Codeware `#45` (2026-08-11, achado do agente de pesquisa): "PlayerSystem"
+                                // 2026-08-11, achado do agente de pesquisa: "PlayerSystem"
                                 // é só um ALIAS script-time que o `scc` resolve em compile-time — o CNAME
                                 // REAL na RTTI é `gamePlayerSystem` (mesma categoria de divergência já
                                 // documentada #81-85, script-name vs native-name). Bug latente desde que
@@ -2901,7 +2897,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // `updateregistrar` (2026-08-11, mesma sessão, RED4ext.SDK #461) — read-only: reporta o
+    // `updateregistrar` (2026-08-11, mesma sessão) — read-only: reporta o
     // ponteiro `UpdateRegistrar*` capturado pelo probe `update_registrar_group_probe` (se já
     // armado via `~/.bwms-updateregistrar-probe` e se o motor já chamou `RegisterUpdate` pra
     // algum sistema vanilla, o que acontece naturalmente durante o boot). Zero mutação.
@@ -2915,7 +2911,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // `registerupdate` (2026-08-11, mesma sessão, RED4ext.SDK #461) — a ÚLTIMA peça: constrói o
+    // `registerupdate` (2026-08-11, mesma sessão) — a ÚLTIMA peça: constrói o
     // `Callback<>` real (ABI mapeada) e chama `RegisterUpdate` no `UpdateRegistrar*` já capturado,
     // registrando `bwms_update_tick_callback` (função MÍNIMA, só loga, nunca lê FrameInfo/JobQueue)
     // pra confirmar que a chamada de registro NÃO crasha e que o callback DISPARA de verdade nos
@@ -2937,7 +2933,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // `sysbymap <classname>` (2026-08-11, sessão nova, RED4ext.SDK #472) — via SEGURA (zero
+    // `sysbymap <classname>` (2026-08-11, sessão nova) — via SEGURA (zero
     // execução de código do motor): lê `systemMap` @ `GameInstance+0x08` DIRETO em vez de chamar
     // slot de vtable (mesmo campo-de-objeto, imune ao shift Itanium que já causou o crash da
     // tentativa anterior por vtable-call). Cross-valida contra `GetPlayerSystem` (native já
@@ -3047,7 +3043,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // axl-garment-apply / axl-transmog-apply (2026-08-03, /goal): achado ao vivo — `equipctxonce` E
+    // Garment/transmog (2026-08-03, /goal): achado ao vivo — `equipctxonce` E
     // `equiprawonce` (que chamam um native de 2 params `handle` de DENTRO do bytecode de
     // `BwmsForceEquipCtx`/`Raw`) crasham no MESMO 0x101099d98 de sempre, ANTES de qualquer log nosso
     // aparecer (nem o Print imediatamente antes, nem o log de entrada do trampolim Rust). Isso aponta
@@ -3097,10 +3093,10 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // axl-garment-apply/axl-transmog-apply (2026-08-03, /goal): 4ª via — 1 SÓ call_func top-level
+    // Garment/transmog (2026-08-03, /goal): 4ª via — 1 SÓ call_func top-level
     // (Void), 2 natives aninhadas de 1-handle-arg cada capturam es/req via atomic; Rust lê depois e
     // faz o transmute pro endereço cru. Evita os 2 bugs diagnosticados nesta madrugada (cont.17/19).
-    // axl-garment-apply/axl-transmog-apply (2026-08-03, /goal): instala a sonda naked observe-only
+    // Garment/transmog (2026-08-03, /goal): instala a sonda naked observe-only
     // em 0x102445ee0 (dentro de QueueRequest, ANTES do dispatch por tabela runtime). Rodar ESTE
     // comando ANTES de `equiprawv4` — loga x0/x1/x2/x3/x8 + buf16 antes/depois, sem mudar
     // comportamento nenhum (a chamada real acontece igual).
@@ -3146,7 +3142,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // axl-garment-apply/axl-transmog-apply (2026-08-03, /goal): 5ª via — achado decisivo (cont.21):
+    // Garment/transmog (2026-08-03, /goal): 5ª via — achado decisivo (cont.21):
     // o crash é especificamente `new T()` via `call_func` (bytecode) quando não é uma das 1ªs
     // alocações da sessão. `rtti::new_object` JÁ EXISTE (replica CClass::CreateInstance 100% em
     // Rust, usado pra outras coisas há sessões) — constrói `req` SEM bytecode nenhum, evitando o
@@ -3221,8 +3217,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
                 ((req_ptr as *mut u8).add(voff as usize) as *mut i32).write_unaligned(-1);
             }
             // FIX DECISIVO (2026-08-03, achado por RE dedicada offline): `ScriptableSystemRequest+0x40`
-            // é um campo C++ interno NÃO-refletido (confirmado pelo header vendorizado real do
-            // RED4ext.SDK: `uint8_t unk40[0x48-0x40]` em ScriptableSystemRequest.hpp) — QueueRequest LÊ
+            // é um campo C++ interno NÃO-refletido (8 bytes em `+0x40`) — QueueRequest LÊ
             // esse campo (nunca escreve) esperando um ponteiro cru de volta pro `ScriptableSystem`/
             // `EquipmentSystem` dono (o mesmo `this`), usado internamente pra enfileirar no ring buffer
             // lock-free do próprio sistema (`CircularBuffer<THandle<ScriptableSystemRequest>>`). Nem
@@ -3517,7 +3512,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         }
         return;
     }
-    // `axl-factories-apply`: dump read-only do FactoryIndex (aIndex), pra achar o offset REAL do
+    // Factories: dump read-only do FactoryIndex (aIndex), pra achar o offset REAL do
     // registry pós-async. Ver `selftest::dump_factory_index`.
     #[cfg(feature = "devtools")]
     if cmd == "factdump" {
@@ -3530,7 +3525,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         return;
     }
     #[cfg(feature = "devtools")]
-    if cmd == "cethooksproof" {
+    if cmd == "luaganchosprova" {
         unsafe {
             match status_do_personagem::hasgod(reg, player) {
                 Some(real_before) => {
@@ -3557,15 +3552,15 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
                     let override_ok = overridden == Some(ov_target);
                     let suppress_ok = real_after == Some(real_before);
                     let verdict = if observe_ok && override_ok && suppress_ok {
-                        ">>> CET-HOOKS-SHIPPABLE OK: Observe (cb disparou + original rodou) + Override (retorno reescrito) + Suppress (estado real preservado), tudo não-Lua em método REAL <<<"
+                        ">>> GANCHOS-NAO-LUA OK: Observe (cb disparou + original rodou) + Override (retorno reescrito) + Suppress (estado real preservado), tudo não-Lua em método REAL <<<"
                     } else {
                         "FALHA/verificar: alguma perna não bateu"
                     };
                     crate::log_dev!(
-                        "[cethooksproof] real_antes={real_before} | observe: hits {hits_before}->{hits_after} retorno={observed:?} ok={observe_ok} | override(alvo={ov_target}): retorno={overridden:?} ok={override_ok} | suppress: real_depois={real_after:?} ok={suppress_ok} | {verdict}"
+                        "[luaganchosprova] real_antes={real_before} | observe: hits {hits_before}->{hits_after} retorno={observed:?} ok={observe_ok} | override(alvo={ov_target}): retorno={overridden:?} ok={override_ok} | suppress: real_depois={real_after:?} ok={suppress_ok} | {verdict}"
                     );
                 }
-                None => crate::log_dev!("[cethooksproof] hasgod() falhou antes de testar (player/sys indisponível)"),
+                None => crate::log_dev!("[luaganchosprova] hasgod() falhou antes de testar (player/sys indisponível)"),
             }
         }
         return;
@@ -3619,10 +3614,10 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
             return crate::log_dev!("[console] '{cmd}' -> {}", if _lido { "lido" } else { "FALHOU" });
         }
         ["summon"] | ["car"] => return act("enviado", unsafe { veiculos::summon(reg, player) }),
-        // Codeware/registro nativo (rodar no jogo p/ destravar a fundação):
+        // Registro nativo (rodar no jogo p/ destravar a fundação):
         // cwprobe = despeja o layout de uma função nativa real (o handler não mora nela: ver o
         // doc do módulo `register`); cwreg = smoke-test (registra BlackwallPing global); cwfacade =
-        // registra Codeware.Version/Require (precisa do .reds do Codeware).
+        // registra `Version`/`Require` da fachada de versão (precisa do .reds da fachada).
         #[cfg(feature = "devtools")]
         ["cwprobe"] => return log(&unsafe { diagnostico::probe(reg) }),
         #[cfg(feature = "devtools")]
@@ -3657,7 +3652,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
             crate::diagnostico::censo::relatorio();
             return;
         }
-        // ArchiveXL `#53` (`tpp_attach.rs`, gate `~/.bwms-axl-tpp`): tamanhos dos arrays do
+        // `roupas_e_armas/terceira_pessoa.rs` (gate `~/.bwms-tpp-slots`): tamanhos dos arrays do
         // TPPRepresentationComponent e ida-e-volta do RegisterAffectedItem num slot vanilla.
         #[cfg(feature = "devtools")]
         ["tppafetados"] => { unsafe { crate::roupas_e_armas::terceira_pessoa::relatorio() }; return; }
@@ -3674,7 +3669,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         // `mkflatnovo <flat> <doador> <hex>` (2026-09-11): flat que o record não tem, qualquer largura.
         #[cfg(feature = "devtools")]
         ["mkflatnovo", flat, donor, hex] => { unsafe { crate::tweakdb::mkflatnovo_cmd(flat, donor, hex) }; return; }
-        // Codeware `#120` — captura DINÂMICA de LR em `Red::InkSystem::Get()` (2026-08-14).
+        // Captura DINÂMICA de LR em `InkSystem::Get()` (2026-08-14).
         // `inkgethook` instala o probe observe-only (gate `~/.bwms-hook-inkget-lr`); rode
         // `inkgetbaseline` em idle (~10-15s após o hook), depois `presskey <kc>` 3-5x, depois
         // `inkgetpost` — loga os call-sites que só aparecem depois do keypress.
@@ -3688,7 +3683,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         // `checkresbaseline`/`checkrespost`, canal MORTO fora da rajada mesmo com
         // `PHASE_REACHED_5=true`).
         // `inkgethook` (este braço) continua existindo como comando MANUAL do canal do executor
-        // (útil pra reinstalar sob demanda/depurar), mas desde `cw-inkget-autoretry` (2026-08-16,
+        // (útil pra reinstalar sob demanda/depurar), mas desde a nova tentativa automática do inkGet (2026-08-16,
         // `on_load`, thread dedicada logo após a thread de heartbeat) NÃO é mais o único jeito de
         // instalar o probe: o dylib agora tenta sozinho, repetidamente (750ms, gate
         // `~/.bwms-hook-inkget-lr`), independente do executor estar vivo ou não — resolve
@@ -3733,8 +3728,8 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
             crate::selftest::inkget_post();
             return;
         }
-        // Codeware `#120` candidato `0x104404720` (2026-08-17, achado por LR-tracing em `Get()` +
-        // disassembly offline — ver `HISTORICO.md`/`CATALOGO-EXAUSTIVO-CODEWARE.md` item `#120`).
+        // Candidato `0x104404720` (2026-08-17, achado por LR-tracing em `Get()` +
+        // disassembly offline — ver `HISTORICO.md`).
         // `ink120hook` instala sob demanda (independente do gate de boot `~/.bwms-hook-
         // ink120cand`); `ink120dump` lê o ring (x0/x1/x2/x3 por chamada); `ink120reset` zera pra
         // uma janela nova. Mesmo idioma do trio `inkgethook`/`inkgetbaseline`/`inkgetpost` acima.
@@ -3753,7 +3748,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
             crate::selftest::ink120cand_reset();
             return;
         }
-        // Codeware `#198`/`#199` (`ResourceLoader::LoadAsync`/`LoadResource`) — captura DINÂMICA
+        // `ResourceLoader::LoadAsync`/`LoadResource` — captura DINÂMICA
         // de LR em `ResourceDepot::CheckResource` (2026-08-14, ancoragem alternativa ao
         // `InkSystem::Get()` do `#120`). `checkreshook` instala o probe observe-only (gate
         // `~/.bwms-hook-checkres-lr`); `CheckResource` dispara sozinho durante loading real —
@@ -3808,7 +3803,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
             crate::arquivos_do_jogo::reslink_path(src, tgt);
             return;
         }
-        // `cw-controller-misc`: arma o watch de UM resource path — quando o jogo constrói esse
+        // Controller de recurso: arma o watch de UM resource path — quando o jogo constrói esse
         // `ResourcePath` de verdade (via o hook resource.link já instalado), dispara "Resource/
         // Load" (ResourceEvent real) no próximo tick. Ex.: `watchres base\characters\...\x.mesh`.
         #[cfg(feature = "devtools")]
@@ -3823,24 +3818,6 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         #[cfg(feature = "devtools")]
         ["reslinkstat"] => {
             crate::selftest::reslink_stat();
-            return;
-        }
-        // Chama o GETTER NATIVO real do record (ex.: Grenade_Record.DeepWaterDepth(), via callf já
-        // provado) antes/durante/depois do UpdateRecord (`tweakdb::prove_updaterecord_v3`). Ex.:
-        // updaterecgetter gamedataGrenade_Record Items.GrenadeIncendiarySticky DeepWaterDepth deepWaterDepth 7.5
-        #[cfg(feature = "devtools")]
-        ["updaterecgetter", class_name, name, getter, prop, new_val] => {
-            let class_name = class_name.to_string();
-            let name = name.to_string();
-            let getter = getter.to_string();
-            let prop = prop.to_string();
-            let new_val: f32 = match new_val.parse() {
-                Ok(v) => v,
-                Err(_) => return crate::log_dev!("[updaterec3] valor inválido '{new_val}'"),
-            };
-            std::thread::spawn(move || unsafe {
-                crate::tweakdb::prove_updaterecord_v3(&class_name, &name, &getter, &prop, new_val);
-            });
             return;
         }
         #[cfg(feature = "devtools")]
@@ -3859,7 +3836,7 @@ fn run_cmd(reg: &rtti::Registry, player: *mut c_void, tx: *mut c_void, cmd: &str
         // `refsis <SistemaDeScript>` / `refsis getter <GetXxx>` / `refsis metodo <Metodo>` — a rota do sistema devolve handle forte: mede se quem guarda só o ponteiro vaza a referência.
         #[cfg(feature = "devtools")]
         ["refsis", resto @ ..] => { unsafe { crate::diagnostico::run_refsis(reg, player, resto) }; return; }
-        // `axl49 [path]` — o veredito do ArchiveXL `#49` inteiro, em Rust, numa linha.
+        // `axl49 [path]` — o veredito do `#49` inteiro, em Rust, numa linha.
         //
         // POR QUE VIROU COMANDO DE CANAL. A prova vivia num smoke redscript disparado em
         // `OnGameAttached` + retentativa por `DelaySystem`. Nesse instante o mundo ainda não
@@ -3908,7 +3885,7 @@ slot0x30={slot:#x} esperado={esperado:#x} bate={} controle(fake nulo)={}",
         // dúvida sobre a causa. Aqui não se chama nada: compara-se o VALOR do slot.
         // `slotscan <vmaddr_estatico> [slot_hex]` — GENERALIZAÇÃO do `axl49scan`.
         //
-        // O método que provou o alvo do `A#49` não tem nada de específico daquele item: dado um
+        // O método que provou o alvo do `#49` não tem nada de específico daquele item: dado um
         // endereço estático de função e um slot, ele responde "existe objeto VIVO cuja vtable
         // despacha esse endereço nesse slot?". Cruzado com `re-xref vtable-of <addr>` (que diz em
         // QUAIS vtables do binário o endereço aparece), duas fontes independentes confirmam um alvo
@@ -4008,7 +3985,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::selftest::resloader_reqdump_cmd(p) };
             return;
         }
-        // `resforget <path>` (2026-09-11): `ResourceBank::ForgetResource` duas vezes (Codeware `#198` `RemoveResourceFromCache`).
+        // `resforget <path>` (2026-09-11): `ResourceBank::ForgetResource` duas vezes (`RemoveResourceFromCache`).
         #[cfg(feature = "devtools")]
         ["resforget", p, ..] => {
             unsafe { crate::selftest::resloader_forget_cmd(p) };
@@ -4026,7 +4003,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
         ["depotres"] => { unsafe { depotres_report(None) }; return; }
         #[cfg(feature = "devtools")]
         ["depotres", alvo, ..] => { unsafe { depotres_report(Some(alvo)) }; return; }
-        // Codeware `#82`/`#80`/`#84`: runtime system por índice, a partir da cena capturada.
+        // Runtime system por índice, a partir da cena capturada.
         // `rtsys` sem argumento mostra os que interessam + o controle; com argumento, um índice do mapa.
         #[cfg(feature = "devtools")]
         ["rtsys"] => {
@@ -4076,7 +4053,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
         // vtable de um objeto vivo, lido via `rd_u64(obj)`) — NÃO faz `rebase()` (que espera um
         // vmaddr ESTÁTICO de arquivo; aplicar rebase de novo num ponteiro já pós-ASLR dava
         // endereço errado). Read-only, nunca chama nada. count clampado 1..48 (cobre vtables
-        // maiores, ex. `TweakDB::FlatValue` tem 31 slots — ver `RED4ext.SDK/TweakDB.hpp`).
+        // maiores, ex. `TweakDB::FlatValue` tem 31 slots).
         #[cfg(feature = "devtools")]
         ["vtdump", addr, rest @ ..] => {
             let n = rest.first().and_then(|s| s.parse::<usize>().ok()).unwrap_or(8).clamp(1, 48);
@@ -4105,7 +4082,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
                 return log(&out);
             }
         }
-        // `getrecords <classe> [limite]` (2026-08-10) — ArchiveXL #59, `GetRecords<R>`: lista
+        // `getrecords <classe> [limite]` (2026-08-10) — `GetRecords<R>`: lista
         // TODOS os records de um TIPO enumerando `recordsByID` (read-only).
         #[cfg(feature = "devtools")]
         ["getrecords", class] => {
@@ -4118,7 +4095,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::tweakdb::getrecords_cmd(reg, class, n) };
             return;
         }
-        // `getrecbytype <classe> [limite]` (2026-08-10) — RED4ext.SDK #341, `GetRecordsByType`:
+        // `getrecbytype <classe> [limite]` (2026-08-10) — `GetRecordsByType`:
         // lookup DIRETO no índice `recordsByType`@+0x88 (O(1) amortizado), cross-validado contra
         // `getrecords` (scan completo filtrado) — mesma classe deve dar a MESMA contagem.
         #[cfg(feature = "devtools")]
@@ -4126,15 +4103,15 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::tweakdb::getrecbytype_cmd(reg, class, 500_000) };
             return;
         }
-        // `garmentoffsets` (2026-08-11) — ArchiveXL #97, `Facade.EnableGarmentOffsets`/
-        // `DisableGarmentOffsets`: diagnóstico read-only do flag (a real API do ArchiveXL não
+        // `garmentoffsets` (2026-08-11) — `EnableGarmentOffsets`/
+        // `DisableGarmentOffsets` da fachada de recursos: diagnóstico read-only do flag (a API não
         // tem getter — só existe pra provar o round-trip Enable/Disable ao vivo).
         #[cfg(feature = "devtools")]
         ["garmentoffsets"] => {
             crate::log_dev!("[garmentoffsets] enabled={}", crate::roupas_e_armas::garment_offsets_enabled());
             return;
         }
-        // `innertype <typeName>` (2026-08-10) — Codeware #197, `ReflectionType.GetInnerType()`:
+        // `innertype <typeName>` (2026-08-10) — `ReflectionType.GetInnerType()`:
         // resolve um IType composto (array/handle/weak-handle) por nome e mostra o tipo interno.
         #[cfg(feature = "devtools")]
         ["innertype", type_name] => {
@@ -4147,7 +4124,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::tweakdb::getrecbytype_cmd(reg, class, n) };
             return;
         }
-        // `createalias <record_id_hex> <alias_id_hex>` (2026-08-10) — ArchiveXL #59,
+        // `createalias <record_id_hex> <alias_id_hex>` (2026-08-10) —
         // `CreateRecordAlias`: cria uma entrada nova em `recordsByID` (via `CreateTDBRecord`,
         // growth-safe) apontando pro MESMO instance do record fonte.
         ["createalias", rid, aid] => {
@@ -4162,7 +4139,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `resexists <path>` (2026-08-10) — Codeware `#16`/`#198`: testa `resource_exists`
+        // `resexists <path>` (2026-08-10): testa `resource_exists`
         // contra um path CONHECIDO (deve existir) e um INVENTADO (não deve).
         #[cfg(feature = "devtools")]
         ["resexists", path] => {
@@ -4172,7 +4149,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `archiveexists <nome>` (2026-08-10) — Codeware `#16`/`#198`: testa `archive_exists_by_name`
+        // `archiveexists <nome>` (2026-08-10): testa `archive_exists_by_name`
         // contra um nome CONHECIDO (deve existir, ex. basegame_1_engine.archive) e um INVENTADO.
         #[cfg(feature = "devtools")]
         ["archiveexists", name] => {
@@ -4210,7 +4187,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `archivegroupdump` (2026-08-17, auditoria de consistência — ArchiveXL `#37`,
+        // `archivegroupdump` (2026-08-17, auditoria de consistência,
         // `ResolveArchiveGroup`) — DIAGNÓSTICO read-only: lista TODOS os grupos do depot com
         // basePath (offset +0x10) e scope (offset +0x30), decodificados via o header oficial
         // vendorizado. Confirma (ou refuta) os 2 offsets novos antes de usar `resolve_archive_
@@ -4231,7 +4208,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             crate::veredito_dev!("{}", crate::mods_do_usuario::lista_dos_mods::veredito());
             return;
         }
-        // `archivegroupresolve <basePath>` (2026-08-17, ArchiveXL `#37`) — testa
+        // `archivegroupresolve <basePath>` (2026-08-17) — testa
         // `resolve_archive_group_by_path` contra um basePath real (achado via `archivegroupdump`
         // primeiro) e um inventado. Read-only, zero mutação.
         #[cfg(feature = "devtools")]
@@ -4248,7 +4225,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `archivegroupcreate <basePath>` (2026-08-17, ArchiveXL `#37`, metade de ESCRITA) —
+        // `archivegroupcreate <basePath>` (2026-08-17, metade de ESCRITA) —
         // testa `create_archive_group_by_path` (grow+insert real do `depot->groups`, mutação de
         // memória viva do motor). Rode
         // `archivegroupdump` ANTES e DEPOIS pra confirmar visualmente: grupo novo no índice certo,
@@ -4340,9 +4317,9 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             log(&unsafe { crate::rtti::dump_props(reg, class) });
             return;
         }
-        // RED4ext.SDK — introspecção fina de flags (`PENDENCIAS-UNIFICADAS.md`, "CClass::Flags
+        // Introspecção fina de flags (`PENDENCIAS-UNIFICADAS.md`, "CClass::Flags
         // 11 bits / CProperty.flags 13 bits / CBaseFunction.flags 13 bits — maioria nunca
-        // lida"). 3 comandos read-only, decodificam os bits nomeados dos 3 headers vendorizados.
+        // lida"). 3 comandos read-only, decodificam os bits nomeados das 3 structs.
         #[cfg(feature = "devtools")]
         ["classflags", name] => {
             unsafe { crate::rtti::probe_class_flags(reg, name) };
@@ -4358,7 +4335,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::rtti::probe_function_flags(reg, class, method) };
             return;
         }
-        // `funcflagsglobal <nome>` (2026-08-10) — RED4ext.SDK #186 (lado escrita): diagnóstico
+        // `funcflagsglobal <nome>` (2026-08-10) — lado escrita: diagnóstico
         // pra confirmar/refutar o "palpite" documentado em `register.rs::FLAG_STATIC` (bit2,
         // nunca verificado contra o ground-truth de `decode_function_flags`, que diz bit1=
         // isStatic/bit2=isFinal do header vendorizado). Testa contra uma native GLOBAL nossa
@@ -4380,20 +4357,20 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // Codeware `Reflection.ReflectionFunc` — "introspecção de assinatura" (nome, retorno,
+        // `Reflection.ReflectionFunc` — "introspecção de assinatura" (nome, retorno,
         // params, is_native/is_static), junta `resolve_func`+`type_kind`+`function_flags`.
         #[cfg(feature = "devtools")]
         ["funcsig", class, method] => {
             unsafe { crate::rtti::probe_function_signature(reg, class, method) };
             return;
         }
-        // Codeware `Reflection.ReflectionEnum`/`ReflectionBitfield.IsNative()`.
+        // `Reflection.ReflectionEnum`/`ReflectionBitfield.IsNative()`.
         #[cfg(feature = "devtools")]
         ["enumisnative", name] => {
             unsafe { crate::rtti::probe_type_is_native(reg, name) };
             return;
         }
-        // Codeware `ReflectionClass.GetFunctions()`/`GetStaticFunctions()` (item #51).
+        // `ReflectionClass.GetFunctions()`/`GetStaticFunctions()` (item #51).
         #[cfg(feature = "devtools")]
         ["funclistdump", class] => {
             unsafe { crate::rtti::probe_class_own_functions(reg, class, 15) };
@@ -4405,14 +4382,14 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::rtti::probe_class_own_functions(reg, class, n) };
             return;
         }
-        // RED4ext.SDK — `CClass.defaults` (Map<CName,Variant*>@+0x158, PENDENCIAS-UNIFICADAS.md
+        // `CClass.defaults` (Map<CName,Variant*>@+0x158, PENDENCIAS-UNIFICADAS.md
         // prosa "Restante"): valor-default de uma propriedade, nunca lido antes.
         #[cfg(feature = "devtools")]
         ["classdefault", class, prop] => {
             unsafe { crate::rtti::probe_class_default(reg, class, prop) };
             return;
         }
-        // `newobjget <classe> <prop>` (2026-08-10) — RED4ext.SDK #102 (`CClass.defaults`): a via
+        // `newobjget <classe> <prop>` (2026-08-10) — `CClass.defaults`: a via
         // OFICIAL (ler o Map interno `CClass+0x158`) deu vazio nos 5 casos testados antes. Via
         // alternativa: construir uma instância NOVA (`rtti::new_object`, já provado) e ler a prop
         // (`find_property_in_class`+`prop_get_*`, já provado) — o valor que sai do `Construct()`
@@ -4445,7 +4422,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // RED4ext.SDK — "família de tipos-wrapper" (itens #129-158): introspecção genérica de
+        // "Família de tipos-wrapper" (itens #129-158): introspecção genérica de
         // categoria de tipo via `rtti::IType::GetType()` (macOS vtbl+0x28, shift de +0x08 vs
         // Windows — 2 dtors Itanium, achado já documentado no código, nunca exposto como comando).
         #[cfg(feature = "devtools")]
@@ -4464,17 +4441,17 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::rtti::probe_property_type_kind_all(reg, class, n) };
             return;
         }
-        // `axl-customization-apply`: lista métodos RTTI (instância+estáticos) de uma classe.
+        // Customização: lista métodos RTTI (instância+estáticos) de uma classe.
         // Ex: rttifuncs gameuiCharacterCustomizationSystem → GetHeadOptions/GetBodyOptions etc.
         #[cfg(feature = "devtools")]
         ["rttifuncs", class] => {
             log(&unsafe { crate::rtti::dump_class_funcs(reg, class) });
             return;
         }
-        // `cw-controller-misc`: dado CClass+método, acha o CClassFunction* e despeja qwords
+        // Controller de recurso: dado CClass+método, acha o CClassFunction* e despeja qwords
         // em múltiplos offsets — identifica qual offset tem o ponteiro nativo C++ (no TEXT).
         // Ex: nativefunc IComponent Toggle → despeja CFunc*+0x00..+0x60; candidato = vmaddr TEXT.
-        // `resolvefuncrobust <nome>` (2026-08-10) — RED4ext.SDK #55: compara `register::get_function`
+        // `resolvefuncrobust <nome>` (2026-08-10) — compara `register::get_function`
         // (vtbl+0x30, só acha o que foi RegisterFunction-ado pelo Rust) contra
         // `rtti::resolve_global_function_robust` (varre GetGlobalFunctions, casa por nome/fullName)
         // — prova se o fallback resolve uma global PURAMENTE ESCRIPTADA que a via rápida não acha.
@@ -4570,8 +4547,8 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `cw-player-scheduling-vehicle` (WardrobeSystem::ForgetItemID): a fonte real do Codeware
-        // (`WardrobeSystemEx.hpp`) já dá os offsets do Windows — `HashMap<CName,ItemID> ItemStore`
+        // Player, agendamento e veículo (WardrobeSystem::ForgetItemID): os offsets do Windows
+        // — `HashMap<CName,ItemID> ItemStore`
         // em +0x48, `SharedSpinLock ItemStoreMutex` em +0xF4 — NÃO são endereços de função (que
         // mudam entre plataformas), são offsets de DADOS/struct, que este projeto já confirmou
         // repetidas vezes portarem 1:1 macOS↔Windows (`Core::OffsetPtr<0xNN>`). Em vez de tentar
@@ -4616,7 +4593,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
                                     }
                                     // 2026-07-31: enumeração COMPLETA, 100% observe-only (zero
                                     // escrita), do HashMap<CName,ItemID> real em WardrobeSystem+0x48.
-                                    // Layout confirmado por agente de RE contra RED4ext.SDK/HashMap.hpp
+                                    // Layout confirmado por agente de RE
                                     // (ground-truth, ver DATABASE.md): indexTable@+0x00(rel ao HashMap,
                                     // =WardrobeSystem+0x48), size@+0x08(u32), capacity@+0x0C(u32),
                                     // nodes@+0x10(Node*), Node{next:u32@0,hashedKey:u32@4,key:CName
@@ -4669,7 +4646,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // Codeware `WardrobeSystem.ForgetItemID` (item #46/#208, 2026-08-11, 3ª rodada de
+        // `WardrobeSystem.ForgetItemID` (item #46/#208, 2026-08-11, 3ª rodada de
         // candidatos baratos) — mesma cadeia GetGame/GetWardrobeSystem de `wardrobesys` acima,
         // mas remove por TDBID (scan-linear por `ItemID.tdbid`, ver
         // `selftest::wardrobe_forget_by_tdbid`) em vez de CName exato — não precisa saber a
@@ -4706,7 +4683,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `axl-customization-apply`: usa o ptr salvo por getcustsys/CharCustomA probe para
+        // Customização: usa o ptr salvo por getcustsys/CharCustomA probe para
         // inspecionar e chamar métodos do gameuiCharacterCustomizationSystem.
         // custsys probe → loga ptr + valida via class_of
         // custsys call <method> → callon <ptr_salvo> <method> via RTTI
@@ -4732,7 +4709,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
                             crate::log_dev!("[custsys] ptr={ptr:#018x} não é objeto RED válido");
                             return;
                         }
-                        // axl-puppet-state-apply (2026-08-03, /goal): suporte a "player" como arg —
+                        // Estado do puppet (2026-08-03, /goal): suporte a "player" como arg —
                         // passa o handle real do player capturado (Arg::Handle, mesmo padrão de
                         // `give`/roupas_e_armas::give), pra chamar métodos como `HasCharacterCustomizationComponent
                         // (entity: ref<Entity>)` que precisam de um handle de verdade, não um enum/int.
@@ -4752,7 +4729,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
                                         i32::from_le_bytes([r[0], r[1], r[2], r[3]]),
                                         u32::from_le_bytes([r[0], r[1], r[2], r[3]]),
                                         f(0));
-                                    // axl-47/66 (2026-08-18): decodifica também como possível
+                                    // Itens 47/66 (2026-08-18): decodifica também como possível
                                     // DynArray<T> sret {entries(ptr)@0x00, cap(u32)@0x08, size(u32)@0x0C}
                                     // — layout já batalha-testado em todo o resto do projeto (rtti.rs).
                                     // GetHeadOptions()/etc. devolvem array<T>, não escalar; útil pra ler
@@ -4773,7 +4750,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // TweakXL SetFlat runtime: getflat <nome> (read-only, dumpa o FlatValue vivo);
+        // SetFlat em runtime: getflat <nome> (read-only, dumpa o FlatValue vivo);
         // setflat <nome> <0xhex|int|float> (escreve 4B em +0x08).
         #[cfg(feature = "devtools")]
         ["getflat", name] => {
@@ -4818,14 +4795,14 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             crate::veredito_dev!("{}", unsafe { crate::tweakdb::teste::conferir_flat_referenciado(flat, indice, prop, esperado) });
             return;
         }
-        // `cet-tweakdb-read-records`: getarr <nome> lê um flat ARRAY (ex.: attacks/statModifiers
+        // Leitura de records do TweakDB: getarr <nome> lê um flat ARRAY (ex.: attacks/statModifiers
         // de uma arma) de um record vivo, read-only. Ver tweakdb::probe_array_flat.
         #[cfg(feature = "devtools")]
         ["getarr", name] => {
             unsafe { crate::tweakdb::probe_array_flat(name) };
             return;
         }
-        // `axl-resource-patch-apply` (2026-07-24): postloadprobe constrói uma instância REAL de
+        // Resource patch (2026-07-24): postloadprobe constrói uma instância REAL de
         // EntityTemplate/AppearanceResource/CMesh/MorphTargetMesh (rtti::new_object) e lê o slot
         // PostLoad (+0x30) da vtable própria do objeto — resolve os 4 endereços sem RE estática.
         // Read-only após construir (não chama PostLoad). Rodar no MENU (sem save aberto).
@@ -4834,7 +4811,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::selftest::probe_postload_addresses() };
             return;
         }
-        // Codeware `#58` (`ISerializable.ProcessPostLoad`/`RefreshResource`): `postloadprobe`
+        // `ISerializable.ProcessPostLoad`/`RefreshResource`: `postloadprobe`
         // acima só LÊ o endereço do slot PostLoad (+0x30), nunca chama. Este comando vai além:
         // constrói uma instância fresca/descartável (mesmo `new_object`, mesma classe já usada
         // com segurança por `postloadprobe` há sessões) e CHAMA `ProcessPostLoad` de verdade
@@ -4856,7 +4833,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // Codeware item #50 (Reflection.GetClasses/GetEnums/GetBitfields — universo filtrado por
+        // Item #50 (Reflection.GetClasses/GetEnums/GetBitfields — universo filtrado por
         // categoria, composição de get_native_types+type_kind, já provados).
         #[cfg(feature = "devtools")]
         ["reflenum", kind] => {
@@ -4901,14 +4878,14 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             return;
         }
 
-        // Codeware item #50 (Reflection.GetDerivedClasses — via get_derived_classes já provado,
+        // Item #50 (Reflection.GetDerivedClasses — via get_derived_classes já provado,
         // evita a anomalia de GetClasses/#63).
         #[cfg(feature = "devtools")]
         ["reflderived", base] => {
             unsafe { crate::rtti::probe_reflect_derived(reg, base) };
             return;
         }
-        // CET item #44 (DumpVTablesTask, `proofs/2026-08-11-cet-vtabledump-PROVADO.log`): fatia BOUNDED do
+        // Dump de vtables (prova de 2026-08-11 do dump de vtables): fatia BOUNDED do
         // universo RTTI, construindo instâncias reais e lendo o ponteiro de vtable. Gated
         // internamente atrás de dev_mode(). `count` sempre limitado (nunca o universo inteiro
         // numa chamada só) — ver doc-comment do módulo pro porquê.
@@ -4919,7 +4896,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::diagnostico::vtabledump::probe_vtabledump(reg, start, count) };
             return;
         }
-        // Codeware `#176` (2026-08-19 tarde/noite): constrói 1 instância NOMEADA (mesmo perfil
+        // 2026-08-19 tarde/noite: constrói 1 instância NOMEADA (mesmo perfil
         // de risco de `newobj`, endurecido com filtro isAbstract) e dumpa os slots do vtable
         // dela como vmaddr estático, flagando os 2 candidatos já catalogados
         // (0x1043a060c/0x1043ac60c). Ver vtabledump.rs::probe_vtslots.
@@ -4955,7 +4932,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `axl-resource-patch-apply` (2026-07-25): instala hooks observe-only em CMesh::PostLoad
+        // Resource patch (2026-07-25): instala hooks observe-only em CMesh::PostLoad
         // (0x10519a58c) + MorphTargetMesh::PostLoad (0x1051ca1a4). Log primeiros 8 calls de cada
         // tipo com this + campos +0x08..+0x38. Objetivo: RE de layout do CResource (onde fica o
         // resource-path hash) + confirmar que os vmaddrs são realmente PostLoad. Após instalar,
@@ -4987,7 +4964,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::tweakdb::mkarr_cmd(field, donor, list) };
             return;
         }
-        // TweakXL #30 (`!remove-all`): rmall <field> — limpa o array INTEIRO (não recebe valor,
+        // `!remove-all`: rmall <field> — limpa o array INTEIRO (não recebe valor,
         // distinto de `!remove`).
         ["rmall", field] => {
             let id = crate::tweakdb::tweak_db_id(field);
@@ -5001,14 +4978,14 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             crate::log_dev!("[rmall] '{field}' -> {ok}");
             return;
         }
-        // `tweakxl-batch-commit`: batchset <f1>=<hex1> <f2>=<hex2> ... — aplica N sets escalares
+        // Commit em lote de tweaks: batchset <f1>=<hex1> <f2>=<hex2> ... — aplica N sets escalares
         // TUDO-OU-NADA (se qualquer campo não resolver, aborta sem escrever nenhum).
         ["batchset", pairs @ ..] => {
             let owned: Vec<String> = pairs.iter().map(|s| s.to_string()).collect();
             unsafe { crate::tweakdb::batchset_cmd(&owned) };
             return;
         }
-        // `cet-utils-shippable` (fatia `json`): readjson <path> — lê+parseia um JSON de disco
+        // Utilitários de produção (fatia `json`): readjson <path> — lê+parseia um JSON de disco
         // (config de mod típica) sem Lua. Zero risco (I/O puro, sem tocar RTTI/memória do jogo).
         // O log diz só o tipo do topo: o `bwms_primitives::json` não serializa `Valor`, e o erro já traz linha e coluna.
         #[cfg(feature = "devtools")]
@@ -5033,8 +5010,8 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `cet-utils-shippable` (fatia `dir`): listdir <path> — lista arquivos de um diretório
-        // sem Lua (equivalente ao módulo `dir` do CET-Windows). Zero risco (I/O puro).
+        // Utilitários de produção (fatia `dir`): listdir <path> — lista arquivos de um diretório
+        // sem Lua (equivalente ao módulo `dir` da API Lua). Zero risco (I/O puro).
         #[cfg(feature = "devtools")]
         ["listdir", path] => {
             match std::fs::read_dir(path) {
@@ -5049,15 +5026,6 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // CLONE probe (READ-ONLY): confirma o layout do array de flats + enumera as props
-        // do record-fonte e checa se cada flat "source.<prop>" é achável. NÃO muta. Passo de
-        // de-risco ANTES do clone real (insert no flats). Ex:
-        //   cloneprobe gamedataWeaponItem_Record Items.Preset_Lexington_Default Items.BwmsCloneTest
-        #[cfg(feature = "devtools")]
-        ["cloneprobe", class, source, newname] => {
-            unsafe { crate::tweakdb::clone_probe(reg, class, source, newname) };
-            return;
-        }
         // CLONE USÁVEL: cria o record novo e herda os flats do source (stats reais), em thread separada. A classe do comando fica por
         // compatibilidade; o clone a tira do base vivo. Ex:
         //   clone gamedataWeaponItem_Record Items.Preset_Lexington_Default Items.BwmsLexClone
@@ -5065,15 +5033,15 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             unsafe { crate::tweakdb::clone_cmd(source, newname) };
             return;
         }
-        // `tweakxl-pipeline-runtime`: clona SEM dizer a classe (detectada automaticamente do
-        // `source`) — a peça que faltava pro pipeline .yaml real do TweakXL, que nunca anota a
+        // Pipeline de tweaks em runtime: clona SEM dizer a classe (detectada automaticamente do
+        // `source`) — a peça que faltava pro pipeline .yaml real dos mods, que nunca anota a
         // classe do `$base`. Ex.: xlautoclone Items.Preset_Lexington_Default Items.BwmsAutoClone
         ["xlautoclone", source, newname] => {
             unsafe { crate::tweakdb::xlautoclone_cmd(source, newname) };
             return;
         }
-        // `tweakxl-pipeline-runtime` completo: lê+parseia um .yaml REAL do TweakXL (o mesmo
-        // parser `bwms_primitives::tweakxl` do tweakdb-tool offline) e aplica no TweakDB vivo (clone/create com detecção
+        // Pipeline de tweaks em runtime completo: lê+parseia um .yaml REAL de mod (o mesmo
+        // parser `bwms_primitives::tweaks` do tweakdb-tool offline) e aplica no TweakDB vivo (clone/create com detecção
         // automática de classe + edits escalares). Ex.: applyxlfile /tmp/meumod.yaml
         ["applyxlfile", path] => {
             unsafe { crate::tweakdb::applyxlfile_cmd(path) };
@@ -5152,7 +5120,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // callf num objeto ARBITRÁRIO (não só o player) — fecha o gap `cw-register-class-rtti`:
+        // callf num objeto ARBITRÁRIO (não só o player) — fecha o gap de registro de classe no RTTI:
         // registrar (cwregtype/cwregalias) -> instanciar (newobj, devolve o ponteiro) -> CHAMAR
         // MÉTODO nessa instância. `callon <0xptr> <method> [args]`; class_of(ptr) funciona em
         // QUALQUER objeto válido (lê vtable+8=GetType), inclusive o forjado (vtable clonada).
@@ -5223,11 +5191,11 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `cet-game-reflect-bridge` DISPATCH (in-game): cola uma linha CET `Namespace.Method(args)`,
+        // ponte de reflexão do jogo DISPATCH (in-game): cola uma linha Lua `Namespace.Method(args)`,
         // parseia via `parse_chamada_colada` (tokenizer+inferência offline provados), marshalha cada
         // ArgColado pro `rtti::Arg` tipado e DISPATCHA — resolve como MÉTODO na classe `namespace`
         // (callf-style, no player) OU como GLOBAL `method` (callg-style). Cobre o subconjunto de
-        // linhas CET que mapeiam direto pra função/método do RTTI (não os bindings especiais `Game.*`
+        // linhas Lua que mapeiam direto pra função/método do RTTI (não os bindings especiais `Game.*`
         // do Lua, que roteiam pra N pontos distintos — esses seguem no `parse_linha_de_give` give/money).
         // Ex.: callm PlayerPuppet.IsDead()  |  callm Vector4.Length(...)
         ["callm", rest @ ..] => {
@@ -5279,7 +5247,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `cet-call-power-tool`: `sig <Class> <method>` imprime a assinatura (nº params + tipos +
+        // Ferramenta de chamada: `sig <Class> <method>` imprime a assinatura (nº params + tipos +
         // tipo de retorno) sem chamar nada — útil pra descobrir a forma antes de arriscar `call`.
         // Reusa param_count/fn_param_type + o `ret_type` (IType) que o resolve_func já devolve + resolve_cname (hash->nome).
         #[cfg(feature = "devtools")]
@@ -5308,9 +5276,9 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // `cet-call-power-tool`/`cet-game-reflect-bridge`: `call <Class> <method> [args]` — chama
+        // Ferramenta de chamada/ponte de reflexão do jogo: `call <Class> <method> [args]` — chama
         // por NOME DE CLASSE (namespace), ctx=null (chamada estática). Cobre o padrão mais comum
-        // do `Game.*` do CET (TDBID.*, ItemID.*, GameInstance.Get*System, Cast<>, etc — funções de
+        // do `Game.*` da API Lua (TDBID.*, ItemID.*, GameInstance.Get*System, Cast<>, etc — funções de
         // classe/utilitário, não métodos de INSTÂNCIA arbitrária — pra isso já existem `callf`
         // (objeto capturado) e `callon` (ponteiro explícito), ambos provados). Resolve via
         // resolve_func (reg.class_by_name + resolve_in_class, já provados) + auto-marshalling de
@@ -5345,7 +5313,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // Codeware `#120` (2026-09-11): estado do hook do `ProcessInputEvents` e injeção de tecla direto na fila do motor (sem o SO).
+        // 2026-09-11: estado do hook do `ProcessInputEvents` e injeção de tecla direto na fila do motor (sem o SO).
         #[cfg(feature = "devtools")]
         ["rawinputstat"] => {
             log_veredito(&crate::selftest::rawinput_estatistica());
@@ -5369,13 +5337,13 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             log_veredito(&unsafe { crate::selftest::al2_ciclos(classe, n.parse::<usize>().unwrap_or(0)) });
             return;
         }
-        // `strtest` (ArchiveXL `#44` parte 6a, 2026-09-12): String longa pelo motor via `call_func` e vtable do tipo `String`.
+        // `strtest` (2026-09-12): String longa pelo motor via `call_func` e vtable do tipo `String`.
         #[cfg(feature = "devtools")]
         ["strtest"] => {
             log_veredito(&unsafe { crate::diagnostico::strtest_mecanismo() });
             return;
         }
-        // `rawinputsoltos` (Codeware `#120` 3b-2, 2026-09-12): contadores da soltura do handle dos eventos da fila.
+        // `rawinputsoltos` (2026-09-12): contadores da soltura do handle dos eventos da fila.
         #[cfg(feature = "devtools")]
         ["rawinputsoltos"] => {
             log_veredito(&unsafe { crate::selftest::rawinput_soltos_resumo() });
@@ -5404,10 +5372,10 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // Codeware `#120` (captura DINÂMICA de LR em InkSystem::Get()): traz a janela do jogo pra
+        // Captura DINÂMICA de LR em InkSystem::Get(): traz a janela do jogo pra
         // FRENTE via `[NSApp activateIgnoringOtherApps:YES]` (mesma receita/permissão de
         // `presskey`/`mousedelta` — DENTRO do processo do jogo, não externo). Lição já documentada
-        // (2026-08-11, `cw-45-getinventorypuppet`): `presskey` sem foco de janela é NO-OP silencioso
+        // (2026-08-11, item 45, `GetInventoryPuppet`): `presskey` sem foco de janela é NO-OP silencioso
         // (o `CGEventPost` GLOBAL só é postado quando `game_is_frontmost()==true`) — chamar ISTO
         // antes de qualquer `presskey` nesta investigação evita repetir esse bug.
         #[cfg(feature = "devtools")]
@@ -5416,7 +5384,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             crate::log_dev!("[focusgame] force_game_frontmost() chamado");
             return;
         }
-        // `cet-lut-pixel-proof`: seta o preset de LUT por comando (sem depender de F2 nem de clique
+        // Prova de pixel da LUT: seta o preset de LUT por comando (sem depender de F2 nem de clique
         // na aba) — `lut 0` (off) / `lut 3` (P&B) / etc. Mesmo write atômico do clique na aba "LUT".
         ["lut", n] => {
             let idx = n.parse::<u32>().unwrap_or(0);
@@ -5424,7 +5392,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             crate::log_dev!("[lut] preset setado via comando -> {idx}");
             return;
         }
-        // `cw-rawinput-realname` (2026-07-18) — dispara UM keyDown+keyUp sintético via CGEvent
+        // input cru com nome real (2026-07-18) — dispara UM keyDown+keyUp sintético via CGEvent
         // (`cg_press`), pra testar o RawInput controller EM GAMEPLAY. Só existe com
         // `--features autoproceed` (dev); build público não importa
         // CGEventPost/CreateKeyboardEvent. `presskey 49` = SPACE.
@@ -5469,7 +5437,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             crate::log_dev!("[keyup] disparado, keycode={keycode}");
             return;
         }
-        // `cw-real-mod-e2e`/`axl-link-visual-proof` (2026-07-19): navegação de menu por MOUSE via
+        // Mod real ponta a ponta/prova visual do link (2026-07-19): navegação de menu por MOUSE via
         // CGEvent DELTA relativo, disparado de DENTRO do processo do jogo (mesma permissão/receita
         // de `presskey`/`cg_press` — evita o gate de Acessibilidade que bloqueia um processo
         // externo). `mousedelta <dx> <dy>` move o cursor RENDERIZADO PELO JOGO (não o do SO).
@@ -5498,7 +5466,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             crate::log_dev!("[firesessionend] Session/End disparado manualmente -> {n} callback(s)");
             return;
         }
-        // CET `FunctionOverride` (não-Lua, `scripts::sobrepor_funcao`, 2026-08-11): registra Before+After
+        // Sobreposição de função (não-Lua, `scripts::sobrepor_funcao`, 2026-08-11): registra Before+After
         // no método de teste `PlayerPuppet.OnFnOverrideTestTarget` (declarado no .reds de teste
         // temporário). Rodar `callon <ptr> OnFnOverrideTestTarget` antes e depois pra comparar.
         #[cfg(feature = "devtools")]
@@ -5550,8 +5518,8 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             crate::log_dev!("[cname] {hash:#018x} -> '{name}'");
             return;
         }
-        // RED4ext.SDK #43 (`CompareSemVerPrerelease`): prova ao vivo do C-ABI v14 exposto em
-        // BwmsApi (mesma via que um plugin de 3os chamaria) + do Require() real dos 3 enablers.
+        // `CompareSemVerPrerelease`: prova ao vivo do C-ABI v14 exposto em
+        // BwmsApi (mesma via que um plugin de 3os chamaria) + do Require() real das 3 fachadas.
         // `semvercmp 1.2.3-rc1 1.2.3` deve dar cmp=-1 (release > pre-release, o bug original).
         #[cfg(feature = "devtools")]
         ["semvercmp", lhs, rhs] => {
@@ -5580,7 +5548,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             );
             return;
         }
-        // cw-reflection-class-api proof: Reflection.GetClass + probe de props sem file gate
+        // Prova da API de reflexão de classe: Reflection.GetClass + probe de props sem file gate
         #[cfg(feature = "devtools")]
         ["refltest"] => {
             unsafe {
@@ -5589,30 +5557,30 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
             }
             return;
         }
-        // cw-event-target-classes proof: KeyInputEvent.GetKey/GetAction round-trip
+        // Prova das classes de evento-alvo: KeyInputEvent.GetKey/GetAction round-trip
         #[cfg(feature = "devtools")]
         ["keytest"] => {
             unsafe { diagnostico::run_keyinput_test(&reg); }
             return;
         }
-        // cw-entity-builder proof: BwmsEntityAddComponent via dynarray_push_handle16
+        // Prova do construtor de entidade: BwmsEntityAddComponent via dynarray_push_handle16
         #[cfg(feature = "devtools")]
         ["entitytest"] => {
             unsafe { diagnostico::run_entity_builder_test(player); }
             return;
         }
-        // Telas do Equipment-EX e do Virtual Atelier abertas pelo caminho do mod e conferidas por dentro (`interface/teste_telas_de_mod.rs`).
+        // Telas de mods de terceiro abertas pelo caminho do mod e conferidas por dentro (`interface/teste_telas_de_mod.rs`).
         #[cfg(feature = "devtools")]
         ["telasmod", resto @ ..] => return crate::interface::teste_telas_de_mod::pedir(resto),
         _ => {}
     }
-    // Tradução de linha CET (QoL): códigos colados da internet funcionam SEM Lua.
+    // Tradução de linha Lua colada (QoL): códigos colados da internet funcionam SEM Lua.
     // `Game.AddToInventory("Items.X", 5)` -> give | `Game.AddMoney(7777)` -> money.
     if let Some((name, n)) = parse_linha_de_give(cmd) {
         let r = unsafe { roupas_e_armas::give(reg, player, tx, &name, n) };
         match r {
-            Some(res) if res[0] != 0 => crate::log_dev!("[console] CET '{cmd}' -> give {name} x{n} OK"),
-            _ => crate::log_dev!("[console] CET '{cmd}' -> give {name} x{n} FALHOU"),
+            Some(res) if res[0] != 0 => crate::log_dev!("[console] Lua '{cmd}' -> give {name} x{n} OK"),
+            _ => crate::log_dev!("[console] Lua '{cmd}' -> give {name} x{n} FALHOU"),
         }
         return;
     }
@@ -5664,7 +5632,7 @@ slot0x30==worldStreamingSector::PostLoad: {batem} -> {amostra:?}");
     }
 }
 
-/// Um argumento tipado de uma linha CET (`cet-game-reflect-bridge`): a inferência que decide se
+/// Um argumento tipado de uma linha Lua colada (ponte de reflexão do jogo): a inferência que decide se
 /// `42` é int, `1.5` float, `"x"` string, `true` bool, ou um identificador cru (ex.: `TDBID.Create(...)`,
 /// nome de enum) a ser resolvido em runtime.
 #[derive(Debug, Clone, PartialEq)]
@@ -5676,7 +5644,7 @@ enum ArgColado {
     Ident(String),
 }
 
-/// Uma chamada CET tokenizada: `Namespace.Method(arg, ...)` (também aceita `:` como separador, ex.:
+/// Uma chamada Lua tokenizada: `Namespace.Method(arg, ...)` (também aceita `:` como separador, ex.:
 /// `TweakDB:GetFlat`). A DISPATCH pro RTTI do jogo é in-game; a tokenização+inferência é offline.
 #[derive(Debug, Clone, PartialEq)]
 struct ChamadaColada {
@@ -5732,7 +5700,7 @@ fn split_top_level_args(s: &str) -> Vec<String> {
     out
 }
 
-/// Infere o tipo de UM token de argumento CET.
+/// Infere o tipo de UM token de argumento da linha colada.
 fn inferir_arg(tok: &str) -> ArgColado {
     let t = tok.trim();
     let quoted = t.len() >= 2
@@ -5754,9 +5722,9 @@ fn inferir_arg(tok: &str) -> ArgColado {
     ArgColado::Ident(t.to_string())
 }
 
-/// Tokeniza uma linha CET genérica `Namespace.Method(arg, ...)` → [`ChamadaColada`]. `None` se não parece
+/// Tokeniza uma linha Lua genérica `Namespace.Method(arg, ...)` → [`ChamadaColada`]. `None` se não parece
 /// uma chamada (sem `(`/`)` casados ou sem `Namespace.Method`). Base offline pra colar QUALQUER
-/// linha CET no build 0%-Lua (a dispatch pro jogo é o passo in-game).
+/// linha Lua no build 0%-Lua (a dispatch pro jogo é o passo in-game).
 fn parse_chamada_colada(line: &str) -> Option<ChamadaColada> {
     let s = line.trim();
     let open = s.find('(')?;
@@ -5775,7 +5743,7 @@ fn parse_chamada_colada(line: &str) -> Option<ChamadaColada> {
     Some(ChamadaColada { namespace, method, args })
 }
 
-/// Linha CET → (item, qtd), o par que o comando `give` do BWMS entende (build 0%-Lua). Aceita
+/// Linha Lua → (item, qtd), o par que o comando `give` do BWMS entende (build 0%-Lua). Aceita
 /// `Game.AddToInventory("Items.X", 5)` (aspas '/"', qtd opcional=1) e `Game.AddMoney(7777)` →
 /// ("Items.money", 7777). None = não é uma dessas duas. Construído sobre [`parse_chamada_colada`]
 /// (o tokenizer genérico).
@@ -5876,7 +5844,7 @@ mod chamada_colada_tests {
         );
         assert_eq!(parse_linha_de_give(r#"Game.AddToInventory("Items.X")"#), Some(("Items.X".into(), 1)));
         assert_eq!(parse_linha_de_give("Game.AddMoney(7777)"), Some(("Items.money".into(), 7777)));
-        assert_eq!(parse_linha_de_give("give Items.X"), None); // comando nosso ≠ linha CET
+        assert_eq!(parse_linha_de_give("give Items.X"), None); // comando nosso ≠ linha Lua
         assert_eq!(parse_linha_de_give(r#"Game.AddToInventory("", 1)"#), None);
     }
 

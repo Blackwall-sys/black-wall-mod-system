@@ -1,10 +1,10 @@
-// bwms-soundbanks.reds — Codeware `#122` (a parte de áudio do `ResourceLoadHook`) no BWMS.
+// bwms-soundbanks.reds — a parte de áudio do `ResourceLoadHook` no BWMS.
 //
-// Na referência, `Resource/Load` com o `soundbanks.json` sai logo depois do `SoundBankManager::ReadSoundBanksJson`, e o que os ouvintes mudam nos
-// bancos volta pro mapa do motor. No Mac essa leitura roda ~3 s depois da carga da dylib, antes de qualquer script (boot 185), então nenhum ouvinte de
+// O `Resource/Load` com o `soundbanks.json` teria de sair logo depois do `SoundBankManager::ReadSoundBanksJson`, com o que os ouvintes mudam nos
+// bancos voltando pro mapa do motor. No Mac essa leitura roda ~3 s depois da carga da dylib, antes de qualquer script (boot 185), então nenhum ouvinte de
 // script chegaria a tempo. Forma do BWMS: cada `RegisterCallback` de `Resource/Load` pede um reenvio, e no tick seguinte os ouvintes recebem um
 // `Resource/Load` com o hash de `base\sound\event\soundbanks.json` no `GetPath()` e um `BwmsSoundBanks` no `GetResource()`. Os métodos valem só
-// durante o evento: banco com nome existente recebe os campos novos e nome novo entra no mapa do motor, como a escrita de volta da referência. Os
+// durante o evento: banco com nome existente recebe os campos novos e nome novo entra no mapa do motor. Os
 // caminhos saem como hash (`Uint64`), a mesma forma do `ResourceEvent.GetPath`. Bancos residentes já carregados na inicialização não recarregam.
 //
 // Este arquivo no bundle liga, na carga da dylib, o hook do `ReadSoundBanksJson` que guarda o manager.

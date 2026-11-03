@@ -1,4 +1,4 @@
-// bwms-vector-ops.reds — aritmética de `Vector2`/`Vector3` (catálogo Codeware #70).
+// bwms-vector-ops.reds — aritmética de `Vector2`/`Vector3`.
 //
 // POR QUE ISTO É UM GAP DE VERDADE (checado, não suposto): o jogo declara 39 sobrecargas de
 // `OperatorAdd` no redscript vanilla — e **todas** são de `Vector4`. `Vector2` e `Vector3` têm

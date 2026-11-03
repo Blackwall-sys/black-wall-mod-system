@@ -1,4 +1,4 @@
-//! CName do CP2077 = FNV1a64 do nome flat (ASCII). Idêntico ao RED4ext/CET/
+//! CName do CP2077 = FNV1a64 do nome flat (ASCII). Idêntico ao do
 //! redscript — e ao `fnv1a64` do `bwms-primitives`, o mesmo do tweakdb-tool. É como se resolve um tipo
 //! ou função RED por nome em runtime (IRTTISystem::GetClass(CName), etc.). Os tipos [`CName`] e
 //! [`ResourcePathHash`] separam esses ids nas fronteiras com `u64` de espécies misturadas.

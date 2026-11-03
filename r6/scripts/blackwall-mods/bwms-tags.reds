@@ -1,5 +1,5 @@
-// Tag de entidade no registro do motor — o `TagSystem::AssignTag`/`UnassignTag` que o Codeware usa por baixo do `DynamicEntitySystem` e do
-// `StaticEntitySystem` (item #220), com nome próprio do BWMS. A tag entra no registro do `GameTagSystem` (só em memória, não vai pro save), e as consultas
+// Tag de entidade no registro do motor — o `TagSystem::AssignTag`/`UnassignTag` que fica por baixo do `DynamicEntitySystem` e do
+// `StaticEntitySystem`, com nome próprio do BWMS. A tag entra no registro do `GameTagSystem` (só em memória, não vai pro save), e as consultas
 // vanilla `GetAnyMatchingEntity`/`GetAllMatchingEntities` passam a achar a entidade.
 //
 //   let tags: ref<GameTagSystem> = GameInstance.GetGameTagSystem(game);

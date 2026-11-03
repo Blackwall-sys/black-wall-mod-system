@@ -4,7 +4,7 @@
 
 **Runtime nativo de modding de Cyberpunk 2077 para macOS / Apple Silicon.**
 
-100% Rust + redscript. Sem máquina virtual, sem Wine, sem streaming do Windows — os
+100% Rust + redscript. Sem máquina virtual, sem camada de compatibilidade, sem streaming do Windows — os
 mods rodam diretamente dentro do build nativo macOS do jogo.
 
 > **Status: BETA 0.1.5** — cedo, mas real. Este README é honesto sobre o que
@@ -20,16 +20,16 @@ do jogo. A partir da 0.1.5:
 - **Console in-game** — um console de desenvolvedor desenhado sobre o jogo pelo
   renderizador Metal do próprio BWMS (sem biblioteca de interface de terceiro). É um **console de comandos nativo**,
   com zero Lua no código (0% Lua). Comandos: `heal`, `level`, `money`, `give`, `remove`,
-  `godmode`, `help`. O Rust do BWMS também entende linha de CET colada
+  `godmode`, `help`. O Rust do BWMS também entende linha de console Lua de Windows colada
   (`Game.AddMoney(N)`, `Game.AddToInventory(...)` e `callm Namespace.Método(args)`) e a
   traduz em chamadas nativas.
-- **Mods de CET** — mod de CET feito de `.lua` roda pela pasta `Mods/`: o Rust do próprio BWMS
+- **Mods `.lua`** — mod de Windows feito de `.lua` roda pela pasta `Mods/`: o Rust do próprio BWMS
   lê e executa os `.lua` de Windows, sem código de terceiro. A janela dele sai no terminal do
-  BWMS. Mod que precisa de `.dll` não roda. Testado em jogo com o JB Third Person.
+  BWMS. Mod que precisa de `.dll` não roda. Testado em jogo com um mod de câmera em terceira pessoa.
 - **Cheats** — god mode, capacidade de carga, toggles de dano e recursos, eddies,
   atributos, perks, veículos e conveniências single-player similares (~15), expostos
   como ações nativas em redscript num painel **Configurações > Mods** próprio (UI em
-  redscript do BWMS — **não** o framework NativeSettings do PC).
+  redscript do BWMS).
 - **Pular boot de 3 níveis** — um seletor (Desligado / até o menu / direto pra gameplay,
   zero input) com tela de carregamento no boot e barra de progresso real; vale a partir
   do próximo boot. A instalação nova já vem em "direto pra gameplay".
@@ -46,10 +46,10 @@ do jogo. A partir da 0.1.5:
 Loja: **Steam, versão 2.5 do jogo, testada e funcionando.** A versão 2.3.1 deixou de
 ser suportada. O instalador recusa GOG e Epic: o bwms usa endereços da build da Steam,
 e noutra build o jogo fecha no boot (`BWMS_IGNORE_BUILD_CHECK=1` força a instalação,
-por sua conta). Frameworks: mods do Windows feitos para Codeware/ArchiveXL/TweakXL
-funcionam dentro do que o bwms cobre — Virtual Atelier e Equipment-EX compilam e
-carregam, e na 2.5 as telas deles abriram em jogo com os itens e o controller do mod
-(build de desenvolvimento). Os `.xl` da pasta `Mods/` do jogo entram nas tabelas de runtime no boot;
+por sua conta). Mods do Windows: mods com `.reds` que chamam funções que o jogo não
+tem, com `.xl` e com `.yaml`/`.tweak` funcionam dentro do que o bwms cobre — dois mods
+de Windows com telas próprias compilam e carregam, e na 2.5 as telas deles abriram em
+jogo com os itens e o controller do mod (build de desenvolvimento). Os `.xl` da pasta `Mods/` do jogo entram nas tabelas de runtime no boot;
 fora da `Mods/`, seções do `.archive.xl` não são aplicadas.
 
 É software beta. Espere arestas. Sempre faça backup dos seus saves antes de usar
@@ -71,9 +71,10 @@ Lista completa: [`docs/CHANGELOG-0.1.5-PUBLICO.md`](docs/CHANGELOG-0.1.5-PUBLICO
   `CallbackSystem`, medido em jogo): o BWMS entrega `Session/Start`, `Session/Ready` e
   `Session/End`, e `BeforeSave`, `AfterSave`, `Pause` e `Resume` não disparam. A 2.5 tirou a declaração de `Log`/`LogChannel`/
   `LogWarning`/`LogError`/`Trace`; o BWMS as declara de novo para mod do Windows
-  compilar. Mod escrito para o Codeware continua compilando como antes. O Equipment-EX
-  funciona: o BWMS aceita as escritas que ele faz no TweakDB (`SetFlat` de lista e de
-  texto: 1898 de 1898; `CreateRecord` de slot pelo nome curto: 54 de 54).
+  compilar. Mod de Windows com `.reds` que chamam funções que o jogo não tem continua
+  compilando como antes. Mod de Windows que escreve no TweakDB funciona: o BWMS aceita as
+  escritas que ele faz (`SetFlat` de lista e de texto: 1898 de 1898; `CreateRecord` de
+  slot pelo nome curto: 54 de 54).
 - **Pasta `Mods/`.** Jogue a pasta de um mod do Nexus como vem no zip (`archive/pc/mod/`,
   `r6/scripts/`, `r6/tweaks/` ou arquivos soltos) em `Mods/`, na pasta do jogo (ao lado do
   `Cyberpunk2077.app`). No boot seguinte, sem passo manual, o BWMS usa o `.archive` (posto
@@ -81,7 +82,7 @@ Lista completa: [`docs/CHANGELOG-0.1.5-PUBLICO.md`](docs/CHANGELOG-0.1.5-PUBLICO
   disco, e montado pelo próprio jogo com a prioridade mais alta: vence o jogo base e o
   Phantom Liberty), o `.xl` (`*.archive.xl` e
   `*.xl`: as tabelas de runtime são geradas no boot; `localization.onscreens` e
-  `factories` vão para o ArchiveXL próprio da 2.5, que o jogo aplica), o `.yaml`/`.tweak`
+  `factories` vão para o suporte a `.xl` próprio da 2.5, que o jogo aplica), o `.yaml`/`.tweak`
   (aplicado ao carregar o save, pelo mesmo caminho dos tweaks de mod) e o `.reds`. A
   `Mods/` vence o jogo e, no `.archive`, o mod.io; entre duas pastas da `Mods/`, no
   archive e no `.xl` vence a que vem antes em ordem de caminho (letra a letra,
@@ -90,7 +91,7 @@ Lista completa: [`docs/CHANGELOG-0.1.5-PUBLICO.md`](docs/CHANGELOG-0.1.5-PUBLICO
   scripts de plugin são compilados antes de o jogo ler os scripts, só quando algo mudou.
   Medido fora do jogo, com mudança: ~0,7 s sem mod quebrado, ~1,3 s com 1, ~2 s em
   cascata (mod quebrado por outro quebrado); 3–5 ms sem mudança. Num boot real, 877 ms
-  com Virtual Atelier e Equipment-EX, 48 `.reds` da `Mods/`. Sem mudança, medido
+  com os dois mods de Windows com telas próprias, 48 `.reds` da `Mods/`. Sem mudança, medido
   também no jogo: 7 ms (boot de 2026-10-18).
 - **Mod com script quebrado sai sozinho.** Se um `.reds` de um mod da `Mods/` não
   compila, só aquele mod fica de fora; os outros mods e o BWMS entram e o jogo abre. O
@@ -107,10 +108,11 @@ Lista completa: [`docs/CHANGELOG-0.1.5-PUBLICO.md`](docs/CHANGELOG-0.1.5-PUBLICO
   inverter: renomear a pasta ou o arquivo), seções de `.xl` que o BWMS ainda não aplica e
   a seção Scripts. Cada mod tem a linha `luz / light` (verde: entrou inteiro, amarelo:
   em parte, vermelho: não funciona); a seção `[mod.io]` lista os mods do mod.io; os
-  caminhos são relativos, sem o caminho da máquina. O `.lua` sai como "mod de CET: o BWMS roda pela pasta Mods; o que depende
-  de .dll não"; a `.dll`, como "plugin de Windows, não carrega no Mac".
+  caminhos são relativos, sem o caminho da máquina. O `.lua` sai como mod de Lua que o
+  BWMS roda pela pasta Mods, menos o que depende de `.dll`; a `.dll`, como plugin de
+  Windows que não carrega no Mac.
 - **Spawn de widget no build do usuário.** O override de controller no spawn de widget
-  (`Item:Controller`, usado pelo Virtual Atelier e pelo Equipment-EX), com a injeção da
+  (`Item:Controller`, usado pelos dois mods de Windows com telas próprias), com a injeção da
   dependência da biblioteca externa pelo RTTI, e o evento `InkWidget/Spawn` com o filtro
   `inkWidgetTarget` agora estão no build do usuário. O override e a injeção valem nos
   spawns síncronos e nos assíncronos; o evento `InkWidget/Spawn` sai só do síncrono.
@@ -143,12 +145,12 @@ Lista completa: [`docs/CHANGELOG-0.1.5-PUBLICO.md`](docs/CHANGELOG-0.1.5-PUBLICO
   `Mods/` (o jogo monta o mod.io depois, no mesmo grupo). O BWMS só lê o mod.io: nunca
   escreve na pasta dele nem no `EnabledMods.json`. Sem caixa de marcar. Antes, o selo
   mostrava "0" cinza com mods na `Mods/`.
-- **`factories` aplicado pelo jogo.** O ArchiveXL próprio da 2.5 aplica a seção
+- **`factories` aplicado pelo jogo.** O suporte a `.xl` próprio da 2.5 aplica a seção
   `factories` dos `.xl` da `Mods/`; o BWMS não tem mais gancho nem tabela para isso. Se o
   jogo não puder aplicar (ex.: o `.csv` não está em nenhum archive), o mod fica amarelo
   com o motivo.
 - **Travamento antes do "pressione qualquer tecla" consertado.** O gancho do BWMS na
-  abertura de vídeo não repassava um argumento (as flags) ao Bink; dependendo do boot,
+  abertura de vídeo não repassava um argumento (as flags) à biblioteca de vídeo do jogo; dependendo do boot,
   isso prendia a thread de leitura do jogo. Consertado em 2026-10-24. Outros 2 ganchos
   do BWMS consertados: um não repassava um argumento do registro de atualizações do
   motor; outro, num trecho de 8 bytes, sobrescrevia o começo da função vizinha.
@@ -164,14 +166,14 @@ Lista completa: [`docs/CHANGELOG-0.1.5-PUBLICO.md`](docs/CHANGELOG-0.1.5-PUBLICO
 Provado em jogo na 2.5 (build de desenvolvimento, 2026-10-23): boot até a gameplay com o
 save carregado sozinho; tweaks pela `Mods/` com um mod de teste do BWMS (13 de 13 valores
 no TweakDB); `.archive` da `Mods/` montados pelo jogo (4 de 4); a aba Cheats (God Mode,
-Invisibilidade, Zerar procurado); as telas do Virtual Atelier e do Equipment-EX com os
+Invisibilidade, Zerar procurado); as telas dos dois mods de Windows, com os
 itens e o controller do mod (4 de 4). Em 2026-10-24: mod com script quebrado saindo
 sozinho, o selo e a aba Mods com os mods da `Mods/` e do mod.io, o `factories` aplicado
 pelo jogo e o roteiro completo depois do conserto do travamento. Ainda sem
-prova: mod real de TweakXL do Nexus pela `Mods/`, tecla entregue a widget de mod e o
-build público do zip instalado na 2.5. `.xl` pela via nativa do jogo: a 2.5 traz um
-ArchiveXL próprio, que lê `.json`, e os textos de interface (`localization.onscreens`)
-dos `.xl` da `Mods/` passam a ir por ele (provado com Equipment-EX e Virtual Atelier),
+prova: mod real do Nexus com `.yaml`/`.tweak` pela `Mods/`, tecla entregue a widget de mod e o
+build público do zip instalado na 2.5. `.xl` pela via nativa do jogo: a 2.5 traz suporte
+a `.xl` próprio, que lê `.json`, e os textos de interface (`localization.onscreens`)
+dos `.xl` da `Mods/` passam a ir por ele (provado com os dois mods de Windows com telas próprias),
 e o `factories` também. As outras seções continuam aplicadas pelo BWMS, e os textos
 também quando mod do mod.io ou outra pasta de mods do jogo traz textos junto; o
 `Mods/BWMS-RELATORIO.txt` diz quem aplica cada seção.
@@ -303,12 +305,12 @@ BWMS. Limpeza completa opcional: apague `red4ext/`,
 ```
 cp77-console/            A dylib do runtime (console in-game, pontes nativas)
 bwms/                    Ferramenta de linha de comando unificada (`bwms mods checar`: checar os scripts do jogo; `bwms tweak`: ler / editar tweakdb.bin; `bwms archive`: ler / extrair containers .archive; `bwms input`: mesclar definições de keybind / input) + `bwms-helper`, o ajudante sem privilégio usado pelo instalador (`src/bin/`)
-bwms-primitives/         Fonte única do que o runtime e as ferramentas calculam igual (crate-folha): hashes, endereços do jogo, parser do TweakXL, tabelas de runtime da `Mods/`, migração da biblioteca, núcleos puros
+bwms-primitives/         Fonte única do que o runtime e as ferramentas calculam igual (crate-folha): hashes, endereços do jogo, parser de `.yaml`/`.tweak`, tabelas de runtime da `Mods/`, migração da biblioteca, núcleos puros
 r6/scripts/blackwall-mods/   fontes redscript (compilados no momento da instalação)
                          — mesmo conjunto que o pacote publicado leva
 example-plugin/          Plugin nativo de exemplo (C ABI), pra autores de mod
                          (o pacote publicado leva esta mesma fonte em `engine/example-plugin/`)
-docs/                    API pro modder, fontes de mods, changelog público
+docs/                    API pro modder, changelog público
 INSTALAR.command         Instalador para usuário final (ponto de entrada)
 bwms-install.sh          Script instalador (terminal / scriptável)
 ```

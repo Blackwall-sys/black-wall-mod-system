@@ -1,5 +1,5 @@
 // blackwall-mods.reds — o botão MODS e a página de cheats na lista do menu de pausa, e a entrada do V no jogo (`BwmsAoEntrarNoJogo`).
-// A página reusa Clear/AddMenuItem/Refresh herdados de gameuiMenuItemListGameController (texto limpo), sem CET e sem hook de runtime;
+// A página reusa Clear/AddMenuItem/Refresh herdados de gameuiMenuItemListGameController (texto limpo), sem Lua e sem hook de runtime;
 // só no menu de PAUSA (precisa de player vivo).
 //
 // Modo Imortal le o ESTADO REAL do God Mode via GodModeSystem.HasGodMode (sem campo proprio
@@ -28,7 +28,7 @@ public func BwmsAoEntrarNoJogo(game: GameInstance) -> Void {
   if !IsDefined(pp) {
     return;
   };
-  // ArchiveXL #29: o PuppetStateHandler do V (estado de braços e pés para os sufixos de aparência).
+  // O PuppetStateHandler do V (estado de braços e pés para os sufixos de aparência).
   pp.BwmsAlwaysRun_estado_do_boneco();
   // God Mode ligado na config externa (fora do save) volta. O save pode já trazer a entrada `BWMS`: só põe sem invulnerabilidade, para não
   // duplicar a fonte.

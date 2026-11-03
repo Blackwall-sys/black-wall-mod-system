@@ -1,4 +1,4 @@
-// bwms-ui-themecolors.reds — reimplementação PRÓPRIA das cores de tema (catálogo Codeware #114).
+// bwms-ui-themecolors.reds — as cores de tema.
 //
 // A cor NÃO é um número guardado aqui. Componentes fixos de `HDRColor` teriam dois problemas:
 //   1. **Envelhece calado.** Se um patch do jogo (ou um mod de tema) mexer na paleta, as cores

@@ -290,13 +290,13 @@ impl Parser<'_> {
     fn comando(&mut self) -> R<Option<Stat>> {
         if self.aceita("if")? {
             let mut casos = Vec::new();
-            let c = self.expr(0)?;
+            let c = self.expr()?;
             self.exige("then")?;
             casos.push((c, self.bloco_com_escopo()?));
             let mut senao = None;
             loop {
                 if self.aceita("elseif")? {
-                    let c = self.expr(0)?;
+                    let c = self.expr()?;
                     self.exige("then")?;
                     casos.push((c, self.bloco_com_escopo()?));
                 } else if self.aceita("else")? {
@@ -311,7 +311,7 @@ impl Parser<'_> {
             return Ok(Some(Stat::If(casos, senao)));
         }
         if self.aceita("while")? {
-            let c = self.expr(0)?;
+            let c = self.expr()?;
             self.exige("do")?;
             let b = self.bloco_com_escopo()?;
             self.exige("end")?;
@@ -331,7 +331,7 @@ impl Parser<'_> {
             let b = self.bloco();
             let c = b.and_then(|b| {
                 self.exige("until")?;
-                Ok((b, self.expr(0)?))
+                Ok((b, self.expr()?))
             });
             self.fechar();
             let (b, c) = c?;
@@ -400,10 +400,10 @@ impl Parser<'_> {
     fn comando_for(&mut self) -> R<Stat> {
         let n1 = self.nome()?;
         if self.aceita("=")? {
-            let ini = self.expr(0)?;
+            let ini = self.expr()?;
             self.exige(",")?;
-            let fim = self.expr(0)?;
-            let passo = if self.aceita(",")? { Some(self.expr(0)?) } else { None };
+            let fim = self.expr()?;
+            let passo = if self.aceita(",")? { Some(self.expr()?) } else { None };
             self.exige("do")?;
             self.abrir();
             let v = self.declarar(n1);
@@ -464,9 +464,9 @@ impl Parser<'_> {
     }
 
     fn lista_expr(&mut self) -> R<Vec<Expr>> {
-        let mut v = vec![self.expr(0)?];
+        let mut v = vec![self.expr()?];
         while self.aceita(",")? {
-            v.push(self.expr(0)?);
+            v.push(self.expr()?);
         }
         Ok(v)
     }
@@ -479,7 +479,7 @@ impl Parser<'_> {
             }
             Tok::P("(") => {
                 self.avancar()?;
-                let e = self.expr(0)?;
+                let e = self.expr()?;
                 self.exige(")")?;
                 Ok(Expr::Parenteses(Box::new(e)))
             }
@@ -518,7 +518,7 @@ impl Parser<'_> {
                 }
                 Tok::P("[") => {
                     self.avancar()?;
-                    let k = self.expr(0)?;
+                    let k = self.expr()?;
                     self.exige("]")?;
                     e = Expr::Index(Box::new(e), Box::new(k));
                 }
@@ -542,16 +542,16 @@ impl Parser<'_> {
         let mut campos = Vec::new();
         while !self.e("}") {
             if self.aceita("[")? {
-                let k = self.expr(0)?;
+                let k = self.expr()?;
                 self.exige("]")?;
                 self.exige("=")?;
-                campos.push(Campo::Chave(k, self.expr(0)?));
+                campos.push(Campo::Chave(k, self.expr()?));
             } else if matches!(self.tok, Tok::Nome(_)) && matches!(self.olhar_adiante()?, Tok::P("=")) {
                 let n = self.nome()?;
                 self.exige("=")?;
-                campos.push(Campo::Chave(Expr::Str(Rc::from(n.as_bytes())), self.expr(0)?));
+                campos.push(Campo::Chave(Expr::Str(Rc::from(n.as_bytes())), self.expr()?));
             } else {
-                campos.push(Campo::Pos(self.expr(0)?));
+                campos.push(Campo::Pos(self.expr()?));
             }
             if !self.aceita(",")? && !self.aceita(";")? {
                 break;
@@ -585,60 +585,168 @@ impl Parser<'_> {
         Ok(e)
     }
 
-    /// Precedência da linguagem: (esquerda, direita) de cada operador binário; o unário vale 8.
-    fn expr(&mut self, limite: u8) -> R<Expr> {
-        let un = match &self.tok {
-            Tok::P("not") => Some(Un::Not),
-            Tok::P("-") => Some(Un::Neg),
-            Tok::P("#") => Some(Un::Len),
-            _ => None,
-        };
-        let mut e = match un {
-            Some(u) => {
-                self.avancar()?;
-                let o = self.expr(8)?;
-                match (u, o) {
-                    (Un::Neg, Expr::Num(n)) => Expr::Num(-n),
-                    (u, o) => Expr::Un(u, Box::new(o)),
-                }
-            }
-            None => self.expr_simples()?,
-        };
+    /// Porta de entrada da expressão: o nível de menor precedência. Uma função por nível (Manual 5.1 §2.5.6), da mais fraca à mais forte.
+    fn expr(&mut self) -> R<Expr> {
+        self.expr_ou()
+    }
+
+    fn expr_ou(&mut self) -> R<Expr> {
+        let mut e = self.expr_e()?;
+        while self.aceita("or")? {
+            let d = self.expr_e()?;
+            e = Expr::Ou(Box::new(e), Box::new(d));
+        }
+        Ok(e)
+    }
+
+    fn expr_e(&mut self) -> R<Expr> {
+        let mut e = self.expr_comparacao()?;
+        while self.aceita("and")? {
+            let d = self.expr_comparacao()?;
+            e = Expr::E(Box::new(e), Box::new(d));
+        }
+        Ok(e)
+    }
+
+    /// Sem regra de cadeia: `a < b < c` é `(a < b) < c`, e o erro de comparar booleano com número fica para o executor.
+    fn expr_comparacao(&mut self) -> R<Expr> {
+        let mut e = self.expr_concat()?;
         loop {
-            let (esq, dir) = match &self.tok {
-                Tok::P("or") => (1, 1),
-                Tok::P("and") => (2, 2),
-                Tok::P("<" | ">" | "<=" | ">=" | "~=" | "==") => (3, 3),
-                Tok::P("..") => (5, 4),
-                Tok::P("+" | "-") => (6, 6),
-                Tok::P("*" | "/" | "%") => (7, 7),
-                Tok::P("^") => (10, 9),
+            let op = match &self.tok {
+                Tok::P("<") => Bin::Menor,
+                Tok::P(">") => Bin::Maior,
+                Tok::P("<=") => Bin::MenorIg,
+                Tok::P(">=") => Bin::MaiorIg,
+                Tok::P("~=") => Bin::Dif,
+                Tok::P("==") => Bin::Igual,
                 _ => return Ok(e),
             };
-            if esq <= limite {
-                return Ok(e);
-            }
-            let Tok::P(op) = self.tok.clone() else { return Ok(e) };
             self.avancar()?;
-            let d = self.expr(dir)?;
-            let (a, b) = (Box::new(e), Box::new(d));
-            e = match op {
-                "or" => Expr::Ou(a, b),
-                "and" => Expr::E(a, b),
-                "<" => Expr::Bin(Bin::Menor, a, b),
-                ">" => Expr::Bin(Bin::Maior, a, b),
-                "<=" => Expr::Bin(Bin::MenorIg, a, b),
-                ">=" => Expr::Bin(Bin::MaiorIg, a, b),
-                "~=" => Expr::Bin(Bin::Dif, a, b),
-                "==" => Expr::Bin(Bin::Igual, a, b),
-                ".." => Expr::Bin(Bin::Concat, a, b),
-                "+" => Expr::Bin(Bin::Soma, a, b),
-                "-" => Expr::Bin(Bin::Sub, a, b),
-                "*" => Expr::Bin(Bin::Mul, a, b),
-                "/" => Expr::Bin(Bin::Div, a, b),
-                "%" => Expr::Bin(Bin::Resto, a, b),
-                _ => Expr::Bin(Bin::Pot, a, b),
-            };
+            let d = self.expr_concat()?;
+            e = Expr::Bin(op, Box::new(e), Box::new(d));
         }
+    }
+
+    /// `..` associa à direita: o lado direito é o próprio nível.
+    fn expr_concat(&mut self) -> R<Expr> {
+        let e = self.expr_aditiva()?;
+        if self.aceita("..")? {
+            let d = self.expr_concat()?;
+            return Ok(Expr::Bin(Bin::Concat, Box::new(e), Box::new(d)));
+        }
+        Ok(e)
+    }
+
+    fn expr_aditiva(&mut self) -> R<Expr> {
+        let mut e = self.expr_multiplicativa()?;
+        loop {
+            let op = match &self.tok {
+                Tok::P("+") => Bin::Soma,
+                Tok::P("-") => Bin::Sub,
+                _ => return Ok(e),
+            };
+            self.avancar()?;
+            let d = self.expr_multiplicativa()?;
+            e = Expr::Bin(op, Box::new(e), Box::new(d));
+        }
+    }
+
+    fn expr_multiplicativa(&mut self) -> R<Expr> {
+        let mut e = self.expr_unaria()?;
+        loop {
+            let op = match &self.tok {
+                Tok::P("*") => Bin::Mul,
+                Tok::P("/") => Bin::Div,
+                Tok::P("%") => Bin::Resto,
+                _ => return Ok(e),
+            };
+            self.avancar()?;
+            let d = self.expr_unaria()?;
+            e = Expr::Bin(op, Box::new(e), Box::new(d));
+        }
+    }
+
+    /// O operando do unário é o nível da potência: `-x^2` = `-(x^2)`. Unário seguido de unário (`- - 2`, `not not x`) volta para cá.
+    fn expr_unaria(&mut self) -> R<Expr> {
+        let op = match &self.tok {
+            Tok::P("not") => Un::Not,
+            Tok::P("#") => Un::Len,
+            Tok::P("-") => Un::Neg,
+            _ => return self.expr_potencia(),
+        };
+        self.avancar()?;
+        let e = self.expr_unaria()?;
+        Ok(Expr::Un(op, Box::new(e)))
+    }
+
+    /// `^` associa à direita e o expoente aceita unário (`2^-3`): o lado direito volta ao nível unário, que cai de novo aqui.
+    fn expr_potencia(&mut self) -> R<Expr> {
+        let base = self.expr_simples()?;
+        if self.aceita("^")? {
+            let expoente = self.expr_unaria()?;
+            return Ok(Expr::Bin(Bin::Pot, Box::new(base), Box::new(expoente)));
+        }
+        Ok(base)
+    }
+}
+
+#[cfg(test)]
+mod testes {
+    use crate::{Lua, Value};
+
+    fn valor(codigo: &str) -> crate::Result<Value> {
+        Lua::new().load(format!("return {codigo}")).call::<Value>(())
+    }
+
+    fn numero(codigo: &str) -> f64 {
+        match valor(codigo) {
+            Ok(Value::Integer(i)) => i as f64,
+            Ok(Value::Number(n)) => n,
+            outro => panic!("{codigo}: esperava número, veio {outro:?}"),
+        }
+    }
+
+    fn booleano(codigo: &str) -> bool {
+        match valor(codigo) {
+            Ok(Value::Boolean(b)) => b,
+            outro => panic!("{codigo}: esperava booleano, veio {outro:?}"),
+        }
+    }
+
+    #[test]
+    fn potencia_e_unarios() {
+        assert_eq!(numero("2^3^2"), 512.0);
+        assert_eq!(numero("-2^2"), -4.0);
+        assert_eq!(numero("2^-3"), 0.125);
+        assert_eq!(numero("-2^-2"), -0.25);
+        assert_eq!(numero("(function() local x = 3 return -x^2 end)()"), -9.0);
+        assert_eq!(numero("- - 2"), 2.0);
+        assert_eq!(numero("-#\"ab\""), -2.0);
+        assert_eq!(numero("#{1, 2, 3} * 2"), 6.0);
+    }
+
+    #[test]
+    fn aritmetica_e_concatenacao() {
+        assert_eq!(numero("1 + 2 * 3 ^ 2"), 19.0);
+        assert_eq!(numero("7 - 2 - 1"), 4.0);
+        assert_eq!(numero("8 / 2 / 2"), 2.0);
+        assert_eq!(numero("2 * 3 % 4"), 2.0);
+        assert_eq!(numero("-3 % 5"), 2.0);
+        assert!(matches!(valor("\"a\" .. 1 + 2"), Ok(Value::String(s)) if &*s.0 == b"a3"));
+        assert!(matches!(valor("2 .. 3 ^ 2"), Ok(Value::String(s)) if &*s.0 == b"29"));
+        assert!(matches!(valor("1 .. 2 .. 3"), Ok(Value::String(s)) if &*s.0 == b"123"));
+    }
+
+    #[test]
+    fn comparacao_e_logicos() {
+        assert!(booleano("not nil == true"));
+        assert!(!booleano("not 1 == 2"));
+        assert!(booleano("1 < 2 == true"));
+        assert!(booleano("1 == 1 ~= false"));
+        assert!(booleano("1 + 1 == 2 and 3 > 2"));
+        assert!(!booleano("nil or false and 1"));
+        assert_eq!(numero("1 or error('x')"), 1.0);
+        assert!(valor("1 < 2 < 3").is_err());
+        assert!(Lua::new().load("return 1 +").into_function().is_err());
     }
 }

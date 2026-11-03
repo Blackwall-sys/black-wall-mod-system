@@ -1,14 +1,14 @@
-// bwms-questgraph.reds — leitura do grafo de fase de quest pelos campos do motor, a base do `QuestPhaseGraphAccessor` do Codeware
-// (`App/Quest/QuestPhaseGraphAccessor.hpp`, item #160). A API completa (os 14 `Find*` e `GetAllGraphNodePaths`) é a
+// bwms-questgraph.reds — leitura do grafo de fase de quest pelos campos do motor, a base do `QuestPhaseGraphAccessor`.
+// A API completa (os 14 `Find*` e `GetAllGraphNodePaths`) é a
 // `BwmsQuestPhaseGraphAccessor` (`bwms-quest-accessor.reds`); aqui ficam o grafo da fase raiz, o filtro de nós por tipo
-// (`GetNodesOfType<T>()` do Codeware) e os leitores genéricos por offset.
+// (`GetNodesOfType<T>()`) e os leitores genéricos por offset.
 //
 // Cadeia de acesso, só offsets de CAMPO (sem deslocamento de vtable):
 //   GameInstance.GetQuestsSystem(game) -> ref<QuestsSystem>   [native vanilla, orphans.script:11445]
-//   QuestsSystem+0x68       = RootPhase: Handle<questPhaseInstance>   [header curado do Codeware]
+//   QuestsSystem+0x68       = RootPhase: Handle<questPhaseInstance>   [header curado]
 //   QuestPhaseInstance+0x40 = Graph: Handle<questGraphDefinition>     [mesmo header]
 //   questGraphDefinition+0x30 = nodes: DynArray<Handle<GraphNodeDefinition>>  [header gerado da reflection,
-//                                                                       RED4ext.SDK/.../Generated/graph/GraphDefinition.hpp]
+//                                                                       Generated/graph/GraphDefinition.hpp]
 //
 // Os tipos concretos de nó (`questInputNodeDefinition`/`questEventManagerNodeDefinition`/`questJournalNodeDefinition`/...) não
 // aparecem no corpus vanilla: declarar a ancestralidade às cegas é a categoria do `CMesh`, que derruba o bind. Todo handle de nó sai
@@ -25,16 +25,16 @@ public func BwmsGetRootQuestGraph() -> ref<IScriptable> {
 }
 
 // -----------------------------------------------------------------------------------------
-// Leitores genéricos (campo `Handle<T>` e array `DynArray<Handle<T>>` num offset qualquer): compõem em redscript os métodos que o
-// Codeware resolve com Cast aninhado em `.actions`/`.condition`/`.type`, sem declarar tipo de nó. Offsets dos headers gerados da
+// Leitores genéricos (campo `Handle<T>` e array `DynArray<Handle<T>>` num offset qualquer): compõem em redscript a leitura de
+// `.actions`/`.condition`/`.type`, sem declarar tipo de nó. Offsets dos headers gerados da
 // reflection do jogo:
-//   RED4ext.SDK/.../Generated/quest/SpawnManagerNodeDefinition.hpp
+//   Generated/quest/SpawnManagerNodeDefinition.hpp
 //     -> actions: DynArray<SpawnManagerNodeActionEntry> @ +0x48
-//   RED4ext.SDK/.../Generated/quest/SpawnManagerNodeActionEntry.hpp
+//   Generated/quest/SpawnManagerNodeActionEntry.hpp
 //     -> struct de 0x10 bytes = o próprio Handle<SpawnManagerNodeType> (offset 0 do entry)
-//   RED4ext.SDK/.../Generated/quest/FactsDBManagerNodeDefinition.hpp
+//   Generated/quest/FactsDBManagerNodeDefinition.hpp
 //     -> type: Handle<IFactsDBManagerNodeType> @ +0x48
-//   RED4ext.SDK/.../Generated/quest/PauseConditionNodeDefinition.hpp
+//   Generated/quest/PauseConditionNodeDefinition.hpp
 //     -> condition: Handle<IBaseCondition> @ +0x48
 
 native func BwmsQuestNodeHandleField(node: ref<IScriptable>, offset: Int32) -> ref<IScriptable>;

@@ -1,4 +1,4 @@
-// bwms-inksystem-worldwidgets.reds — Codeware `#100`: `GetWorldWidgets` com nome BWMS.
+// bwms-inksystem-worldwidgets.reds — `GetWorldWidgets` com nome BWMS.
 //
 // Os controllers dos componentes de widget do world layer (telas de device, placas etc.), lidos direto do layer sem chamar nada. Só entram os
 // componentes com janela e controller vivo.

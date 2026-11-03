@@ -109,7 +109,7 @@ static PHASE_MAX_CHANGED_ELAPSED: AtomicU64 = AtomicU64::new(0);
 /// menu vencia 0–2 s depois do lever, com o save já carregando (214 de 214 logs, HISTORICO 2026-10-01).
 static FASE_DO_SM: AtomicI64 = AtomicI64::new(-1);
 /// Teto do splash depois do 1º phase 5, só para load que não termina: 1º→último phase 5 medido em 12–29 s em 223 logs
-/// (`[tweakxl] ... 1º phase 5 há N s`). Folga larga porque a regra do dono é o splash até o load terminar.
+/// (`[tweaks] ... 1º phase 5 há N s`). Folga larga porque a regra do dono é o splash até o load terminar.
 const SPLASH_TETO_APOS_PHASE5_SECS: u64 = 180;
 const BOOT_HANG_WATCHDOG_SECS: u64 = 75; // travado NA engagement (phase<=1) — claramente quebrado
 const BOOT_STUCK_LOADING_WATCHDOG_SECS: u64 = 120; // phase 2 (loading) — conservador (pode ser load lento)
@@ -565,7 +565,7 @@ static EXECPACE_BURACO_MAX: AtomicU64 = AtomicU64::new(0);
 
 // ===== [fntrace] — instrumentação da rodada 32 (2026-08-16/17), continuação direta da bisecção
 // do achado `[execpace]` (rodada 31): sabemos que o log VIVO para 155+s logo após
-// `codeware-inklayerwrapper-smoke.reds` terminar, com o processo consumindo 852-863% CPU
+// o smoke do wrapper de `inkLayer` terminar, com o processo consumindo 852-863% CPU
 // sustentado — mas `[execpace]` só diz O RITMO (quantas chamadas/segundo), nunca QUAL função
 // está sendo chamada. `[fntrace]` fecha essa lacuna: loga o CNAME resolvido (`func+0x10`, mesmo
 // offset já usado por `RUST_OV_CNAME`) toda vez que
@@ -617,17 +617,17 @@ pub static FROMTD_RET: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 /// escreve `RUST_OV_VAL` no aOut (tipado) e RETORNA (suprime a original). É o suppress puro
 /// (interceptar + retorno custom + pular original) num caminho Rust-only — o que o teste via
 /// lua não conseguia (o cb lua crashava no stack profundo do aninhamento).
-/// Só no dev: quem arma são os comandos de prova `ovcall` e `cethooksproof`, e prova de item fechado não vai
+/// Só no dev: quem arma são os comandos de prova `ovcall` e `luaganchosprova`, e prova de item fechado não vai
 /// ao público (régua de 2026-10-03). Assim o executor do público não paga os 2 loads por chamada.
 #[cfg(feature = "devtools")]
 pub static RUST_OV_CNAME: AtomicU64 = AtomicU64::new(0);
 #[cfg(feature = "devtools")]
 pub static RUST_OV_VAL: AtomicI64 = AtomicI64::new(0);
 
-/// `cet-hooks-shippable` — perna OBSERVE (a que faltava: Override+Suppress via `RUST_OV_*` já
+/// Hooks de produção — perna OBSERVE (a que faltava: Override+Suppress via `RUST_OV_*` já
 /// provados, 2026-07-13). Mesmo mecanismo do Override, mas NÃO suprime: só loga que o callback
 /// disparou e deixa a execução CAIR PRA FORA (a original roda normalmente depois). Prova que dá
-/// pra "escutar" um método real sem alterar seu comportamento — o 3º modo do contrato CET
+/// pra "escutar" um método real sem alterar seu comportamento — o 3º modo do contrato da API Lua
 /// (Observe/Override/Suppress) por caminho não-Lua. Só no dev, pelo mesmo motivo de `RUST_OV_CNAME`.
 #[cfg(feature = "devtools")]
 pub static RUST_OBS_CNAME: AtomicU64 = AtomicU64::new(0);
@@ -779,7 +779,7 @@ pub(crate) unsafe fn selfboot_if_needed() {
             #[cfg(feature = "devtools")]
             crate::diagnostico::censo::install();
             crate::roupas_e_armas::terceira_pessoa::install();
-            // Self-test DEV-GATED do hooking + diagnóstico ArchiveXL. SÓ roda sob
+            // Self-test DEV-GATED do hooking + diagnóstico de recursos. SÓ roda sob
             // dev_mode() (no-op em produção); chamado DEPOIS do hook do executor estar
             // instalado. Não toca em nada do jogo num boot normal.
             #[cfg(feature = "devtools")]
@@ -793,7 +793,7 @@ pub(crate) unsafe fn selfboot_if_needed() {
     // (RedScriptsHost::Load → orchestrator @0x101113e44) roda muito cedo. register_all tb no cp77_tick. No selfboot/ctor o
     // CRTTISystem::Get crasha (RTTI não pronto).
     // SAÍDA LIMPA (incondicional): mata a janela "Cyberpunk2077 quit unexpectedly" ao FECHAR.
-    // Não é gateado — o crash de shutdown do RED4ext afeta todo fechamento.
+    // Não é gateado — o crash de shutdown da dylib de terceiro afeta todo fechamento.
     install_clean_exit();
     // App Nap OFF (incondicional): o macOS pausa o jogo quando ele não está na frente (janela
     // ocluída) → no CPVR, olhando o capacete, o jogo congela (boot lento + engagement travada +
@@ -1082,11 +1082,11 @@ unsafe fn install_phase_skip_near4() {
 static ORIG_BINK_SKIP: AtomicU64 = AtomicU64::new(0);
 
 // ===== SAÍDA LIMPA: elimina a janela de erro ao fechar o jogo =====
-// O binário do jogo carrega o `RED4ext.dylib` (port C++, LC_LOAD do setup CPVR/memaxo). No
-// `exit()`, `__cxa_finalize_ranges` roda o `RED4extShutdown`, que desfaz os detours dele e dá
+// O binário do jogo pode carregar uma dylib C++ de terceiro (LC_LOAD de um setup de mod). No
+// `exit()`, `__cxa_finalize_ranges` roda o shutdown dela, que desfaz os detours dela e dá
 // SIGSEGV em `DetourTransaction::Abort()` → o macOS abre "Cyberpunk2077 quit unexpectedly"
-// (2 crash-reports idênticos confirmam: bug determinístico). O nosso runtime NÃO depende do
-// RED4ext (otool -L: 0 link). Fix: interceptar o `exit` da libc e encerrar por syscall direto
+// (2 crash-reports idênticos confirmam: bug determinístico). O nosso runtime NÃO depende
+// dessa dylib (otool -L: 0 link). Fix: interceptar o `exit` da libc e encerrar por syscall direto
 // (SYS_exit, ver `exit_replacement`), que termina o processo SEM rodar o `__cxa_finalize`
 // (portanto sem o shutdown que crasha). O `exit`
 // só é chamado no encerramento, então não há efeito em runtime; settings do jogo são gravados na
@@ -1094,9 +1094,9 @@ static ORIG_BINK_SKIP: AtomicU64 = AtomicU64::new(0);
 static EXIT_HOOKED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "C" fn exit_replacement(status: i32) {
-    // `cet-lifecycle-events` (onShutdown): dispara ANTES de qualquer coisa — o motor ainda está
+    // Eventos de ciclo de vida (onShutdown): dispara ANTES de qualquer coisa — o motor ainda está
     // 100% intacto aqui (é POR ISSO que este hook existe: interceptamos `exit()` ANTES do
-    // `__cxa_finalize_ranges`/RED4extShutdown desmontarem qualquer coisa). `fire_event` é o MESMO
+    // `__cxa_finalize_ranges` desmontar qualquer coisa). `fire_event` é o MESMO
     // mecanismo já provado em Input/Key, Session/Ready, Overlay/Open/Close — só percorre a
     // registry e chama via `call_func` (nenhuma escrita/lock novo). `catch_unwind` por segurança
     // (um mod que panica aqui não pode impedir a saída limpa, que é o objetivo #1 deste hook).
@@ -1109,7 +1109,7 @@ unsafe extern "C" fn exit_replacement(status: i32) {
         0
     };
     crate::log_dev!("[cleanexit] Session/End (onShutdown) -> {n} callback(s)");
-    // red4ext-gamestates-add: Shutdown.OnEnter (type=3) — exit() hookado = entrando em Shutdown
+    // Shutdown.OnEnter (type=3) — exit() hookado = entrando em Shutdown
     let _ = std::panic::catch_unwind(|| crate::mods_do_usuario::api::call_game_state_enter(EstadoDoJogo::Shutdown));
     // Via ALTERNATIVA (2026-07-18): `fire_event`/CallbackSystem exige um TARGET (ref<IScriptable>)
     // vivo — mas em quit real o mundo/player já foram desmontados antes do exit() rodar (achado
@@ -1132,7 +1132,7 @@ unsafe extern "C" fn exit_replacement(status: i32) {
         "[cleanexit] BwmsOnGameShutdown (onShutdown, funcao global) -> {}",
         if g.is_some() { "chamada OK" } else { "nao achada/nao chamou" }
     );
-    // RED4ext.SDK `#45` (`EMainReason::Unload`): sinaliza plugins Rust ANTES do processo morrer
+    // Descarga (`Unload`): sinaliza plugins Rust ANTES do processo morrer
     // (mesmo timing/motivo dos 2 disparos acima — motor ainda intacto aqui). Isolado por plugin.
     let _ = std::panic::catch_unwind(crate::mods_do_usuario::plugins::unload_all_plugins);
     // Desarma o dead-man's switch do lever (ver inicio/natives.rs::tramp_fire_start_state): chegar
@@ -1141,7 +1141,7 @@ unsafe extern "C" fn exit_replacement(status: i32) {
     clear_boot_attempt_marker();
     crate::inicio::energia::apagar();
     crate::log_dev!(
-        "[cleanexit] exit({status}) interceptado -> exit syscall (pula finalize/RED4extShutdown)"
+        "[cleanexit] exit({status}) interceptado -> exit syscall (pula finalize)"
     );
     // Encerramento DIRETO por syscall (macOS arm64: x16=1 = SYS_exit, x0=status, svc #0x80).
     // NÃO usar o `_exit` da libc por FFI: o símbolo `_exit` no Mach-O é ambíguo e reentrava no
@@ -1305,12 +1305,12 @@ pub(crate) unsafe fn install_bind_bridge() {
 // 0x1011a84b4 = função DIFERENTE, ainda não hookada — o validador de CLASSE (itera funcs+props
 // de um "class descriptor" com offsets que não batem com o CClass real; hipótese: struct do
 // bundle/compilador, não da RTTI nativa). É provavelmente quem emite o erro que crasha o boot
-// quando o .reds da Facade é deployado (ver [[cp77-codeware-port]] pra RE completa).
+// quando o .reds da Facade é deployado.
 //
 // O hook (`class_validate_probe_hook`) é produção, instalado sem condição no `on_load` (lib.rs): na
 // 1ª chamada roda `fase_de_tipos` + `carregar_plugins`; em cada chamada forja/registra a classe do
-// BWMS que o validador está visitando (Facade `Codeware`, `CallbackSystem`, alvos, TweakXL...) antes
-// da original — sem a forja da `Codeware` o validador reprova e o boot cai no assert
+// BWMS que o validador está visitando (fachada de versão, `CallbackSystem`, alvos, fachada de tweaks...) antes
+// da original — sem a forja da fachada de versão o validador reprova e o boot cai no assert
 // `baseEngineInit.cpp:1094`. Sempre
 // chama o trampolim com os 8 registradores inalterados. Só o log/diagnóstico fica atrás de `dev_mode()`.
 const CLASS_VALIDATE_VM: u64 = 0x1_011a_84b4;
@@ -1319,19 +1319,19 @@ const CLASS_VALIDATE_PROLOGUE: u64 = 0xa907_6ffc_d103_43ff;
 static ORIG_CLASS_VALIDATE: AtomicU64 = AtomicU64::new(0);
 static CLASSVAL_CALLS: AtomicUsize = AtomicUsize::new(0);
 
-/// CName de "Codeware" pré-computado 1x (evita custo por chamada; a função dispara pra CADA
+/// CName da fachada de versão pré-computado 1x (evita custo por chamada; a função dispara pra CADA
 /// classe do bundle durante o bind — dezenas+ vezes por boot).
-static CODEWARE_CNAME: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-static CODEWARE_REGISTERED: AtomicBool = AtomicBool::new(false);
-/// `cw-callbacksystem-rtti` (2026-07-13) — mesma técnica da Facade, classe diferente
-/// (`CallbackSystem extends IGameSystem`). Guard próprio, mesmo padrão de `CODEWARE_REGISTERED`.
+static CNAME_DA_FACHADA_DE_VERSAO: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+static FACHADA_DE_VERSAO_REGISTRADA: AtomicBool = AtomicBool::new(false);
+/// CallbackSystem no RTTI (2026-07-13) — mesma técnica da Facade, classe diferente
+/// (`CallbackSystem extends IGameSystem`). Guard próprio, mesmo padrão de `FACHADA_DE_VERSAO_REGISTRADA`.
 static CALLBACKSYSTEM_CNAME: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 /// `inkWidget` é VANILLA (não forjada por nós), mas passa pelo `class_validate_probe_hook` (o hook intercepta a validação de QUALQUER classe do
 /// bind): a visita dele dispara o registro do `#96` em `inkUserData`.
 static INKWIDGET_CNAME: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 static INKWIDGET_REGISTERED: AtomicBool = AtomicBool::new(false);
 static CALLBACKSYSTEM_REGISTERED: AtomicBool = AtomicBool::new(false);
-// `cw-rawinput-realname` — 2 tentativas, 2 crashes, ambas revertidas (2026-07-13). Ver
+// Input cru com nome real — 2 tentativas, 2 crashes, ambas revertidas (2026-07-13). Ver
 // `blackwall-mods-dev/ponte-callbacksystem.reds` pro histórico completo.
 
 type Registrar = unsafe fn(&crate::rtti::Registry) -> String;
@@ -1347,21 +1347,21 @@ const AVISO_SO_REGISTRO: &str = "registrando AGORA (classe vanilla, sem forja)";
 const N_CLASSES_FORJADAS: usize = 38;
 /// Classes que o `class_validate_probe_hook` forja pela mesma regra: na visita do validador à classe (`name_hash` igual ao hash do
 /// nome), `swap` da flag da linha em `CLASSES_FORJADAS_REGISTRADAS` ANTES do `Registry::obtain`, depois `register_type_min` quando a
-/// 3ª coluna pede, o registrador e o `diag_class_forge_prediction` quando há tag. Codeware e CallbackSystem (diagnóstico próprio) e
+/// 3ª coluna pede, o registrador e o `diag_class_forge_prediction` quando há tag. A fachada de versão e CallbackSystem (diagnóstico próprio) e
 /// inkWidget (registro extra do `#96`) têm bloco próprio no hook. Cada chamada do validador traz uma classe só, então no máximo uma
 /// linha casa por chamada.
 static CLASSES_FORJADAS: [LinhaDeForja; N_CLASSES_FORJADAS] = [
-    // 2026-08-05 (achado de auditoria): mesmo padrão da Facade do Codeware, agora pro TweakXL
-    // (`TweakXL.Require`/`Version`/`Reload`, nunca portado apesar do "11/11 IMPL" do catálogo —
+    // 2026-08-05 (achado de auditoria): mesmo padrão da fachada de versão, agora pra fachada de tweaks
+    // (`Require`/`Version`/`Reload`, ausentes apesar do "11/11 IMPL" do catálogo —
     // esses métodos são a API de CONTROLE que mods chamam, não o pipeline de aplicação de flats).
     // Declarada em `ponte-fachada-de-tweaks.reds`.
     ("TweakXL", crate::tweakdb::natives::registrar_fachada_de_tweaks, true, None, "registrar_fachada_de_tweaks", AVISO_FORJA_E_REGISTRO, true),
-    // `TweakDBManager` (2026-08-08, item TweakXL #44 do `PENDENCIAS-UNIFICADAS.md`) — mesma técnica
+    // `TweakDBManager` (2026-08-08, `PENDENCIAS-UNIFICADAS.md`) — mesma técnica
     // de forja da Facade (`register_type_min`+`register_method` no validador), classe diferente. É a
     // API real que mods do Nexus importam pra CRUD de TweakDB (`SetFlat`/`CreateRecord`/
     // `UpdateRecord`/`RegisterName`), nunca exposta antes — só o backend nativo existia. Declarada em `ponte-tweakdbmanager.reds`.
     ("TweakDBManager", crate::tweakdb::natives::register_tweakdbmanager, true, None, "register_tweakdbmanager", AVISO_FORJA_E_REGISTRO, true),
-    // `TweakDBBatch` (item TweakXL #45) — devolvida por `TweakDBManager.StartBatch()`. Precisa
+    // `TweakDBBatch` — devolvida por `TweakDBManager.StartBatch()`. Precisa
     // registrar ANTES/independente de `TweakDBManager` porque o validador pode visitar as 2 classes
     // em qualquer ordem (cada `.reds` é seu próprio `native class`). Instanciável, sem `extends` (pai `IScriptable`).
     ("TweakDBBatch", crate::tweakdb::natives::register_tweakdbbatch, false, None, "register_tweakdbbatch", AVISO_FORJA_E_REGISTRO, true),
@@ -1369,12 +1369,11 @@ static CLASSES_FORJADAS: [LinhaDeForja; N_CLASSES_FORJADAS] = [
     ("ArchiveXL", crate::aparencia::registrar_fachada_de_recursos, true, None, "registrar_fachada_de_recursos", AVISO_FORJA_E_REGISTRO, true),
     // Declarada em `bwms-aparencia.reds`.
     ("BwmsAparencia", crate::aparencia::register_bwmsaparencia, true, None, "register_bwmsaparencia", AVISO_FORJA_E_REGISTRO, true),
-    // Codeware `#23` (`JobQueue`, 2026-08-14) — mesma receita Facade 100%-estática de `TweakXL`/
+    // `JobQueue` (2026-08-14) — mesma receita Facade 100%-estática da fachada de tweaks/
     // `TweakDBManager` acima (`register_type_min`+`register_facade_methods`). Ver
     // `tarefas::register_jobqueue_facade` pro escopo/divergência exatos. Declarada em `ponte-job-queue.reds`.
     ("JobQueue", crate::tarefas::register_jobqueue_facade, true, None, "register_jobqueue_facade", AVISO_FORJA_E_REGISTRO, true),
-    // `ScriptableTweak` precisa estar no RTTI antes do compilador validar as subclasses dos mods (ex.: Equipment-EX:
-    // `PatchCustomItems`/`RegisterOutfitSlots`).
+    // `ScriptableTweak` precisa estar no RTTI antes do compilador validar as subclasses dos mods.
     ("ScriptableTweak", crate::tweakdb::natives::register_scriptabletweak, false, None, "register_scriptabletweak", AVISO_SO_FORJA, false),
     ("CallbackSystemTarget", crate::tipos_do_motor::register_callbacksystemtarget, false, None, "register_callbacksystemtarget", AVISO_SO_FORJA, false),
     // `ComponentTarget extends CallbackSystemTarget` (2026-07-24) — fábricas STATIC (`ID`/`Name`).
@@ -1387,8 +1386,7 @@ static CLASSES_FORJADAS: [LinhaDeForja; N_CLASSES_FORJADAS] = [
     // `ComponentTarget` acima): `ResourceTarget`/`inkWidgetTarget`/`DynamicEntityTarget`/
     // `StaticEntityTarget`/`EntityTarget`/`InputTarget`. As fábricas STATIC delas entram na mesma prova
     // de 2026-08-05 (nota em `aparencia/mod.rs` acima de `COMPONENTTARGET_STATES`). Todas
-    // registram SÓ depois de `CallbackSystemTarget` (parent comum, mesmo confirmado lendo cada .reds
-    // vendorizado em `enablers/Codeware/scripts/Callback/Targets/`) já ter passado pelo validador.
+    // registram SÓ depois de `CallbackSystemTarget` (parent comum, mesmo confirmado lendo cada .reds) já ter passado pelo validador.
     // Cada chamada do validador traz uma classe só (`name_hash`), então a ordem é a do motor, não a
     // de `CLASSES_FORJADAS`; hoje ele valida `CallbackSystemTarget` antes das 7 filhas
     // (`proofs/20260919-boot312-console-completo.log`). Filha antes do pai: o `register_*` devolve
@@ -1403,18 +1401,18 @@ static CLASSES_FORJADAS: [LinhaDeForja; N_CLASSES_FORJADAS] = [
     // `DynamicEntitySystem extends IGameSystem`, instanciável (mesma hierarquia de `CallbackSystem`). O `.reds` dela não pode
     // declarar `module`: `module` + `native func` no mesmo escopo derruba o bind (memória `cp77-redscript-module-plus-nativefunc-crash`).
     ("DynamicEntitySystem", crate::npcs::register_dynamicentitysystem, false, Some("DES"), "register_dynamicentitysystem", AVISO_FORJA_E_REGISTRO, false),
-    // Codeware `#75` (`StaticEntitySystem`) — implementação NOVA 2026-08-15, módulo IRMÃO do
+    // `StaticEntitySystem` — implementação NOVA 2026-08-15, módulo IRMÃO do
     // `DynamicEntitySystem` acima, mesma hierarquia (`extends IGameSystem`), mesma receita de forja.
     ("StaticEntitySystem", crate::entidades::register_staticentitysystem, false, Some("SES"), "register_staticentitysystem", AVISO_FORJA_E_REGISTRO, false),
-    // Codeware `#76` (`StaticEntitySpec`) — implementação NOVA 2026-08-15 (rodada 9), companion struct
+    // `StaticEntitySpec` — implementação NOVA 2026-08-15 (rodada 9), companion struct
     // do `#75` acima. `extends IScriptable` DIRETO (mesma receita de `CallbackSystemHandler`).
     ("StaticEntitySpec", crate::entidades::register_staticentityspec, false, Some("SESPEC"), "register_staticentityspec", AVISO_FORJA_E_REGISTRO, false),
-    // Codeware `#74` (`DynamicEntitySpec`) — implementação NOVA 2026-08-19, companion struct do `#73`/
+    // `DynamicEntitySpec` — implementação NOVA 2026-08-19, companion struct do `#73`/
     // `DynamicEntitySystem` (acima). Porte direto de `#76`/`StaticEntitySpec` (12 campos em vez de 6,
     // `extends IScriptable` direto, mesma receita).
     ("DynamicEntitySpec", crate::npcs::register_dynamicentityspec, false, Some("DESPEC"), "register_dynamicentityspec", AVISO_FORJA_E_REGISTRO, false),
     ("CallbackSystemHandler", crate::tipos_do_motor::register_callbacksystemhandler, false, None, "register_callbacksystemhandler", AVISO_FORJA_E_REGISTRO, false),
-    // `cw-event-target-classes`/`cw-rawinput-realname` (2026-07-18, sessão `handle-ctor-re`,
+    // Classes de evento-alvo/input cru com nome real (2026-07-18, sessão `handle-ctor-re`,
     // retomada após 2 crashes em 2026-07-15 — ver nota grande em `ponte-callbacksystem.reds`).
     // MESMO padrão de guard por classe; `CallbackSystemEvent` primeiro (parent real de
     // `KeyInputEvent`, forjada como ABSTRATA via `register_type_min`, mesma receita 100% segura já
@@ -1423,54 +1421,54 @@ static CLASSES_FORJADAS: [LinhaDeForja; N_CLASSES_FORJADAS] = [
     // usavam um parent não-nativo ou pulavam a hierarquia real).
     ("CallbackSystemEvent", crate::tipos_do_motor::register_callbacksystemevent, false, None, "register_callbacksystemevent", AVISO_FORJA_E_REGISTRO, false),
     ("KeyInputEvent", crate::entrada::register_keyinputevent, false, None, "register_keyinputevent", AVISO_FORJA_E_REGISTRO, false),
-    // `cw-controller-session` (2026-07-18) — `GameSessionEvent extends CallbackSystemEvent`, MESMA
+    // Controller de sessão (2026-07-18) — `GameSessionEvent extends CallbackSystemEvent`, MESMA
     // receita segura de `KeyInputEvent` (parent nativo real). Dispatch de "Session/Start"/"Session/
     // End" NÃO usa hook de world-attach/detach (categoria que causou a saga de crash do full-body,
     // `SystemsUpdater::Node::LinkJob` — ver memória `cp77-fullbody-fpp-posicao-casaco`) — reusa a
     // detecção de transição de presença do player JÁ SEGURA e JÁ PROVADA (`lib.rs::cp77_tick`, o
     // mesmo bloco que dispara "Player/Spawned"/"Player/Despawned").
     ("GameSessionEvent", crate::inicio::natives::register_gamesessionevent, false, None, "register_gamesessionevent", AVISO_FORJA_E_REGISTRO, false),
-    // `cw-controller-entity` (2026-07-18) — `EntityLifecycleEvent extends CallbackSystemEvent`,
-    // MESMA receita segura. Dispatch de "Entity/Attach" (nome REAL, `EntityAttachHook.hpp`) NÃO
+    // Controller de entidade (2026-07-18) — `EntityLifecycleEvent extends CallbackSystemEvent`,
+    // MESMA receita segura. Dispatch de "Entity/Attach" (nome REAL) NÃO
     // hooka `Raw::Entity::Attach` (função nativa de ALTA FREQUÊNCIA, dispara pra TODA entidade do
     // mundo — hook novo e não-provado neste projeto) — reusa a MESMA transição de presença do
-    // player já seguríssima, escopada só ao player (o caso de uso mais comum pra mods como
-    // Equipment-EX/Cyberware-EX).
+    // player já seguríssima, escopada só ao player (o caso de uso mais comum pra mods de roupa
+    // e cyberware).
     ("EntityLifecycleEvent", crate::entidades::register_entitylifecycleevent, false, None, "register_entitylifecycleevent", AVISO_FORJA_E_REGISTRO, false),
-    // `cw-controller-misc` (2026-07-19) — `ResourceEvent extends CallbackSystemEvent`, MESMA receita
+    // Controller de recurso (2026-07-19) — `ResourceEvent extends CallbackSystemEvent`, MESMA receita
     // segura. Dispatch de "Resource/Load" NÃO hooka `ResourceSerializer::SchedulePostLoadJobs` (RE
     // nova, offset Mac desconhecido) — reusa o hook `resource.link` JÁ INSTALADO E PROVADO
     // (`selftest.rs::reslink_lookup`, dispara em TODA construção real de `ResourcePath`) com um
     // "watch" (`watchres <path>`): quando o hash observado bate, `cp77_tick` dispara o evento
     // edge-triggered, MESMO padrão seguro de `Player/Spawned`/`Session/Start`.
     ("ResourceEvent", crate::arquivos_do_jogo::register_resourceevent, false, None, "register_resourceevent", AVISO_FORJA_E_REGISTRO, false),
-    // `cw-event-target-classes` (2026-07-24) — `AxisInputEvent extends KeyInputEvent`,
+    // Classes de evento-alvo (2026-07-24) — `AxisInputEvent extends KeyInputEvent`,
     // `VehicleLightControlEvent`/`EntityComponentEvent extends EntityLifecycleEvent`. MESMA receita
     // já provada (parent nativo real + `register_type_instantiable_with_parent`).
     ("AxisInputEvent", crate::entrada::register_axisinputevent, false, None, "register_axisinputevent", AVISO_FORJA_E_REGISTRO, false),
     ("VehicleLightControlEvent", crate::veiculos::register_vehiclelightcontrolevent, false, None, "register_vehiclelightcontrolevent", AVISO_FORJA_E_REGISTRO, false),
     ("EntityComponentEvent", crate::aparencia::register_entitycomponentevent, false, None, "register_entitycomponentevent", AVISO_FORJA_E_REGISTRO, false),
-    // Codeware `#11` (`inkWidgetSpawnEvent`, candidato 6ª rodada 2026-08-11) — mesma receita robusta
+    // `inkWidgetSpawnEvent` (candidato 6ª rodada 2026-08-11) — mesma receita robusta
     // (parent = `CallbackSystemEvent` real, já forjado).
     ("inkWidgetSpawnEvent", crate::interface::register_inkwidgetspawnevent, false, None, "register_inkwidgetspawnevent", AVISO_FORJA_E_REGISTRO, false),
-    // Codeware 1.21.1 `GarageComponent.LoadSummonSetup` (`ponte-vehiclesystem.reds`): classe vanilla, só a native entra antes do bind.
+    // `GarageComponent.LoadSummonSetup` (`ponte-vehiclesystem.reds`): classe vanilla, só a native entra antes do bind.
     ("GarageComponent", crate::veiculos::registrar_garagem, false, None, "registrar_garagem", AVISO_SO_REGISTRO, false),
-    // ArchiveXL `#47` (`CustomizationExtension`, 2026-08-14, agente offline dedicado) — mesma receita
+    // `CustomizationEvent` (2026-08-14, agente offline dedicado) — mesma receita
     // robusta (parent = `CallbackSystemEvent` real, já forjado). Ver `corpo_e_rosto::register_customizationevent`.
     ("CustomizationEvent", crate::corpo_e_rosto::register_customizationevent, false, None, "register_customizationevent", AVISO_FORJA_E_REGISTRO, false),
-    // Codeware `#25` (`EntityBuilderWrapper`, 2026-08-18 madrugada cont.20) — mesma receita robusta
+    // `EntityBuilderWrapper` (2026-08-18 madrugada cont.20) — mesma receita robusta
     // dos eventos acima, mas parent = `IScriptable` (não `CallbackSystemEvent`), mesmo padrão já
     // usado por `CallbackSystemHandler`/`StaticEntitySpec`/`TweakDBBatch`. Ver
     // `entidades::register_entitybuilderwrapper`.
     ("EntityBuilderWrapper", crate::entidades::register_entitybuilderwrapper, false, None, "register_entitybuilderwrapper", AVISO_FORJA_E_REGISTRO, false),
-    // Codeware `#8`/`#25`/`#130`: `EntityBuilderEvent` (pai `CallbackSystemEvent`) e os wrappers de template e de aparência (pai
-    // `IScriptable`); Codeware `#77`: os wrappers de comunidade (pai `IScriptable`).
+    // `EntityBuilderEvent` (pai `CallbackSystemEvent`) e os wrappers de template e de aparência (pai
+    // `IScriptable`); os wrappers de comunidade (pai `IScriptable`).
     ("EntityBuilderEvent", crate::entidades::register_entitybuilderevent, false, None, "EntityBuilderEvent", AVISO_FORJA_E_REGISTRO, false),
     ("EntityBuilderTemplateWrapper", crate::entidades::register_ebw_template, false, None, "EntityBuilderTemplateWrapper", AVISO_FORJA_E_REGISTRO, false),
     ("EntityBuilderAppearanceWrapper", crate::aparencia::register_ebw_appearance, false, None, "EntityBuilderAppearanceWrapper", AVISO_FORJA_E_REGISTRO, false),
     ("CommunityWrapper", crate::npcs::register_communitywrapper, false, None, "CommunityWrapper", AVISO_FORJA_E_REGISTRO, false),
     ("CommunityEntryWrapper", crate::npcs::register_communityentrywrapper, false, None, "CommunityEntryWrapper", AVISO_FORJA_E_REGISTRO, false),
-    // Codeware `#176` 176b (`BwmsInkKeyEvent extends inkInputEvent`, 2026-09-13) — mesmo gate por classe, pai nativo `inkInputEvent` e doador
+    // `BwmsInkKeyEvent extends inkInputEvent` (2026-09-13) — mesmo gate por classe, pai nativo `inkInputEvent` e doador
     // `inkCharacterEvent`. Ver `interface::register_bwmsinkkeyevent`.
     ("BwmsInkKeyEvent", crate::interface::register_bwmsinkkeyevent, false, None, "register_bwmsinkkeyevent", AVISO_FORJA_E_REGISTRO, false),
 ];
@@ -1480,7 +1478,7 @@ static CLASSES_FORJADAS_HASH: std::sync::OnceLock<[u64; N_CLASSES_FORJADAS]> = s
 /// `Registry::obtain`: a linha forja e registra no máximo uma vez por processo, e um `obtain` nulo nessa visita não é repetido.
 static CLASSES_FORJADAS_REGISTRADAS: [AtomicBool; N_CLASSES_FORJADAS] = [const { AtomicBool::new(false) }; N_CLASSES_FORJADAS];
 
-/// O `CallbackSystem` do Codeware que o jogo registra sob os mesmos nomes de script (2.5: `gameCallbackSystem` como `CallbackSystem` e os
+/// A família `CallbackSystem` que o jogo registra sob os mesmos nomes de script (2.5: `gameCallbackSystem` como `CallbackSystem` e os
 /// irmãos), pai antes de filho. O nome de script passa a apontar pra classe do BWMS: o handler do jogo (`AddTarget`, 2.5 Mac `0x10504d748`)
 /// chama a virtual `+0x120` do alvo e a comparação de alvos (`0x10504e0d4`) a `+0x118`, que os alvos forjados do BWMS (vtable do doador) não
 /// têm; o `RegisterCallback` do jogo (`0x105047ad4`) só ativa evento com controlador C++ no mapa `sys+0x80`. Os eventos seguem a família: os
@@ -1554,7 +1552,7 @@ pub(crate) unsafe fn religar_familia_do_callbacksystem(reg: &crate::rtti::Regist
 }
 
 /// Dump de [engine+0x150] (header@+0x14 = size:30|flag:2 packed) pra comparar ANTES/DEPOIS do
-/// forge+register do Codeware dentro do próprio class_validate_probe_hook (ver Tentativa 7).
+/// forge+register da fachada de versão dentro do próprio class_validate_probe_hook (ver Tentativa 7).
 unsafe fn dump_engine_error_container(engine: *const u8, label: &str) {
     if engine.is_null() {
         crate::log_dev!("[classval-probe] {label}: engine nulo/ilegível");
@@ -1595,7 +1593,7 @@ unsafe fn diag_class_forge_prediction(reg: &rtti::Registry, tag: &str, class_nam
     let igs = reg.class_by_name("IGameSystem");
     crate::log_dev!("[classval-probe] {tag} diag: {class_name}={cls:p} IGameSystem={igs:p}");
     let getter: extern "C" fn() -> *mut c_void = std::mem::transmute(crate::rebase(0x1_011e_46d8));
-    let expected_base = getter(); // sempre IScriptable (universal, confirmado p/ Codeware)
+    let expected_base = getter(); // sempre IScriptable (universal, confirmado p/ a fachada de versão)
     let mut cur = cls;
     let mut found = false;
     for depth in 0..16u32 {
@@ -1738,7 +1736,7 @@ unsafe extern "C" fn class_validate_probe_hook(
     // PRODUÇÃO 2026-07-13 (achado crítico pós-sessão): este hook rodava INTEIRO atrás de
     // `~/.bwms-classvalidate-probe` (marker de DEV) — incluindo o FORGE que fixa a Facade. Um
     // boot de verdade (zero markers de dev, simulando o usuário final) confirmou: sem o marker,
-    // `Codeware` nunca é forjada, o validador reprova, e o boot CRASHA no assert
+    // a fachada de versão nunca é forjada, o validador reprova, e o boot CRASHA no assert
     // `baseEngineInit.cpp:1094` TODA VEZ — ou seja, o "6/6 PASS"/"Facade fechada" de hoje só
     // valia em configuração de DEV, não no produto real. Fix: o FORGE (mais abaixo) agora roda
     // SEMPRE; só o LOG/DIAGNÓSTICO verboso (stack-walk, dump de registradores, IsKindOf re-walk)
@@ -1765,9 +1763,9 @@ unsafe extern "C" fn class_validate_probe_hook(
     // do LOOP de validação (vive na stack do CHAMADOR, não do orquestrador). Em vez de só logar o
     // valor de x2, dumpar o CONTEÚDO apontado por ele pode revelar um ponteiro salvo pro mesmo
     // objeto "engine" (ou pro container de erro +0x150), sem depender da árvore de chamada do
-    // orquestrador. Só na classe 'Codeware' (evita spam nos outros 12). Diagnóstico puro —
+    // orquestrador. Só na classe da fachada de versão (evita spam nos outros 12). Diagnóstico puro —
     // gated dev_mode (não afeta o forge, que roda incondicional mais abaixo).
-    let fachada_de_versao_hash = *CODEWARE_CNAME.get_or_init(|| crate::cname::cname("Codeware"));
+    let fachada_de_versao_hash = *CNAME_DA_FACHADA_DE_VERSAO.get_or_init(|| crate::cname::cname("Codeware"));
     if diag && name_hash == Some(fachada_de_versao_hash) {
         const HEAP_LO: u64 = 0x7000000000;
         const HEAP_HI: u64 = 0x8000000000;
@@ -1820,10 +1818,10 @@ unsafe extern "C" fn class_validate_probe_hook(
     // ASSUME a classe já existe) falhou porque a classe REALMENTE não existe ainda neste ponto
     // ("classe não existe"). Desta vez: FORJAMOS a classe NÓS MESMOS via register_type_min
     // (STEP-1 do RegisterType, já provado desde 2026-07-04 — mesmas flags isAbstract|isNative
-    // que a declaração real `public abstract native class Codeware`), e SÓ DEPOIS registramos
+    // que a declaração real `public abstract native class` da fachada), e SÓ DEPOIS registramos
     // os métodos nativos nela — tudo ANTES de deixar o validador original rodar.
     // ESTE BLOCO É O FIX DE PRODUÇÃO — roda SEMPRE, não só com dev_mode (ver nota no topo da fn).
-    if name_hash == Some(fachada_de_versao_hash) && !CODEWARE_REGISTERED.swap(true, Ordering::AcqRel) {
+    if name_hash == Some(fachada_de_versao_hash) && !FACHADA_DE_VERSAO_REGISTRADA.swap(true, Ordering::AcqRel) {
         // Tentativa 7 cont. (2026-07-13): a tentativa 6 provou que *(x2+0x60) É o mesmo ponteiro
         // "engine" que a sonda do orquestrador (0x104d7a9f8) reportou no MESMO boot (valor
         // idêntico, bit-a-bit). Logo dá pra ler [engine+0x150] (o container de erro do assert
@@ -1839,10 +1837,10 @@ unsafe extern "C" fn class_validate_probe_hook(
         if diag {
             dump_engine_error_container(engine, "ANTES do forge+register");
         }
-        crate::log_dev!("[classval-probe] classe 'Codeware' detectada no validador — forjando+registrando AGORA");
+        crate::log_dev!("[classval-probe] classe da fachada de versão detectada no validador — forjando+registrando AGORA");
         if let Some(reg) = crate::rtti::Registry::obtain() {
             let forged = crate::register::register_type_min(&reg, "Codeware");
-            crate::log_dev!("[classval-probe] register_type_min('Codeware') -> {forged:p}");
+            crate::log_dev!("[classval-probe] register_type_min(fachada de versão) -> {forged:p}");
             let r = crate::tipos_do_motor::registrar_fachada_de_versao(&reg);
             crate::log_dev!("[classval-probe] registrar_fachada_de_versao -> {r}");
         } else {
@@ -1852,7 +1850,7 @@ unsafe extern "C" fn class_validate_probe_hook(
             dump_engine_error_container(engine, "DEPOIS do forge+register");
         }
     }
-    // Forja das classes de `CLASSES_FORJADAS`. Roda SEMPRE, como o bloco do Codeware acima: classe declarada num `.reds` e não
+    // Forja das classes de `CLASSES_FORJADAS`. Roda SEMPRE, como o bloco da fachada de versão acima: classe declarada num `.reds` e não
     // forjada reprova no validador. Uma chamada traz um `name_hash` só, então no máximo uma linha casa e a posição deste laço
     // em relação aos blocos do CallbackSystem e do inkWidget, abaixo, não muda log nem forja.
     let hashes = CLASSES_FORJADAS_HASH.get_or_init(|| std::array::from_fn(|i| crate::cname::cname(CLASSES_FORJADAS[i].0)));
@@ -1876,15 +1874,15 @@ unsafe extern "C" fn class_validate_probe_hook(
             }
         }
     }
-    // `cw-callbacksystem-rtti` (2026-07-13) — MESMO fix da Facade (parent explícito + fullName
+    // CallbackSystem no RTTI (2026-07-13) — MESMO fix da Facade (parent explícito + fullName
     // bare), classe DIFERENTE (`CallbackSystem extends IGameSystem`, instanciável). Bloco
     // ESSENCIAL, roda SEMPRE (não gated por dev_mode) — mesma justificativa de produção do bloco
-    // do Codeware acima: se isso rodasse só atrás de marker de dev, um mod real que declare
+    // da fachada de versão acima: se isso rodasse só atrás de marker de dev, um mod real que declare
     // `ponte-callbacksystem.reds` crasharia o boot pra qualquer usuário sem o marker.
     let cbs_hash = *CALLBACKSYSTEM_CNAME.get_or_init(|| crate::cname::cname("CallbackSystem"));
     if name_hash == Some(cbs_hash) && !CALLBACKSYSTEM_REGISTERED.swap(true, Ordering::AcqRel) {
         crate::log_dev!("[classval-probe] classe 'CallbackSystem' detectada no validador — forjando+registrando AGORA");
-        // Diagnóstico de dev, 1x: qual nome exato o compilador declarou como base de `extends IGameSystem`? Mesma leitura já provada pro Codeware
+        // Diagnóstico de dev, 1x: qual nome exato o compilador declarou como base de `extends IGameSystem`? Mesma leitura já provada pra fachada de versão
         // (Tentativa 11 abaixo) — `[x1+0x20]` = descritor da base declarada, `[+0x8]` = CName.
         if cfg!(feature = "devlog") && !x1.is_null() && crate::memoria::is_readable(x1.add(0x20) as *const c_void, 8) {
             let decl_base_desc = core::ptr::read_unaligned(x1.add(0x20) as *const *mut u8);
@@ -1902,7 +1900,7 @@ unsafe extern "C" fn class_validate_probe_hook(
             let r = crate::tipos_do_motor::register_callbacksystem(&reg);
             crate::log_dev!("[classval-probe] register_callbacksystem -> {r}");
             // DIAGNÓSTICO (mesma técnica da Tentativa 11, parametrizada p/ CallbackSystem/
-            // IGameSystem em vez de Codeware/IScriptable) — roda IMEDIATAMENTE após o forge, pra
+            // IGameSystem em vez de fachada de versão/IScriptable) — roda IMEDIATAMENTE após o forge, pra
             // prever se o IsKindOf walk + o check de base-declarada vão passar, ANTES do validador
             // ORIGINAL rodar (log logo abaixo, fora deste bloco). Ver `diag_class_forge_prediction`
             // (2026-08-06, cont.26 — consolida esta lógica com a cópia idêntica do bloco DES).
@@ -1911,7 +1909,7 @@ unsafe extern "C" fn class_validate_probe_hook(
             crate::log_dev!("[classval-probe] Registry::obtain() falhou — RTTI não pronto aqui?");
         }
     }
-    // Codeware `#96`: `inkUserData` é classe VANILLA e o bind dela acontece junto do resto da árvore de UI; a visita do validador ao
+    // `#96`: `inkUserData` é classe VANILLA e o bind dela acontece junto do resto da árvore de UI; a visita do validador ao
     // `inkWidget` (vanilla também passa por este hook) é o gatilho, antes de qualquer mod rodar.
     let iw_hash = *INKWIDGET_CNAME.get_or_init(|| crate::cname::cname("inkWidget"));
     if name_hash == Some(iw_hash) && !INKWIDGET_REGISTERED.swap(true, Ordering::AcqRel) {
@@ -1921,7 +1919,7 @@ unsafe extern "C" fn class_validate_probe_hook(
         }
     }
     // Tentativa 11 (2026-07-13, sessão seguinte) — o parent-pointer fix (Tentativa 10) rodou ao
-    // vivo mas o validador ORIGINAL continuou retornando 0 pro Codeware. Em vez de hookar
+    // vivo mas o validador ORIGINAL continuou retornando 0 pra fachada de versão. Em vez de hookar
     // `0x1010c6bf4` (IsKindOf) direto — função pequena em tight-loop, mesmo risco de transbordo
     // de redirect já documentado pra outros leafs — reimplementamos a MESMA caminhada em Rust
     // aqui dentro (hook já provado seguro), lendo os ponteiros REAIS: o getter do base esperado
@@ -1937,7 +1935,7 @@ unsafe extern "C" fn class_validate_probe_hook(
             let expected_base = getter();
             let iscriptable = reg.class_by_name("IScriptable");
             crate::log_dev!(
-                "[classval-probe] IsKindOf diag: Codeware={fachada_de_versao_cls:p} expected_base(getter)={expected_base:p} IScriptable(by_name)={iscriptable:p} (bate={})",
+                "[classval-probe] IsKindOf diag: fachada_de_versao={fachada_de_versao_cls:p} expected_base(getter)={expected_base:p} IScriptable(by_name)={iscriptable:p} (bate={})",
                 expected_base as u64 == iscriptable as u64
             );
             let mut cur = fachada_de_versao_cls;
@@ -1967,7 +1965,7 @@ unsafe extern "C" fn class_validate_probe_hook(
             if !fachada_de_versao_cls.is_null() && crate::memoria::is_readable(fachada_de_versao_cls as *const c_void, 0x74) {
                 let flags = core::ptr::read_unaligned((fachada_de_versao_cls as *const u8).add(0x70) as *const u32);
                 crate::log_dev!(
-                    "[classval-probe] Codeware flags@+0x70 = {flags:#010x} (bit1_isNative={} bit6_isImportOnly={} bit7={} bit8={} bit9={})",
+                    "[classval-probe] fachada de versão flags@+0x70 = {flags:#010x} (bit1_isNative={} bit6_isImportOnly={} bit7={} bit8={} bit9={})",
                     (flags >> 1) & 1, (flags >> 6) & 1, (flags >> 7) & 1, (flags >> 8) & 1, (flags >> 9) & 1
                 );
             }
@@ -2023,19 +2021,19 @@ unsafe extern "C" fn class_validate_probe_hook(
     // Achado 2026-07-13 (RE offline, chamadores por `bl` subindo de 0x1011a84b4 até o loop de
     // validação 0x1011a7e28 e daí até singleton->vtbl[8]=0x1011e7114, chamado pelo MESMO
     // 0x104d76544 já mapeado nas Tentativas 7/8): a validação de classe roda AninhADA dentro do
-    // orquestrador de verdade — mas NUNCA logamos o RETORNO da validação original do Codeware em
-    // si. Se ele voltar 0 (falha) MESMO com nosso forge (Version/Require=true), a causa não é
+    // orquestrador de verdade — mas NUNCA logamos o RETORNO da validação original da fachada de
+    // versão em si. Se ele voltar 0 (falha) MESMO com nosso forge (Version/Require=true), a causa não é
     // "classe não existe" — é alguma outra checagem interna do validador que register_method
-    // não satisfaz. Log SÓ pra Codeware (nome_hash já resolvido acima). Diagnóstico — dev_mode.
+    // não satisfaz. Log SÓ pra fachada de versão (nome_hash já resolvido acima). Diagnóstico — dev_mode.
     if diag && name_hash == Some(fachada_de_versao_hash) {
-        crate::log_dev!("[classval-probe] validador ORIGINAL retornou {ret} pro Codeware (0=falha, !=0=sucesso)");
+        crate::log_dev!("[classval-probe] validador ORIGINAL retornou {ret} pra fachada de versão (0=falha, !=0=sucesso)");
     }
     // Tentativa 12 (2026-07-13) — decodifiquei o chained-fixup de vtbl+0x08 do singleton
     // 0x1011e6c1c (offline, sem boot): resolve pra 0x1011e7114, a MESMA função já mapeada como
     // o DISPATCHER do loop de validação inteiro (chama 0x1011a7e28 -> este validador, ×12). Ou
-    // seja: o retorno agregado de TODAS as 12 validações (não só Codeware) é o que decide
-    // [engine+0x54] e, por cascata, o assert. Log leve pra TODAS (não só Codeware) — diagnóstico,
-    // dev_mode (o forge de Codeware já é incondicional acima; isso é só instrumentação).
+    // seja: o retorno agregado de TODAS as 12 validações (não só a da fachada de versão) é o que decide
+    // [engine+0x54] e, por cascata, o assert. Log leve pra TODAS — diagnóstico,
+    // dev_mode (o forge da fachada de versão já é incondicional acima; isso é só instrumentação).
     if ret & 0xff == 0 {
         let name = crate::cname::resolve_cname(name_hash.unwrap_or(0));
         crate::veredito_dev!("[bind] classe '{name}' reprovada na validação do bind");
@@ -2047,10 +2045,10 @@ unsafe extern "C" fn class_validate_probe_hook(
     ret
 }
 
-// ===== Codeware `#251` — espelho do `ScriptBundle` no `ScriptValidator::Validate` =====
+// ===== Espelho do `ScriptBundle` no `ScriptValidator::Validate` =====
 // `0x1011a7e28(validator, bundle, report) -> bool` é o único chamador do validador de classe (`0x1011a7f38`) e é chamado só de `0x1011e71d8`. A coleta de
 // definições que ele faz, `0x10111ebcc(bundle, &lista, 0)`, soma os tamanhos em `+0xac`/`+0xbc`/`+0xcc`/`+0xdc`/`+0xec` e lê as entradas de `+0xe0`: os
-// arrays `globals`/`enums`/`bitfields`/`classes`/`types` do `Red/ScriptBundle.hpp`, nos mesmos offsets. O hook lê o bundle antes da original, só memória
+// arrays `globals`/`enums`/`bitfields`/`classes`/`types` do `ScriptBundle`. O hook lê o bundle antes da original, só memória
 // (nem RTTI nem pool de nomes), guarda as contagens e o índice (dono, nome curto) → (arquivo, linha) das funções que têm arquivo e, com
 // `~/.bwms-hook-c251-teste`, confere os membros de `bwms-c251-bundle-teste.reds`.
 const SCRIPT_VALIDATE_VM: u64 = 0x1_011a_7e28;
@@ -2557,7 +2555,7 @@ pub(crate) unsafe fn install_recarga_de_scripts_dos_mods() {
     }
 }
 
-/// Codeware `#251`: hook do `ScriptValidator::Validate`, incondicional como o do validador de classe (só lê o bundle antes da original).
+/// Hook do `ScriptValidator::Validate`, incondicional como o do validador de classe (só lê o bundle antes da original).
 pub(crate) unsafe fn install_script_validate_hook() {
     let target = crate::rebase(SCRIPT_VALIDATE_VM);
     if !crate::memoria::is_readable(target as *const c_void, 8) {
@@ -2580,7 +2578,7 @@ pub(crate) unsafe fn install_script_validate_hook() {
 /// PRODUÇÃO 2026-07-13: este hook agora é INCONDICIONAL (era gated `~/.bwms-classvalidate-probe`
 /// até um teste com zero markers de dev revelar que, sem ele, o boot CRASHA sempre que
 /// `ponte-fachada-de-versao.reds` está no bundle — ou seja, pra QUALQUER usuário final instalando o
-/// BWMS hoje. O forge da classe `Codeware` (dentro do hook) é o que realmente conserta o boot;
+/// BWMS hoje. O forge da fachada de versão (dentro do hook) é o que realmente conserta o boot;
 /// o marker antigo só devia ter gateado o LOG verboso (agora atrás de `dev_mode()`, ver a fn).
 pub(crate) unsafe fn install_class_validate_probe() {
     let target = crate::rebase(CLASS_VALIDATE_VM);
@@ -2652,7 +2650,7 @@ static LEITURAS_PHASE5_DO_MUNDO: AtomicU64 = AtomicU64::new(0);
 static TROCA_DE_MUNDO_S: AtomicU64 = AtomicU64::new(0);
 
 /// A leitura `agora` da phase entra num mundo de jogo novo: 5 vindo de um objeto de sessão novo (-1) ou do pregame (1–4). Nos logs de `proofs/`, o
-/// que antecede uma leitura de 5 vinda de outra fase: -1 em 310, 2 em 2, 3 em 1, 7 em 0. O 7 sai com o jogo aberto (`proofs/20261023-provas-25-tweakxl-archives-nativos-abamods-abacheats-telas-anexos/console-do-boot.log:13169`,
+/// que antecede uma leitura de 5 vinda de outra fase: -1 em 310, 2 em 2, 3 em 1, 7 em 0. O 7 sai com o jogo aberto (console do boot das provas da 2.5 de 2026-10-23, linha 13169,
 /// `5 5 5 5 5 7 7 7 7` em 10 logs) e não é mundo novo: um 7 → 5 zeraria e recusaria o player vivo até o fim da carga.
 fn troca_de_mundo(antes: i64, agora: i64) -> bool {
     FaseDaSessao::do_byte(agora) == Some(FaseDaSessao::Jogo)
@@ -3110,7 +3108,7 @@ unsafe extern "C" fn exec_replacement(
             }
         }
     }
-    // Observe RUST-nativo (`cet-hooks-shippable`, perna que faltava): se `func` é o alvo, LOGA que
+    // Observe RUST-nativo (hooks de produção, perna que faltava): se `func` é o alvo, LOGA que
     // o callback disparou e CAI FORA sem suprimir — a original roda normalmente logo depois.
     #[cfg(feature = "devtools")]
     {
@@ -3133,7 +3131,7 @@ unsafe extern "C" fn exec_replacement(
     // que o `ctx` capturado é passado CRU pro handler nativo (sem filtro/validação nenhuma no
     // dispatcher), então capturar o 1º caller que bate ANTES da gameplay real (ex.: algum
     // warm-up interno do motor, ctx "degenerado") trava o resto do boot inteiro com resultado
-    // zero. Mesmo padrão de bug/fix já usado em `tweakxl_rt::create_once_if_marked` (GOG,
+    // zero. Mesmo padrão de bug/fix já usado na criação de record (GOG,
     // `CreateRecord`) — esperar `PHASE_REACHED_5` garante que só um caller de GAMEPLAY real
     // (mais provável de ter estado interno inicializado) seja capturado.
     let tgt = FROMTD_TGT.load(Ordering::Relaxed);
@@ -3162,7 +3160,7 @@ unsafe extern "C" fn exec_replacement(
         crate::scripts::sobrepor_funcao::dispatch_after(func, ctx, frame, a_out, a4);
         return 1usize as *mut c_void;
     }
-    // ROTEAMENTO de nativas registradas (Codeware): se `func` é uma nativa que NÓS
+    // ROTEAMENTO de nativas registradas: se `func` é uma nativa que NÓS
     // registramos no RTTI, despacha pro handler Rust e retorna — sem cair na via nativa
     // do jogo (cujo regIndex/tabela global não conhece nossa função). Func do jogo quase
     // sempre volta no filtro de bits do route_native, com 1 load e sem trava.
@@ -3185,10 +3183,10 @@ unsafe extern "C" fn exec_replacement(
         let mcname = core::ptr::read_unaligned((func as *const u8).add(0x10) as *const u64);
         log_fn_trace(mcname, n);
     }
-    // Observe/Override dos mods CET (`cet::observar`): método vigiado roda o `before`; com suppress (void, ou retorno POD já gravado no
+    // Observe/Override dos mods Lua (`mods_lua::observar`): método vigiado roda o `before`; com suppress (void, ou retorno POD já gravado no
     // `a_out`) a original não roda.
     #[cfg(feature = "lua")]
-    let (suprimir, vigiado) = crate::cet::observar::watched_before(func, ctx, frame, a_out);
+    let (suprimir, vigiado) = crate::mods_lua::observar::watched_before(func, ctx, frame, a_out);
     #[cfg(feature = "lua")]
     if suprimir {
         return 1usize as *mut c_void;
@@ -3201,7 +3199,7 @@ unsafe extern "C" fn exec_replacement(
     let r = f(func, ctx, frame, a_out, a4);
     #[cfg(feature = "lua")]
     if vigiado != 0 {
-        crate::cet::observar::watched_after(vigiado, ctx, a_out);
+        crate::mods_lua::observar::watched_after(vigiado, ctx, a_out);
     }
     if alvos {
         crate::scripts::sobrepor_funcao::dispatch_after(func, ctx, frame, a_out, a4);
@@ -3292,7 +3290,7 @@ pub(crate) const JOB_DE_ESTADO_PROLOGO: u32 = 0xd100_c3ff;
 
 pub(crate) static ORIG_JOB_DO_FRAMEWORK: AtomicU64 = AtomicU64::new(0);
 
-/// Depois da original: anota a execução de um job de estado para o `selftest` do C#239.
+/// Depois da original: anota a execução de um job de estado para o `selftest`.
 #[cfg(feature = "devtools")]
 pub(crate) fn job_de_estado_visto(job: u8, estado: u8) {
     let ms = C239_RELOGIO.get_or_init(std::time::Instant::now).elapsed().as_millis();
@@ -3328,7 +3326,7 @@ pub(crate) unsafe extern "C" fn job_do_framework_hook(params: *mut c_void, conte
     }
 }
 
-/// No `on_load`: hook do job de estado do framework, com o `bwms-workspot.reds` (a `RuntimeScene` do C#82 sai do framework) no bundle, ou
+/// No `on_load`: hook do job de estado do framework, com o `bwms-workspot.reds` (a `RuntimeScene` sai do framework) no bundle, ou
 /// `~/.bwms-hook-c239-teste`/`c82-teste`. O do job da sessão só anota para o `selftest`: só no dev.
 pub(crate) unsafe fn install_jobs_de_estado() {
     let no_bundle = |nome: &str| crate::dylib_dir().is_some_and(|d| std::path::Path::new(&d).join("../r6/scripts/blackwall-mods").join(nome).exists());
@@ -3344,11 +3342,11 @@ pub(crate) unsafe fn install_jobs_de_estado() {
     crate::log_dev!("[c239] hook do job de estado do framework no on_load: {framework:?}");
 }
 
-// ===== Codeware `#129`: `PlayerSpawnedHook` — hook no `cp::PlayerSystem::OnPlayerMainObjectSpawned` (2026-09-18) =====
+// ===== Hook no `cp::PlayerSystem::OnPlayerMainObjectSpawned` (2026-09-18) =====
 // `0x100fffcb8` (RE offline 2026-09-18: 4 argumentos — `PlayerSystem`, entrada de spawn, parâmetros, `&Handle`; único chamador é o `operator()` do
-// `std::function` do spawn do jogador, `0x101003c80`; grava o objeto principal em `this+0x604c0`). Como o HookAfter da referência, cada chamada vira um
+// `std::function` do spawn do jogador, `0x101003c80`; grava o objeto principal em `this+0x604c0`). Cada chamada vira um
 // `Session/Ready` fora de sessão carregada de save; o hook só anota e o despacho sai no tick (`register::session_ready_tick`). A sessão carregada de save
-// é marcada como no `OnGameLoad` da referência: hook de passagem no `OnGameLoad` do `questWorldStateSystem` (`0x102a2dfc8`, `(this, JobGroup&, bool&,
+// é marcada por hook de passagem no `OnGameLoad` do `questWorldStateSystem` (`0x102a2dfc8`, `(this, JobGroup&, bool&,
 // stream)`, chamado na carga de todo save), consumido no spawn seguinte — o jogo novo e o mundo do menu não passam por ele. O `WasRestored` de
 // `ScriptableSystem` não serve: o `SaveLocksManager` não tem dado persistente e volta falso também no save carregado (boot 244).
 pub(crate) const PLAYER_MAIN_OBJECT_SPAWNED: (u64, u32) = (0x1_00ff_fcb8, 0xd101_c3ff);
@@ -3402,10 +3400,10 @@ pub(crate) unsafe fn install_player_spawned_hook() {
 
 pub(crate) static GS01_FIRED: AtomicBool = AtomicBool::new(false);
 
-/// RED4ext.SDK `#32`/`#36`/`#37`/`#38` (2026-08-11, fix desta sessão — GameStates cluster):
+/// GameStates (2026-08-11, fix desta sessão):
 /// latch de `Initialization.OnExit` (type=1), ESCOPO DE ARQUIVO (antes era uma `static` LOCAL
 /// dentro da closure da thread de heartbeat, disparada por leitura do byte de fase — achado de
-/// cont.192 (`proofs/2026-08-11-red4ext-37-gamestates-onupdate-PARCIAL.log`): essa leitura é
+/// cont.192 (prova parcial de 2026-08-11 do `OnUpdate` dos game states): essa leitura é
 /// FLAKY, às vezes o byte nunca chega a `5` de forma confiável naquela thread, mesmo quando a
 /// transição real pra Running já aconteceu). Movido pra disparar no MESMO ponto/mecanismo já
 /// PROVADO confiável pra `Running.OnEnter`/`OnExit` — a transição de presença do player dentro
@@ -3414,6 +3412,6 @@ pub(crate) static GS01_FIRED: AtomicBool = AtomicBool::new(false);
 pub(crate) static GS1_EXITED: AtomicBool = AtomicBool::new(false);
 
 
-/// O `CGameFramework` da última execução do job: a `RuntimeScene` fica em `+0x18` (`register::cena_base`, C#82).
+/// O `CGameFramework` da última execução do job: a `RuntimeScene` fica em `+0x18` (`register::cena_base`).
 pub(crate) static CGAMEFRAMEWORK_ATUAL: AtomicU64 = AtomicU64::new(0);
 

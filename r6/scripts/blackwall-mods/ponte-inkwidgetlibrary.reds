@@ -1,4 +1,4 @@
-// ponte-inkwidgetlibrary.reds — Codeware `scripts/UI/Core/inkWidgetLibraryReference.reds` (catálogo `#94`). `inkWidgetLibraryResource.SetPath`/
+// ponte-inkwidgetlibrary.reds — `inkWidgetLibraryReference`. `inkWidgetLibraryResource.SetPath`/
 // `Create(path)` e `inkWidgetLibraryReference.Create(path)` são natives do jogo desde a 2.5; o jogo não tem o `Create` com o item.
 
 @addMethod(inkWidgetLibraryReference)

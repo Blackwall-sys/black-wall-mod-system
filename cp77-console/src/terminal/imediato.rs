@@ -247,23 +247,16 @@ fn identidade_da_janela(titulo: &str) -> &str {
     titulo.find("###").map_or(titulo, |p| &titulo[p..])
 }
 
-/// Colunas da linha mais larga e número de linhas, como a referência mede texto: o `\n` quebra, o `\r` não ocupa lugar e o `\n` do fim
-/// não abre uma linha a mais.
+/// Colunas da linha mais larga e número de linhas de um texto monoespaçado.
 fn colunas_e_linhas(t: &str) -> (usize, usize) {
-    let (mut maior, mut atual, mut quebras) = (0usize, 0usize, 0usize);
-    for c in t.chars() {
-        match c {
-            '\n' => {
-                maior = maior.max(atual);
-                atual = 0;
-                quebras += 1;
-            }
-            '\r' => {}
-            _ => atual += 1,
-        }
+    let corpo = t.strip_suffix('\n').unwrap_or(t);
+    let mut colunas = 0;
+    let mut linhas = 0;
+    for linha in corpo.split('\n') {
+        colunas = colunas.max(linha.chars().filter(|c| *c != '\r').count());
+        linhas += 1;
     }
-    let linhas = if atual > 0 || quebras == 0 { quebras + 1 } else { quebras };
-    (maior.max(atual), linhas)
+    (colunas, linhas)
 }
 
 // ---------------------------------------------------------------- entrada do frame
@@ -367,28 +360,30 @@ fn forma_do_ponteiro(p: Ponteiro) -> (&'static [&'static str], [f32; 2]) {
     }
 }
 
-/// Canto da dica, como a referência a posiciona: evita o retângulo do ponteiro (16 px à esquerda, 8 acima, 12 à direita e 12 abaixo
-/// do mouse, com o ponteiro em escala 0,5) e tenta à direita (na altura do mouse), embaixo, em cima e à esquerda, nessa ordem; a que
-/// cabe na tela ganha, presa à borda na outra direção.
+/// Canto superior esquerdo da dica (tooltip) para o mouse em `mouse`, dica de `tamanho` e tela de `tela`.
 fn posicao_da_dica(mouse: [f32; 2], tamanho: [f32; 2], tela: [f32; 2]) -> [f32; 2] {
+    // Retângulo do ponteiro que a dica não cobre: 16 à esquerda, 12 à direita, 8 acima e 12 abaixo do ponto quente.
+    const ESQUERDA: f32 = 16.0;
+    const DIREITA: f32 = 12.0;
+    const ACIMA: f32 = 8.0;
+    const ABAIXO: f32 = 12.0;
     let [mx, my] = mouse;
-    let [l, h] = tamanho;
-    let evita = [mx - 16.0, my - 8.0, mx + 12.0, my + 12.0];
+    let [l, a] = tamanho;
     if tela[0] <= 0.0 || tela[1] <= 0.0 {
-        return [evita[2], my];
+        return [mx + DIREITA, my];
     }
-    let preso_x = mx.min(tela[0] - l).max(0.0);
-    let preso_y = my.min(tela[1] - h).max(0.0);
-    if tela[0] - evita[2] >= l {
-        return [evita[2], preso_y];
+    let presa_x = |x: f32| x.min(tela[0] - l).max(0.0);
+    let presa_y = |y: f32| y.min(tela[1] - a).max(0.0);
+    if tela[0] - (mx + DIREITA) >= l {
+        return [mx + DIREITA, presa_y(my)];
     }
-    if tela[1] - evita[3] >= h {
-        return [preso_x, evita[3]];
+    if tela[1] - (my + ABAIXO) >= a {
+        return [presa_x(mx), my + ABAIXO];
     }
-    if evita[1] >= h {
-        return [preso_x, evita[1] - h];
+    if my - ACIMA >= a {
+        return [presa_x(mx), my - ACIMA - a];
     }
-    [(evita[0] - l).max(0.0), preso_y]
+    [(mx - ESQUERDA - l).max(0.0), presa_y(my)]
 }
 
 pub(crate) const TECLA_BACKSPACE: u16 = 51;
@@ -551,78 +546,68 @@ pub(crate) struct Tela<'a> {
     achados: Vec<ItemAchado>,
 }
 
-/// Fim da linha que começa em `ini`, pela regra de quebra da referência com fonte monoespaçada (1 coluna por caractere): quebra em branco ou depois de `. , ; ! ? "`; palavra que não cabe numa linha inteira é cortada onde estoura.
+/// Índice (em `cs`) do fim da linha que começa em `ini`, com fonte monoespaçada de 1 coluna por caractere.
 fn fim_da_linha(cs: &[char], ini: usize, colunas: usize) -> usize {
-    let largura = colunas as i64;
-    let (mut linha, mut palavra, mut branco) = (0i64, 0i64, 0i64);
-    let (mut fim_da_palavra, mut fim_da_anterior) = (ini, None::<usize>);
-    let mut dentro = true;
-    let mut s = ini;
-    while s < cs.len() {
-        let c = cs[s];
-        if c == '\n' {
-            return s;
-        }
-        if c == ' ' || c == '\t' || c == '\u{3000}' {
-            if dentro {
-                linha += branco;
-                branco = 0;
-                fim_da_palavra = s;
-            }
-            branco += 1;
-            dentro = false;
-        } else {
-            palavra += 1;
-            if dentro {
-                fim_da_palavra = s + 1;
-            } else {
-                fim_da_anterior = Some(fim_da_palavra);
-                linha += palavra + branco;
-                palavra = 0;
-                branco = 0;
-            }
-            dentro = !matches!(c, '.' | ',' | ';' | '!' | '?' | '"');
-        }
-        if linha + palavra > largura {
-            if palavra < largura {
-                s = fim_da_anterior.unwrap_or(fim_da_palavra);
-            }
-            break;
-        }
-        s += 1;
+    let n = cs.len();
+    if ini >= n {
+        return ini;
     }
-    // Nada cabe: mostra 1 caractere, como a referência, para a linha andar.
-    s.max(ini + 1).min(cs.len().max(ini))
+    let limite = (ini + colunas.max(1)).min(n);
+    let mut quebra = ini;
+    for p in ini..=limite {
+        if p == n {
+            return n;
+        }
+        if cs[p] == '\n' {
+            return p;
+        }
+        if p == ini {
+            continue;
+        }
+        // Pontuação só abre quebra depois de si quando não continua uma sequência de pontuação dentro da linha: a imagem aprovada
+        // (`terminal_igual_ao_aprovado`) quebra `"...!!!???"` em 8 colunas como `[".", "..!!!???"]`.
+        let depois_de_pontuacao = pontuacao_que_quebra(cs[p - 1]) && (p - 1 == ini || !pontuacao_que_quebra(cs[p - 2]));
+        if branco_que_quebra(cs[p]) || depois_de_pontuacao {
+            quebra = p;
+        }
+    }
+    if quebra > ini { quebra } else { limite }
 }
 
-/// O texto quebrado em linhas de até `colunas` caracteres (ver `fim_da_linha`). Os brancos do começo da linha seguinte são pulados e
-/// `\n` sempre quebra.
+fn branco_que_quebra(c: char) -> bool {
+    matches!(c, ' ' | '\t' | '\u{3000}')
+}
+
+fn pontuacao_que_quebra(c: char) -> bool {
+    matches!(c, '.' | ',' | ';' | '!' | '?' | '"')
+}
+
+/// O texto quebrado em linhas de até `colunas` caracteres.
 pub(crate) fn linhas_quebradas(texto: &str, colunas: usize) -> Vec<String> {
     let cs: Vec<char> = texto.chars().collect();
+    let n = cs.len();
     let mut linhas = Vec::new();
-    let mut s = 0;
+    let mut ini = 0;
     loop {
-        let fim = fim_da_linha(&cs, s, colunas.max(1));
-        linhas.push(cs[s..fim].iter().collect::<String>().trim_end().to_string());
-        s = fim;
-        if s >= cs.len() {
-            break;
-        }
-        if cs[s] == '\n' {
-            s += 1;
+        let fim = fim_da_linha(&cs, ini, colunas);
+        let linha: String = cs[ini..fim].iter().collect();
+        linhas.push(linha.trim_end().to_string());
+        ini = fim;
+        if ini < n && cs[ini] == '\n' {
+            ini += 1;
         } else {
-            while s < cs.len() && matches!(cs[s], ' ' | '\t' | '\u{3000}') {
-                s += 1;
+            // Quebra por largura: os brancos que sobraram não abrem a linha seguinte, nem o `\n` logo depois deles.
+            while ini < n && branco_que_quebra(cs[ini]) {
+                ini += 1;
             }
-            if s < cs.len() && cs[s] == '\n' {
-                s += 1;
+            if ini < n && cs[ini] == '\n' {
+                ini += 1;
             }
         }
-        if s >= cs.len() {
-            break;
+        if ini >= n {
+            return linhas;
         }
     }
-    linhas
 }
 
 /// Área de transferência ausente: copiar não guarda, colar não traz nada.
@@ -1050,7 +1035,7 @@ impl<'a> Tela<'a> {
         }
     }
 
-    /// Deslizante de número real (o `SliderFloat` dos mods CET), com o valor em 3 casas no meio, como o `%.3f` padrão da referência.
+    /// Deslizante de número real (o `SliderFloat` dos mods Lua), com o valor em 3 casas no meio, no formato `%.3f`.
     #[cfg(feature = "lua")]
     pub(crate) fn deslizante_real(&mut self, rotulo: &str, valor: &mut f32, min: f32, max: f32, largura: f32) -> bool {
         let faixa = (max - min).abs().max(f32::EPSILON);

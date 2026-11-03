@@ -1,7 +1,7 @@
-// bwms-widget-building.reds — Codeware `#175` (`WidgetBuildingService`) no BWMS.
+// bwms-widget-building.reds — `WidgetBuildingService` no BWMS.
 //
 // Widget criado por script e ligado a uma árvore que já está na tela (`Reparent`, `AddChildWidget`) entra na camada dela: o BWMS anexa a árvore com o
-// `AttachWidgetTree` do motor, e os controllers dela recebem widget, `layerProxy` e `OnInitialize`. `BwmsBindController` é o `AttachController` do Codeware
+// `AttachWidgetTree` do motor, e os controllers dela recebem widget, `layerProxy` e `OnInitialize`. `BwmsBindController` é o `AttachController`
 // com forma própria: liga o controller ao widget (principal ou secundário) e, com o widget já na tela, registra o controller na camada e chama o
 // `OnInitialize`; fora da tela devolve `false` e o `OnInitialize` vem quando a árvore for anexada. Controller com as propriedades `detachedWidget` e
 // `gameController` (o `inkCustomController` antigo) chama o próprio `OnInitialize`, e o motor não chama por ele.

@@ -284,7 +284,7 @@ pub(crate) fn ler_em(pasta_dos_mods: &Path, enabled: &Path) -> ModsDoModIo {
             m.marcar(
                 i,
                 parte_ou_nada,
-                ".lua (mod de CET) só roda pela pasta Mods e .dll (plugin de Windows) não carrega no Mac / .lua (CET mod) only runs from the Mods \
+                ".lua (mod Lua) só roda pela pasta Mods e .dll (plugin de Windows) não carrega no Mac / .lua (Lua mod) only runs from the Mods \
                  folder and .dll (Windows plugin) does not load on a Mac",
             );
         }
@@ -350,8 +350,7 @@ mod tests {
         format!("{{\"version\": 6, \"enabled_mods\": [{}]}}", itens.join(", "))
     }
 
-    /// Os 2 mods do dono no formato real (Immersive Rippers: archive + `.archive.json` + `.archive.xl` + `r6/` vazio; Longer Car Delivery
-    /// Timers: só o archive), um desligado, um ligado que só traz `.xl` e `.reds`, um com archive inválido e um ligado sem pasta: ordem do
+    /// Os 2 mods do dono no formato real (Mod Um: archive + `.archive.json` + `.archive.xl` + `r6/` vazio; Mod Dois: só o archive), um desligado, um ligado que só traz `.xl` e `.reds`, um com archive inválido e um ligado sem pasta: ordem do
     /// jogo (id), luz e motivo de cada um, e nada escrito.
     #[test]
     fn le_os_mods_com_a_luz_de_cada_um() {
@@ -359,13 +358,13 @@ mod tests {
         let mods = b.join("mods");
         let (ir, lcdt, desl, so_xl, ruim, sumiu) =
             (mods.join("6383233"), mods.join("6428265"), mods.join("6000001"), mods.join("6500000"), mods.join("6600000"), mods.join("6700000"));
-        escrever(&ir.join("about.json"), b"{\n\t\"ModInfo\": {\n\t\t\"ModName\": \"ImmersiveRippers\",\n\t\t\"ModID\": -1\n\t}\n}");
-        escrever(&ir.join("archive/ImmersiveRippers.archive"), &archive(&[1, 2]));
-        escrever(&ir.join("archive/ImmersiveRippers.archive.json"), b"{\"journal\": []}");
-        escrever(&ir.join("archive/ImmersiveRippers.archive.xl"), b"journal: []");
+        escrever(&ir.join("about.json"), b"{\n\t\"ModInfo\": {\n\t\t\"ModName\": \"ModUm\",\n\t\t\"ModID\": -1\n\t}\n}");
+        escrever(&ir.join("archive/ModUm.archive"), &archive(&[1, 2]));
+        escrever(&ir.join("archive/ModUm.archive.json"), b"{\"journal\": []}");
+        escrever(&ir.join("archive/ModUm.archive.xl"), b"journal: []");
         std::fs::create_dir_all(ir.join("r6/scripts")).unwrap();
-        escrever(&lcdt.join("about.json"), b"{\"ModInfo\": {\"ModName\": \"LongerCarDeliveryTimers\"}}");
-        escrever(&lcdt.join("archive/FairerCourierTimers.archive"), &archive(&[0xffa23560ec50cdc4]));
+        escrever(&lcdt.join("about.json"), b"{\"ModInfo\": {\"ModName\": \"ModDois\"}}");
+        escrever(&lcdt.join("archive/ModDois.archive"), &archive(&[0xffa23560ec50cdc4]));
         escrever(&desl.join("about.json"), b"{\"ModInfo\": {\"ModName\": \"Desligado\"}}");
         escrever(&desl.join("archive/d.archive"), &archive(&[9]));
         escrever(&so_xl.join("archive/x.archive.xl"), b"localization: {}");
@@ -376,8 +375,8 @@ mod tests {
         escrever(
             &enabled,
             lista(&[
-                (&lcdt, 6428265, "Longer Car Delivery Timers"),
-                (&ir, 6383233, "Immersive Rippers"),
+                (&lcdt, 6428265, "Mod Dois"),
+                (&ir, 6383233, "Mod Um"),
                 (&so_xl, 6500000, "So Xl"),
                 (&ruim, 6600000, "Ruim"),
                 (&sumiu, 6700000, "Sumiu"),
@@ -389,8 +388,8 @@ mod tests {
         assert_eq!(
             m.rotulos,
             [
-                "Immersive Rippers (mod.io 6383233)",
-                "Longer Car Delivery Timers (mod.io 6428265)",
+                "Mod Um (mod.io 6383233)",
+                "Mod Dois (mod.io 6428265)",
                 "So Xl (mod.io 6500000)",
                 "Ruim (mod.io 6600000)",
                 "Sumiu (mod.io 6700000)",
@@ -404,7 +403,7 @@ mod tests {
         assert!(m.motivos[3].starts_with("archive/r.archive: não é um .archive válido"), "{}", m.motivos[3]);
         assert!(m.motivos[4].starts_with("a pasta do mod não existe"));
         assert!(m.motivos[5].starts_with("desligado no menu Mods do jogo"));
-        assert_eq!(m.archives[1], [lcdt.join("archive/FairerCourierTimers.archive")]);
+        assert_eq!(m.archives[1], [lcdt.join("archive/ModDois.archive")]);
         assert!(m.archives[3].is_empty(), "o archive inválido não disputa recurso");
         let ordem: Vec<String> = m.na_ordem_de_carga().into_iter().map(|(_, r, _)| r).collect();
         assert_eq!(ordem.len(), 5, "o desligado fica fora da carga");

@@ -1,8 +1,8 @@
 // -----------------------------------------------------------------------------
-// Codeware.World.StaticEntitySpec — item `#76` do catálogo exaustivo
+// StaticEntitySpec
 // -----------------------------------------------------------------------------
 //
-// O spec do `StaticEntitySystem` (`#75`). No Codeware (`enablers/Codeware/src/App/World/StaticEntitySpec.hpp`) é um struct de dado PURO
+// O spec do `StaticEntitySystem`. É um struct de dado PURO
 // (`struct StaticEntitySpec : Red::IScriptable`), sem método, com 6 `RTTI_PROPERTY`:
 //
 //   Red::RaRef<>              templatePath;

@@ -1,7 +1,7 @@
 //! Resolução de nomes: o RDAR guarda só o hash FNV-1a 64-bit do path REDengine
 //! (minúsculas, separador `\`). Para mostrar nomes no datamap/extração montamos
 //! um dicionário hash→path a partir de (a) uma lista opcional do usuário e
-//! (b) os paths embutidos no LxrsFooter do próprio archive.
+//! (b) os paths embutidos no rodapé de paths do próprio archive.
 
 use std::collections::HashMap;
 use std::fs;
@@ -47,7 +47,7 @@ impl PathDictionary {
     /// é normalizado antes de ser hasheado, então aceita `/` ou `\`.
     ///
     /// Aceita tanto texto puro quanto uma lista `KARK`-comprimida (como a
-    /// `usedhashes.kark` do WolvenKit): se o arquivo começa com o magic `KARK`,
+    /// `usedhashes.kark` da comunidade): se o arquivo começa com o magic `KARK`,
     /// é descomprimido via Kraken antes de parsear (requer a feature `kraken`).
     pub fn load_list(&mut self, path: &Path) -> std::io::Result<usize> {
         let bytes = fs::read(path)?;

@@ -1,15 +1,15 @@
 // -----------------------------------------------------------------------------
-// Codeware.Reflection — `Reflection`/`ReflectionClass`/`ReflectionProp`/`ReflectionFunc`/`ReflectionEnum` como classes de script
+// Reflexão — `Reflection`/`ReflectionClass`/`ReflectionProp`/`ReflectionFunc`/`ReflectionEnum` como classes de script
 // -----------------------------------------------------------------------------
 //
-// No Codeware essas classes são `native class`/`native struct` sem pai vanilla na cadeia; forjá-las com o layout C++ do Codeware seria
-// forja de RTTI de tipo desconhecido. Aqui são classes COMUNS (sem `native`, sem RegisterType) que guardam um ponteiro opaco (`Uint64`)
+// Como `native class`/`native struct` sem pai vanilla na cadeia, essas classes exigiriam forja de RTTI de tipo desconhecido.
+// Aqui são classes COMUNS (sem `native`, sem RegisterType) que guardam um ponteiro opaco (`Uint64`)
 // pro `CClass*`/`CProperty*`/`CBaseFunction*`/`CEnum*` real que o Rust resolve, sobre as globais `BwmsRefl*` abaixo.
 //
 // Sem `module` de propósito: declaração nativa dentro de `module X.Y` ganha o prefixo no `fullName`, o bind não casa com o nome que o
 // Rust registra e o jogo trava no boot.
 //
-// Diferenças do Codeware:
+// Formas:
 // - `GetProperties() -> array<ref<ReflectionProp>>` vira `GetPropertyCount()` + `GetPropertyByIndex(i)`.
 // - `ReflectionFunc.Call` só chama SEM argumentos (retorno truncado pra `Bool`).
 // - `ReflectionClass.GetFunction` não distingue estático de instância: devolve o 1º com o nome, nos dois arrays (funcs@+0x48/
@@ -48,7 +48,7 @@ native func BwmsReflFuncGetName(func: Uint64) -> CName;
 native func BwmsReflFuncCall(func: Uint64, obj: ref<IScriptable>) -> Bool;
 native func BwmsReflEnumGetValue(en: Uint64, name: CName) -> Uint64;
 native func BwmsReflMakeHandle(cls: Uint64) -> Uint64;
-// Codeware `#197` (`ReflectionType.GetInnerType()`): tipo interno de um
+// `ReflectionType.GetInnerType()`: tipo interno de um
 // composto (array/handle/weak-handle). `typeName` é o nome literal do IType (ex.
 // `n"array:Float"`/`n"handle:PlayerSystem"` — mesma convenção `"prefixo:Tipo"` já usada por
 // `compose_params_from_types`/`GetType`). Devolve `n""` (hash 0) se não-composto ou não achado.

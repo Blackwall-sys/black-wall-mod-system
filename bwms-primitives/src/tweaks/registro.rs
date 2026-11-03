@@ -1,16 +1,15 @@
-//! TweakXL `#7`/`#38`/`#39`/`#40` — as tabelas de metadado do PRÓPRIO TweakXL.
+//! As tabelas de metadado dos tweaks.
 //!
-//! Estes quatro itens do catálogo estavam marcados "nunca explorado" e pareciam depender do
-//! motor. Não dependem: são bookkeeping do gerenciador de mods sobre o que os mods fizeram —
-//! derivável inteiramente do fluxo de [`Op`] que [`crate::tweakxl::interpret`] já produz. Zero
+//! Não dependem do motor: são bookkeeping do gerenciador de mods sobre o que os mods fizeram —
+//! derivável inteiramente do fluxo de [`Op`] que [`crate::tweaks::interpret`] já produz. Zero
 //! endereço nativo, zero boot, zero TweakDB vivo.
 //!
-//! | item | capacidade original | aqui |
-//! |---|---|---|
-//! | `#7`  | `RegisterEnum`/`GetEnums` | [`Registro::registrar_enum`]/[`Registro::enums`] |
-//! | `#38` | `RegisterForeignKey`/`ForgetForeignKey(s)` | [`Registro::registrar_chave`]/[`Registro::esquecer_chave`]/[`Registro::esquecer_chave_do_flat`] |
-//! | `#39` | `RegisterResourcePath`/`ForgetResourcePath(s)` | [`Registro::registrar_recurso`]/[`Registro::esquecer_recurso`]/[`Registro::esquecer_recurso_do_flat`] |
-//! | `#40` | `GetAffectedRecords`/`IsEmpty`/`CheckForIssues` | [`Registro::records_afetados`]/[`Registro::vazio`]/[`Registro::checar_problemas`] |
+//! | tabela | aqui |
+//! |---|---|
+//! | enums | [`Registro::registrar_enum`]/[`Registro::enums`] |
+//! | chaves estrangeiras | [`Registro::registrar_chave`]/[`Registro::esquecer_chave`]/[`Registro::esquecer_chave_do_flat`] |
+//! | caminhos de recurso | [`Registro::registrar_recurso`]/[`Registro::esquecer_recurso`]/[`Registro::esquecer_recurso_do_flat`] |
+//! | records afetados | [`Registro::records_afetados`]/[`Registro::vazio`]/[`Registro::checar_problemas`] |
 //!
 //! **De onde vem a classificação.** Um flat é chave-estrangeira ou caminho-de-recurso pelo TIPO
 //! declarado dele, não pelo formato do texto do valor — `Items.Foo` e `base/x.mesh` são ambos
@@ -19,8 +18,7 @@
 //! [`Classificador`] pra este módulo morar no `bwms-primitives` sem arrastar o parser binário do
 //! `bwms tweak` (que depende de Kraken nativo).
 //!
-//! **Escopo honesto:** [`Registro::checar_problemas`] NÃO é o `CheckForIssues` completo do
-//! original (que valida contra o TweakDB vivo). Cobre só o que é decidível olhando o fluxo de
+//! **Escopo honesto:** [`Registro::checar_problemas`] NÃO valida contra o TweakDB vivo. Cobre só o que é decidível olhando o fluxo de
 //! ops — cada problema abaixo é uma perda silenciosa real que um mod pode causar sozinho.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -30,9 +28,9 @@ use crate::operacoes::{EditOp, Op};
 /// O que um flat guarda, do ponto de vista das tabelas de rastreio.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Especie {
-    /// Tipo `TweakDBID` (índice 2) — o valor referencia outro record. Alimenta `#38`.
+    /// Tipo `TweakDBID` (índice 2) — o valor referencia outro record. Alimenta a tabela de chaves.
     ChaveEstrangeira,
-    /// Tipo `raRef:CResource` (índice 3) — o valor é um caminho de recurso. Alimenta `#39`.
+    /// Tipo `raRef:CResource` (índice 3) — o valor é um caminho de recurso. Alimenta a tabela de recursos.
     CaminhoDeRecurso,
     /// Qualquer outro tipo (número/string/cor/…) — não entra em nenhuma das duas tabelas.
     Outro,
@@ -65,7 +63,7 @@ impl Registro {
         Self::default()
     }
 
-    // ── `#7` ────────────────────────────────────────────────────────────────────────────
+    // ── enums ────────────────────────────────────────────────────────────────────────────
     pub fn registrar_enum(&mut self, id: &str) {
         self.enums.insert(id.to_string());
     }
@@ -73,7 +71,7 @@ impl Registro {
         &self.enums
     }
 
-    // ── `#38` ───────────────────────────────────────────────────────────────────────────
+    // ── chaves estrangeiras ───────────────────────────────────────────────────────────────────────────
     pub fn registrar_chave(&mut self, chave: &str, flat: &str) {
         self.chaves.entry(chave.to_string()).or_default().insert(flat.to_string());
     }
@@ -99,7 +97,7 @@ impl Registro {
         &self.chaves
     }
 
-    // ── `#39` ───────────────────────────────────────────────────────────────────────────
+    // ── caminhos de recurso ───────────────────────────────────────────────────────────────────────────
     pub fn registrar_recurso(&mut self, caminho: &str, flat: &str) {
         self.recursos.entry(caminho.to_string()).or_default().insert(flat.to_string());
     }
@@ -121,7 +119,7 @@ impl Registro {
         &self.recursos
     }
 
-    // ── `#40` ───────────────────────────────────────────────────────────────────────────
+    // ── records afetados ───────────────────────────────────────────────────────────────────────────
     pub fn records_afetados(&self) -> &BTreeSet<String> {
         &self.afetados
     }
@@ -180,8 +178,8 @@ const MAX_HERANCA: usize = 16;
 ///
 /// **Por que não basta classificar o nome direto.** Um mod quase sempre clona um record e edita
 /// o clone: `Items.MeuItem.animSetResource` NÃO existe no `tweakdb.bin`, então o classificador
-/// devolveria [`Especie::Outro`] e as tabelas `#38`/`#39` ficariam vazias exatamente no caso
-/// mais comum de uso. O TweakXL real tipa o flat pelo SCHEMA do record; aqui o equivalente
+/// devolveria [`Especie::Outro`] e as tabelas de chaves e de recursos ficariam vazias exatamente no caso
+/// mais comum de uso. O tipo certo vem do SCHEMA do record; aqui o equivalente
 /// disponível é o record base — `Items.MeuItem` clonado de `Items.Katana` tem os flats de
 /// `Items.Katana`, cujos tipos o DB conhece. Cadeia seguida transitivamente (clone de clone).
 fn especie_do_flat(
@@ -274,7 +272,7 @@ fn elementos(v: &str) -> Vec<String> {
     out
 }
 
-/// Tira as decorações que o TweakXL aceita pro MESMO valor (`$Items.Foo`, `"base/x.mesh"`,
+/// Tira as decorações aceitas pro MESMO valor (`$Items.Foo`, `"base/x.mesh"`,
 /// `t"Items.Foo"`), pra duas grafias do mesmo alvo caírem na mesma entrada da tabela.
 fn normalizar(v: &str) -> String {
     let t = v.trim();

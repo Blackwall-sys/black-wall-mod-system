@@ -1,4 +1,4 @@
-//! Mods de CET no Mac: os `.lua` rodam no `bwms-lua`. Um estado global único (serializado por Mutex), `Game.*` ligado ao nosso motor RTTI,
+//! Mods Lua no Mac: os `.lua` rodam no `bwms-lua`. Um estado global único (serializado por Mutex), `Game.*` ligado ao nosso motor RTTI,
 //! `registerForEvent(onInit/onUpdate/...)` e o lifecycle dirigido pelo `cp77_tick` (thread do jogo). Mod que depende de `.dll` não roda aqui.
 
 use std::ffi::c_void;
@@ -11,19 +11,22 @@ pub(crate) mod interface;
 pub(crate) mod ponte;
 pub(crate) mod observar;
 
-/// Resposta do `GetVersion()`: o nível da API do CET que os mods conferem, não a versão do BWMS. Mod compara com esse texto para saber o que
+/// Resposta do `GetVersion()`: o nível da API Lua que os mods conferem, não a versão do BWMS. Mod compara com esse texto para saber o que
 /// pode chamar.
-const NIVEL_DA_API_CET: &str = "v1.38.1";
+const NIVEL_DA_API_LUA: &str = "v1.38.1";
 
 struct SendLua(bwms_lua::Lua);
 unsafe impl Send for SendLua {}
 static LUA: Mutex<Option<SendLua>> = Mutex::new(None);
+/// Chave do `io` completo no metatable dos globais (protegido por `__metatable`): só `ambiente_do_mod` o lê, para montar o `io` preso à
+/// pasta de cada mod. Fica no próprio estado, então cada estado tem o seu.
+const CHAVE_DO_IO_COMPLETO: &str = "__io_completo";
 /// Callbacks de hotkey (registerHotkey), keyed pela string da tecla.
 static HOTKEYS: Mutex<Option<std::collections::HashMap<String, bwms_lua::RegistryKey>>> =
     Mutex::new(None);
 
 /// Callbacks de registerInput (down/up), keyed pelo char da tecla. O cb recebe um
-/// bool `isDown` — dispara tanto no key-down quanto no key-up (como o CET).
+/// bool `isDown` — dispara tanto no key-down quanto no key-up (o que os mods esperam).
 static INPUTS: Mutex<Option<std::collections::HashMap<char, bwms_lua::RegistryKey>>> =
     Mutex::new(None);
 
@@ -91,7 +94,7 @@ impl bwms_lua::UserData for Handle {
     fn add_methods<M: bwms_lua::UserDataMethods<Self>>(methods: &mut M) {
         // __index: PRIMEIRO tenta PROPRIEDADE (campo por nome via RTTI) — `obj.label`,
         // `spawnEvent.value`, etc.; se não for campo, devolve proxy de MÉTODO `obj:Metodo()`.
-        // Espelha o CET (campo > método).
+        // Campo vence método, a ordem que os mods esperam.
         methods.add_meta_method(bwms_lua::MetaMethod::Index, |lua, this, key: String| {
             let ptr = this.0;
             let known = this.1;
@@ -295,7 +298,7 @@ fn new_object_handle(lua: &bwms_lua::Lua, class_name: &str) -> bwms_lua::Value {
     unsafe {
         if let Some(r) = crate::registry() {
             cls = r.class_by_name(class_name); // CLASSE conhecida (GetType daria a base)
-            // CET 1.38: classe abstrata não constrói, `.new()` devolve nil.
+            // API 1.38: classe abstrata não constrói, `.new()` devolve nil.
             if !classe_abstrata(r, cls) {
                 out = crate::rtti::new_object(r, class_name);
             }
@@ -310,13 +313,13 @@ fn new_object_handle(lua: &bwms_lua::Lua, class_name: &str) -> bwms_lua::Value {
     }
 }
 
-/// Tipos do CET expostos ao Lua como userdata, p/ marshalling correto nos métodos:
+/// Tipos do jogo expostos ao Lua como userdata, p/ marshalling correto nos métodos:
 /// CName(hash u64), TweakDBID(8B), ItemID(16B). Mods passam esses como args.
 #[derive(Clone, Copy)]
 pub struct CName(pub u64);
 impl bwms_lua::UserData for CName {
     fn add_methods<M: bwms_lua::UserDataMethods<Self>>(m: &mut M) {
-        // O texto do CET (`BasicTypes.cpp`): mods recortam o nome entre `--[[ ` e ` --]]`.
+        // O texto que os mods esperam: eles recortam o nome entre `--[[ ` e ` --]]`.
         m.add_meta_method(bwms_lua::MetaMethod::ToString, |_, t, ()| {
             let (lo, hi) = (t.0 as u32, (t.0 >> 32) as u32);
             Ok(match nome_do_cname(t.0) {
@@ -324,7 +327,7 @@ impl bwms_lua::UserData for CName {
                 None => format!("ToCName{{ hash_lo = 0x{lo:08X}, hash_hi = 0x{hi:08X} }}"),
             })
         });
-        // CET: `cname.value` é a STRING do nome (NativeSettings faz `.value == "..."`,
+        // `cname.value` é a STRING do nome (há mod que faz `.value == "..."`,
         // `.value:gsub(...)`, `.value:find(...)`). Resolve via pool interno (name_of); se
         // desconhecido, devolve o hex do hash — SEMPRE string, pra os métodos de string não
         // quebrarem. `.hash` = o número. (Resolver CName→nome geral = CNamePool, em RE.)
@@ -360,7 +363,7 @@ impl bwms_lua::UserData for ItemId {
         });
     }
 }
-/// Vetor de 4 floats (Vector4/Quaternion/EulerAngles do CET) = 16B → Arg::Raw.
+/// Vetor de 4 floats (Vector4/Quaternion/EulerAngles) = 16B → Arg::Raw.
 /// Campos x/y/z/w (Euler usa roll/pitch/yaw nos 3 primeiros).
 #[derive(Clone, Copy)]
 pub struct Vec4(pub [f32; 4]);
@@ -379,7 +382,7 @@ impl bwms_lua::UserData for Vec4 {
         f.add_field_method_get("y", |_, t| Ok(t.0[1]));
         f.add_field_method_get("z", |_, t| Ok(t.0[2]));
         f.add_field_method_get("w", |_, t| Ok(t.0[3]));
-        // CET permite `v.x = 5` — setters por componente.
+        // Mods fazem `v.x = 5` — setters por componente.
         f.add_field_method_set("x", |_, t, v: f32| { t.0[0] = v; Ok(()) });
         f.add_field_method_set("y", |_, t, v: f32| { t.0[1] = v; Ok(()) });
         f.add_field_method_set("z", |_, t, v: f32| { t.0[2] = v; Ok(()) });
@@ -389,7 +392,7 @@ impl bwms_lua::UserData for Vec4 {
         m.add_meta_method(bwms_lua::MetaMethod::ToString, |_, t, ()| {
             Ok(format!("Vec4({},{},{},{})", t.0[0], t.0[1], t.0[2], t.0[3]))
         });
-        // math 3D (xyz) — como o Vector4 do CET (teleport/distância)
+        // math 3D (xyz) do Vector4 (teleport/distância)
         m.add_method("Length", |_, t, ()| {
             Ok((t.0[0] * t.0[0] + t.0[1] * t.0[1] + t.0[2] * t.0[2]).sqrt())
         });
@@ -414,7 +417,7 @@ impl bwms_lua::UserData for Vec4 {
             };
             lua.create_userdata(Vec4(n))
         });
-        // aritmética componente-a-componente (CET soma/subtrai Vector4)
+        // aritmética componente-a-componente (mods somam/subtraem Vector4)
         m.add_meta_method(bwms_lua::MetaMethod::Add, |lua, t, o: bwms_lua::AnyUserData| {
             let b = o.borrow::<Vec4>()?;
             lua.create_userdata(Vec4([
@@ -612,7 +615,7 @@ fn setup_game(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
             Ok(())
         })?,
     )?;
-    // Game.GetPlayer(): o V capturado; sem ele, o `GetPlayer(GameInstance)` do jogo, como o CET.
+    // Game.GetPlayer(): o V capturado; sem ele, o `GetPlayer(GameInstance)` do jogo.
     // Game.Wrap(addr) → Handle de um ponteiro cru (p/ encadear retornos de getter). handle:Method(...) resolve.
     g.set(
         "GetPlayer",
@@ -672,9 +675,9 @@ fn setup_game(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
     mt.set(
         "__index",
         lua.create_function(|lua, (_t, k): (bwms_lua::Table, String)| {
-            // overloads mangled (ex.: "OperatorEqual;IScriptableIScriptable;Bool") — o CET
-            // resolve como função estática. Minimamente: identidade de ponteiro entre Handles
-            // (== isSameInstance do NativeSettings / Ref.Equals). Cobre getOptionTable.
+            // overloads mangled (ex.: "OperatorEqual;IScriptableIScriptable;Bool") — os mods
+            // chamam como função estática. Minimamente: identidade de ponteiro entre Handles
+            // (== isSameInstance / Ref.Equals). Cobre getOptionTable.
             if k.starts_with("OperatorEqual") || k.starts_with("OperatorNotEqual") {
                 let neg = k.starts_with("OperatorNotEqual");
                 return Ok(bwms_lua::Value::Function(lua.create_function(
@@ -703,10 +706,10 @@ fn setup_game(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
 }
 
 fn setup_hooks(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
-    // ---- Observe / ObserveAfter / Override: o coração do CET ----
+    // ---- Observe / ObserveAfter / Override: o coração da camada Lua ----
     // Registram um callback p/ quando o jogo chamar <classe>.<método>. O registro
     // é em 2 tempos (queue agora, resolve no cp77_tick na thread do jogo).
-    use crate::cet::observar::{queue, Kind};
+    use crate::mods_lua::observar::{queue, Kind};
     lua.globals().set(
         "Observe",
         lua.create_function(|lua, (cls, m, cb): (String, String, bwms_lua::Function)| {
@@ -732,7 +735,7 @@ fn setup_hooks(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         })?,
     )?;
     // Suppress(classe, método, cb): roda o cb NO LUGAR da original (a original é PULADA).
-    // É o Override-suppress do CET — pra métodos com efeito colateral (não só getter).
+    // É o Override-suppress — pra métodos com efeito colateral (não só getter).
     lua.globals().set(
         "Suppress",
         lua.create_function(|lua, (cls, m, cb): (String, String, bwms_lua::Function)| {
@@ -742,7 +745,7 @@ fn setup_hooks(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         })?,
     )?;
 
-    // registerHotkey(id, rótulo, cb) e registerInput(id, rótulo, cb(isDown)), a assinatura do CET. O bind que o CET guarda na tela dele
+    // registerHotkey(id, rótulo, cb) e registerInput(id, rótulo, cb(isDown)), a assinatura que os mods usam. O bind
     // vem do `bwms.toml` (`tecla_<id> = "j"`); sem bind o mod carrega e a tecla fica muda. A forma curta `(tecla, cb)` usa o id como tecla.
     lua.globals().set(
         "registerHotkey",
@@ -782,7 +785,7 @@ fn bind_e_callback(id: &str, a: bwms_lua::Value, b: bwms_lua::Value) -> bwms_lua
     let bind = crate::configuracao::do_mod::ler_texto(&format!("tecla_{id}")).or_else(|| curta.then(|| id.to_string()));
     let tecla = bind.and_then(|t| t.chars().next());
     if tecla.is_none() {
-        crate::log(&format!("[cet] {id} sem tecla: ponha tecla_{id} = \"<tecla>\" no bwms.toml"));
+        crate::log(&format!("[lua] {id} sem tecla: ponha tecla_{id} = \"<tecla>\" no bwms.toml"));
     }
     Ok((tecla, cb))
 }
@@ -816,8 +819,8 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         })?,
     )?;
 
-    // ---- Fase 1 (paridade CET): utils + construtores faltantes ----
-    // IsDefined(h): true se h é Handle não-null (null-check essencial dos mods CET).
+    // ---- Fase 1: utils + construtores faltantes ----
+    // IsDefined(h): true se h é Handle não-null (null-check essencial dos mods Lua).
     lua.globals().set(
         "IsDefined",
         lua.create_function(|_, v: bwms_lua::Value| {
@@ -828,7 +831,7 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
             })
         })?,
     )?;
-    // To* do CET (`ToVector4{x=…}`, `ToEulerAngles{roll=…}`, `ToQuaternion{i=…}`, `ToVector3`): a struct do RTTI montada pelos campos. Os
+    // To* (`ToVector4{x=…}`, `ToEulerAngles{roll=…}`, `ToQuaternion{i=…}`, `ToVector3`): a struct do RTTI montada pelos campos. Os
     // tipos em si (`Vector4.new(…)`) vêm do global por tipo do RTTI (`setup_api`).
     for (global, tipo) in [("ToVector4", "Vector4"), ("ToVector3", "Vector3"), ("ToEulerAngles", "EulerAngles"), ("ToQuaternion", "Quaternion")] {
         lua.globals().set(
@@ -870,7 +873,7 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
             _ => None,
         })
     })?)?;
-    // Proxies de enum NOMEADOS (CET): `PauseMenuAction.OpenSubMenu` → valor int via RTTI.
+    // Proxies de enum NOMEADOS: `PauseMenuAction.OpenSubMenu` → valor int via RTTI.
     // Membro/enum não-resolvido → nil. Usados nos corpos dos hooks de menu (Stage B).
     for ty in [
         "PauseMenuAction",
@@ -907,10 +910,10 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
     lua.globals().set("NewObject", lua.create_function(|lua, class_name: String| {
         Ok(new_object_handle(lua, &class_name))
     })?)?;
-    // _G metatable (estilo CET): um GLOBAL indefinido que SEJA uma classe RTTI registrada
+    // _G metatable: um GLOBAL indefinido que SEJA uma classe RTTI registrada
     // vira um proxy chamável com `.new()` → constrói a instância. Ex.: `PauseMenuListItemData
     // .new()`, `inkTextWidget.new()`. Só dispara p/ chave faltante E classe existente → não
-    // muda o resto (nomes desconhecidos seguem nil). É o que destrava os widgets do NativeSettings.
+    // muda o resto (nomes desconhecidos seguem nil). É o que destrava os widgets dos mods de menu de opções.
     {
         let g_mt = lua.create_table()?;
         g_mt.set(
@@ -944,7 +947,7 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         "ToCName",
         lua.create_function(|lua, s: String| lua.create_userdata(CName(crate::cname::intern(&s))))?,
     )?;
-    // CName no CET é uma TABELA CHAMÁVEL com .new/.add — NÃO só função. NativeSettings
+    // CName é uma TABELA CHAMÁVEL com .new/.add — NÃO só função. Há mod que
     // faz `CName.add(label)` (registra o nome); mods fazem `CName.new("x")`/`CName("x")`.
     // Todas INTERNAM (string→hash) no nosso espelho pra NameToString reverter; a estrutura/
     // aba monta com o hash. (Registro no CNamePool nativo do jogo é refino futuro.)
@@ -964,7 +967,7 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         lua.globals().set("CName", cname_tbl)?;
     }
     // Pré-interna strings que mods comparam contra `CName.value` (o engine passa só o hash;
-    // o FNV1a64 é o mesmo, então name_of reverte). Crítico: AddMenuItem do NativeSettings faz
+    // o FNV1a64 é o mesmo, então name_of reverte). Crítico: o AddMenuItem de um mod de menu de opções faz
     // `spawnEvent.value == "OnSwitchToSettings"` → sem isso o botão "Mods" nunca é criado.
     for s in [
         "OnSwitchToSettings", "OnSwitchToCredits", "OnSwitchToGameplay", "Mods",
@@ -978,7 +981,7 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
             lua.create_userdata(TweakDBID(bwms_primitives::tweak_db_id(&s).to_le_bytes()))
         })?,
     )?;
-    // TweakDBID do CET: `TweakDBID.new(path)`, `TweakDBID.new(base, ".sufixo")` (base = path ou TweakDBID) e `TweakDBID(path)`.
+    // TweakDBID: `TweakDBID.new(path)`, `TweakDBID.new(base, ".sufixo")` (base = path ou TweakDBID) e `TweakDBID(path)`.
     {
         fn id_de(v: &bwms_lua::Value) -> Option<u64> {
             match v {
@@ -1015,16 +1018,16 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         })?,
     )?;
 
-    // ---- globals utilitários do CET ----
-    // GetVersion DEVE casar o regex `^v(%d+)%.(%d+)%.(%d+)` do CET (psiberx) — mods fazem
-    // gate de versão (ex.: NativeSettings: `tonumber(GetVersion():gsub(...)) < 1.25`). Uma
+    // ---- globals utilitários ----
+    // GetVersion DEVE casar o regex `^v(%d+)%.(%d+)%.(%d+)` — mods fazem
+    // gate de versão (ex.: `tonumber(GetVersion():gsub(...)) < 1.25`). Uma
     // string fora do formato vira nil → `nil < 1.25` ESTOURA. Reportamos vX.Y.Z >= 1.25.
     lua.globals().set(
         "GetVersion",
-        lua.create_function(|_, ()| Ok(NIVEL_DA_API_CET.to_string()))?,
+        lua.create_function(|_, ()| Ok(NIVEL_DA_API_LUA.to_string()))?,
     )?;
     setup_globais_de_tipo(lua)?;
-    // StringToName(s) = ToCName (interna + devolve CName). NativeSettings usa em SetName/GetWidget.
+    // StringToName(s) = ToCName (interna + devolve CName). Mods usam em SetName/GetWidget.
     lua.globals().set("StringToName", lua.globals().get::<bwms_lua::Function>("ToCName")?)?;
     // NameToString(n) → nome internado do CName/hash (espelho do CNamePool); "" se nunca visto.
     lua.globals().set(
@@ -1043,7 +1046,7 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         })?,
     )?;
     // GetLocalizedText[ByKey](key) → STUB "" (sem bridge de localização). Os mods tratam
-    // ""/len==0 com fallback (NativeSettings usa o label cru). NUNCA nil (nil:len() estoura).
+    // ""/len==0 com fallback (usam o label cru). NUNCA nil (nil:len() estoura).
     {
         let loc = lua.create_function(|_, _v: bwms_lua::Value| Ok(String::new()))?;
         lua.globals().set("GetLocalizedTextByKey", loc.clone())?;
@@ -1055,7 +1058,7 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         "BuildWidgetPath",
         lua.create_function(|_, segs: bwms_lua::Value| Ok(segs))?,
     )?;
-    // CalcSeed(o) → identidade do ponteiro do Handle como int (o que o CET hasheia).
+    // CalcSeed(o) → identidade do ponteiro do Handle como int (o que os mods hasheiam).
     lua.globals().set(
         "CalcSeed",
         lua.create_function(|_, v: bwms_lua::Value| {
@@ -1079,8 +1082,8 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         "ModArchiveExists",
         lua.create_function(|_, _name: String| Ok(false))?,
     )?;
-    // TweakDB: tabela com os getters e o `SetFlat` do CET sobre o TweakDB vivo do jogo. O flat sai pelo tipo do próprio `FlatValue`; o
-    // `SetFlat` grava pelo escritor único (o tipo do flat converte o valor) e atualiza o record dono do flat, como o CET.
+    // TweakDB: tabela com os getters e o `SetFlat` sobre o TweakDB vivo do jogo. O flat sai pelo tipo do próprio `FlatValue`; o
+    // `SetFlat` grava pelo escritor único (o tipo do flat converte o valor) e atualiza o record dono do flat.
     lua.globals().set("TweakDB", {
         let t = lua.create_table()?;
         for nome in ["GetFlat", "GetFloat", "GetInt", "GetBool", "GetCName", "GetTweakDBID"] {
@@ -1101,7 +1104,7 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         t
     })?;
 
-    // Tipos do jogo no global, como no CET: nome que não é global do Lua e é tipo do RTTI vira o `Tipo` (`Vector4.new(…)`,
+    // Tipos do jogo no global: nome que não é global do Lua e é tipo do RTTI vira o `Tipo` (`Vector4.new(…)`,
     // `Quaternion.Estatica(…)`); função global do jogo (`GetPlayer()`) vira função. Consulta só no global ausente.
     let meta = lua.create_table()?;
     meta.set(
@@ -1140,6 +1143,28 @@ fn setup_api(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
 
     interface::instalar(lua)?;
     setup_imgui_enums(lua)?;
+    fechar_globais(lua)
+}
+
+/// Os globais são o que um mod alcança por `_G`, `getfenv()` e `package.loaded`. Sai o `io` (vai para o metatable protegido dos
+/// globais), o `require` que lê a partir da pasta do jogo e, do `os`, tudo que não é relógio e data: arquivo, só pelo ambiente do mod,
+/// preso à pasta dele.
+fn fechar_globais(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
+    let g = lua.globals();
+    let meta = g.metatable().ok_or_else(|| bwms_lua::Error::RuntimeError("globais sem metatable".into()))?;
+    meta.set(CHAVE_DO_IO_COMPLETO, g.get::<bwms_lua::Table>("io")?)?;
+    meta.set("__metatable", false)?;
+    g.set("io", bwms_lua::Value::Nil)?;
+    g.set("require", bwms_lua::Value::Nil)?;
+    let os: bwms_lua::Table = g.get("os")?;
+    let os_seguro = lua.create_table()?;
+    for nome in ["clock", "time", "date", "difftime"] {
+        os_seguro.set(nome, os.get::<bwms_lua::Value>(nome)?)?;
+    }
+    g.set("os", os_seguro.clone())?;
+    let carregados: bwms_lua::Table = g.get::<bwms_lua::Table>("package")?.get("loaded")?;
+    carregados.set("io", bwms_lua::Value::Nil)?;
+    carregados.set("os", os_seguro)?;
     Ok(())
 }
 
@@ -1168,12 +1193,12 @@ pub unsafe fn call_hook(key: &bwms_lua::RegistryKey, this: *mut c_void, params: 
     }
 }
 
-/// Override-WRAPPED (CET) FLAG-BASED: chama o callback com `(this, ...args, wrapped)`
-/// (wrapped por ÚLTIMO, como o CET). A closure `wrapped` NÃO re-invoca a original (frame
+/// Override-WRAPPED FLAG-BASED: chama o callback com `(this, ...args, wrapped)`
+/// (wrapped por ÚLTIMO, a ordem que os mods esperam). A closure `wrapped` NÃO re-invoca a original (frame
 /// sintético crashava métodos de UI); ela só seta `WRAPPED_CALLED` → o dispatch deixa a
 /// ORIGINAL rodar no FRAME REAL. Se o callback não chamar wrapped (override total), a
 /// original é suprimida. (Limitação: código DEPOIS de wrapped() roda antes da original e
-/// wrapped() não devolve valor — ok p/ NativeSettings, que só faz `wrapped(idx)` no fim.)
+/// wrapped() não devolve valor — ok p/ mod que só faz `wrapped(idx)` no fim.)
 fn handle_val(lua: &bwms_lua::Lua, p: *mut c_void) -> bwms_lua::Value {
     match lua.create_userdata(Handle(p, std::ptr::null_mut())) {
         Ok(ud) => bwms_lua::Value::UserData(ud),
@@ -1285,7 +1310,7 @@ unsafe fn write_pod_ret(func: *mut c_void, res: *mut c_void, v: &bwms_lua::Value
     false
 }
 
-/// Override unificado (semântica CET): roda o callback UMA vez com `(this, ...args,
+/// Override unificado: roda o callback UMA vez com `(this, ...args,
 /// wrapped)`, capturando se ele chamou `wrapped()` (→ `WRAPPED_CALLED`) E o valor de
 /// retorno. Se for override-TOTAL (não chamou `wrapped`) e o retorno couber num POD de
 /// largura conhecida, ESCREVE o `res` (aOut) e devolve `suppress_value=true` → o
@@ -1307,13 +1332,13 @@ pub unsafe fn call_hook_override(
         let lua = &s.0;
         if let Ok(cb) = lua.registry_value::<bwms_lua::Function>(key) {
             let wrapped = match lua.create_function(move |_, _a: bwms_lua::Variadic<bwms_lua::Value>| {
-                crate::cet::observar::WRAPPED_CALLED.store(true, std::sync::atomic::Ordering::Relaxed);
+                crate::mods_lua::observar::WRAPPED_CALLED.store(true, std::sync::atomic::Ordering::Relaxed);
                 Ok(())
             }) {
                 Ok(w) => w,
                 Err(_) => return (false, false),
             };
-            // ordem CET: (this, ...args, wrapped).
+            // ordem: (this, ...args, wrapped).
             let mut args: Vec<bwms_lua::Value> = Vec::with_capacity(params.len() + 2);
             args.push(handle_val(lua, this));
             for &(raw, tc) in params {
@@ -1323,7 +1348,7 @@ pub unsafe fn call_hook_override(
             let mv: bwms_lua::Variadic<bwms_lua::Value> = args.into_iter().collect();
             let ret: bwms_lua::Value = cb.call(mv).unwrap_or(bwms_lua::Value::Nil);
             let wrapped_called =
-                crate::cet::observar::WRAPPED_CALLED.load(std::sync::atomic::Ordering::Relaxed);
+                crate::mods_lua::observar::WRAPPED_CALLED.load(std::sync::atomic::Ordering::Relaxed);
             // Só tenta suprimir-com-valor em override-TOTAL (sem wrapped) que devolveu algo.
             let suppress_value = if !wrapped_called && !matches!(ret, bwms_lua::Value::Nil) {
                 write_pod_ret(func, res, &ret)
@@ -1411,7 +1436,7 @@ unsafe fn lock_init<'a>(
 /// TODO 100%: mod-manager com isolamento por-mod (mods/<nome>/init.lua coexistindo).
 pub unsafe fn reset() {
     let mut g = LUA.lock().unwrap_or_else(|e| e.into_inner());
-    // dispara onShutdown ANTES de descartar (mods salvam estado/limpam) — paridade CET.
+    // dispara onShutdown ANTES de descartar (mods salvam estado/limpam).
     if let Some(s) = g.as_ref() {
         let lua = &s.0;
         let _: bwms_lua::Result<()> = (|| {
@@ -1427,17 +1452,37 @@ pub unsafe fn reset() {
     *g = None;
 }
 
-/// Executa um trecho de código Lua no estado persistente.
+/// Executa um trecho de código Lua no estado persistente. Quem chama é o terminal de quem joga (`luarun`), não um mod: roda num
+/// ambiente com o `io` completo, que lê e grava nos globais.
 pub unsafe fn run_code(code: &str) {
     let mut g = LUA.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(lua) = lock_init(&mut g) {
-        if let Err(e) = lua.load(code).exec() {
+        let r: bwms_lua::Result<()> = (|| {
+            let env = lua.create_table()?;
+            let meta = lua.create_table()?;
+            meta.set("__index", lua.globals())?;
+            meta.set("__newindex", lua.globals())?;
+            env.set_metatable(Some(meta));
+            env.set("io", io_completo(lua)?)?;
+            lua.load(code).set_environment(env).exec()
+        })();
+        if let Err(e) = r {
             crate::log(&format!("[lua] ERRO: {e}"));
         }
     }
 }
 
-/// Roda o `init.lua` de um mod no ambiente dele ([`ambiente_do_mod`]) e guarda o `return` em `__mods[name]` (o `GetMod(name)` do CET).
+/// O `io` completo guardado por `fechar_globais` no metatable protegido dos globais.
+fn io_completo(lua: &bwms_lua::Lua) -> bwms_lua::Result<bwms_lua::Table> {
+    lua.globals()
+        .metatable()
+        .map(|m| m.get::<Option<bwms_lua::Table>>(CHAVE_DO_IO_COMPLETO))
+        .transpose()?
+        .flatten()
+        .ok_or_else(|| bwms_lua::Error::RuntimeError("io do estado Lua ausente: o setup não rodou".into()))
+}
+
+/// Roda o `init.lua` de um mod no ambiente dele ([`ambiente_do_mod`]) e guarda o `return` em `__mods[name]` (o que o `GetMod(name)` devolve).
 pub unsafe fn run_mod(name: &str, code: &str, dir: &std::path::Path) {
     let mut g = LUA.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(lua) = lock_init(&mut g) {
@@ -1461,7 +1506,7 @@ pub unsafe fn run_mod(name: &str, code: &str, dir: &std::path::Path) {
     }
 }
 
-/// Caminho de arquivo do mod: relativo à pasta dele, sem sair dela (absoluto e `..` recusados), como o CET restringe o `io` de cada mod.
+/// Caminho de arquivo do mod: relativo à pasta dele, sem sair dela (absoluto e `..` recusados): o `io` de cada mod fica restrito.
 fn caminho_no_mod(dir: &std::path::Path, rel: &str) -> Option<std::path::PathBuf> {
     // Mod de Windows escreve o caminho com `\`.
     let rel = rel.replace('\\', "/");
@@ -1469,12 +1514,12 @@ fn caminho_no_mod(dir: &std::path::Path, rel: &str) -> Option<std::path::PathBuf
     p.components().all(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir)).then(|| dir.join(p))
 }
 
-/// Arquivo de script do mod por `rel`, como o `loadfile` do CET: o caminho como veio ou com `.lua`.
+/// Arquivo de script do mod por `rel`, como o `loadfile` que os mods chamam: o caminho como veio ou com `.lua`.
 fn script_no_mod(dir: &std::path::Path, rel: &str) -> Option<std::path::PathBuf> {
     [rel.to_string(), format!("{rel}.lua")].iter().filter_map(|r| caminho_no_mod(dir, r)).find(|p| p.is_file())
 }
 
-/// Globais pequenos da lista do sandbox do CET: `IconGlyphs` (ícone sem fonte no terminal vira texto vazio), `ImVec2`/`ImVec4`, `CRUID`,
+/// Globais pequenos do sandbox dos mods: `IconGlyphs` (ícone sem fonte no terminal vira texto vazio), `ImVec2`/`ImVec4`, `CRUID`,
 /// `LocKey`, `Dump`/`DumpType`/`DumpAllTypeNames`. `GameOptions` responde `nil` e avisa: as opções do motor ainda não têm ponte.
 fn setup_globais_de_tipo(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
     use bwms_lua::Value as V;
@@ -1512,7 +1557,7 @@ fn setup_globais_de_tipo(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
             meta.set(
                 "__index",
                 lua.create_function(|lua, (_t, k): (V, String)| {
-                    crate::log(&format!("[cet] GameOptions.{k}: sem ponte com as opções do motor, responde nil"));
+                    crate::log(&format!("[lua] GameOptions.{k}: sem ponte com as opções do motor, responde nil"));
                     lua.create_function(|_, _: bwms_lua::MultiValue| Ok(V::Nil))
                 })?,
             )?;
@@ -1526,9 +1571,9 @@ fn setup_globais_de_tipo(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
             let cls = crate::registry().map_or(std::ptr::null_mut(), |r| r.class_by_name(&nome));
             if cls.is_null() { Vec::new() } else { crate::rtti::propriedades(cls) }
         };
-        crate::log(&format!("[cet] DumpType {nome}: {} propriedade(s)", props.len()));
+        crate::log(&format!("[lua] DumpType {nome}: {} propriedade(s)", props.len()));
         for (n, ty, off) in props {
-            crate::log(&format!("[cet]   +0x{off:x} {}: {}", crate::cname::resolve_cname(n), unsafe {
+            crate::log(&format!("[lua]   +0x{off:x} {}: {}", crate::cname::resolve_cname(n), unsafe {
                 crate::cname::resolve_cname(crate::rtti::type_name_getname(ty))
             }));
         }
@@ -1553,19 +1598,19 @@ fn setup_globais_de_tipo(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
                     let (lista, n) = r.get_classes(base, true);
                     for i in 0..n {
                         let cls = (lista as *const *mut c_void).add(i).read();
-                        crate::log(&format!("[cet] {}", crate::cname::resolve_cname(crate::rtti::type_name_getname(cls))));
+                        crate::log(&format!("[lua] {}", crate::cname::resolve_cname(crate::rtti::type_name_getname(cls))));
                     }
                     n
                 })
             };
-            crate::log(&format!("[cet] DumpAllTypeNames: {n} tipo(s)"));
+            crate::log(&format!("[lua] DumpAllTypeNames: {n} tipo(s)"));
             Ok(())
         })?,
     )?;
     Ok(())
 }
 
-/// Compila `codigo` no ambiente `env`: `(função, nil)` ou `(nil, mensagem)`, como o `loadstring` do sandbox do CET.
+/// Compila `codigo` no ambiente `env`: `(função, nil)` ou `(nil, mensagem)`, como o `loadstring` do sandbox dos mods.
 fn carregar_no_ambiente(lua: &bwms_lua::Lua, codigo: Vec<u8>, nome: String, env: &bwms_lua::Table) -> bwms_lua::Result<(bwms_lua::Value, bwms_lua::Value)> {
     Ok(match lua.load(codigo).set_name(nome).set_environment(env.clone()).into_function() {
         Ok(f) => (bwms_lua::Value::Function(f), bwms_lua::Value::Nil),
@@ -1574,7 +1619,7 @@ fn carregar_no_ambiente(lua: &bwms_lua::Lua, codigo: Vec<u8>, nome: String, env:
 }
 
 /// Ambiente de um mod: lê os globais por `__index` e guarda os globais do mod nele, com `require`, `io.open`/`io.lines`, `os.remove`/
-/// `os.rename`, `dofile` e `dir` presos à pasta do mod, como o sandbox do CET.
+/// `os.rename`, `dofile` e `dir` presos à pasta do mod (o sandbox de cada mod).
 fn ambiente_do_mod(lua: &bwms_lua::Lua, dir: &std::path::Path) -> bwms_lua::Result<bwms_lua::Table> {
     let env = lua.create_table()?;
     let meta = lua.create_table()?;
@@ -1582,7 +1627,7 @@ fn ambiente_do_mod(lua: &bwms_lua::Lua, dir: &std::path::Path) -> bwms_lua::Resu
     env.set_metatable(Some(meta));
     let carregados = lua.create_table()?;
 
-    // `require` devolve `(módulo, erro)`, sem levantar erro: mod testa o `nil`. Módulo em carga responde `nil` (o CET 1.37.1 corta `require` circular).
+    // `require` devolve `(módulo, erro)`, sem levantar erro: mod testa o `nil`. Módulo em carga responde `nil` (corta `require` circular).
     let em_carga = lua.create_table()?;
     let (d, e, c) = (dir.to_path_buf(), env.clone(), carregados.clone());
     env.set(
@@ -1592,7 +1637,7 @@ fn ambiente_do_mod(lua: &bwms_lua::Lua, dir: &std::path::Path) -> bwms_lua::Resu
             let rel = nome.replace('.', "/");
             let candidatos = [nome.clone(), format!("{nome}.lua"), format!("{rel}.lua"), format!("{nome}/init.lua")];
             let Some(arq) = candidatos.iter().filter_map(|r| caminho_no_mod(&d, r)).find(|p| p.is_file()) else {
-                let msg = lua.create_string(format!("Tried to access invalid path '{nome}'!"))?;
+                let msg = lua.create_string(format!("módulo '{nome}' não existe dentro da pasta do mod"))?;
                 return Ok((V::Nil, V::String(msg)));
             };
             let chave = arq.to_string_lossy().into_owned();
@@ -1637,7 +1682,7 @@ fn ambiente_do_mod(lua: &bwms_lua::Lua, dir: &std::path::Path) -> bwms_lua::Resu
         "loadfile",
         lua.create_function(move |lua, rel: String| {
             let Some(p) = script_no_mod(&d, &rel) else {
-                let msg = lua.create_string(format!("Tried to access invalid path '{rel}'!"))?;
+                let msg = lua.create_string(format!("'{rel}' não existe dentro da pasta do mod"))?;
                 return Ok((bwms_lua::Value::Nil, bwms_lua::Value::String(msg)));
             };
             let codigo = std::fs::read(&p).map_err(bwms_lua::Error::external)?;
@@ -1645,7 +1690,7 @@ fn ambiente_do_mod(lua: &bwms_lua::Lua, dir: &std::path::Path) -> bwms_lua::Resu
         })?,
     )?;
 
-    let io: bwms_lua::Table = lua.globals().get("io")?;
+    let io = io_completo(lua)?;
     let io_mod = lua.create_table()?;
     for par in io.pairs::<bwms_lua::Value, bwms_lua::Value>() {
         let (k, v) = par?;
@@ -1690,7 +1735,7 @@ fn ambiente_do_mod(lua: &bwms_lua::Lua, dir: &std::path::Path) -> bwms_lua::Resu
     env.set(
         "dofile",
         lua.create_function(move |lua, rel: String| {
-            let p = script_no_mod(&d, &rel).ok_or_else(|| bwms_lua::Error::RuntimeError(format!("Tried to access invalid path '{rel}'!")))?;
+            let p = script_no_mod(&d, &rel).ok_or_else(|| bwms_lua::Error::RuntimeError(format!("'{rel}' não existe dentro da pasta do mod")))?;
             let src = std::fs::read(&p).map_err(bwms_lua::Error::external)?;
             lua.load(src).set_name(format!("@{}", p.display())).set_environment(e.clone()).call::<bwms_lua::MultiValue>(())
         })?,
@@ -1718,8 +1763,8 @@ fn ambiente_do_mod(lua: &bwms_lua::Lua, dir: &std::path::Path) -> bwms_lua::Resu
     Ok(env)
 }
 
-/// Último instante em que o onUpdate rodou — p/ computar o `delta` (segundos) que o CET passa
-/// pro callback. Sem isso, mods que fazem `Cron.Update(delta)` (NativeSettings) erram todo frame
+/// Último instante em que o onUpdate rodou — p/ computar o `delta` (segundos) que os mods esperam
+/// no callback. Sem isso, mods que fazem `Cron.Update(delta)` erram todo frame
 /// (`arithmetic on nil`). Wall-clock entre ticks = tempo real decorrido (o que o Cron espera).
 static LAST_UPDATE: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
@@ -1734,7 +1779,7 @@ fn next_update_delta() -> f64 {
 }
 
 /// Dispara um evento (onInit/onUpdate/...) → chama todos os callbacks registrados. Pro `onUpdate`
-/// passa o `delta` (segundos desde o último), como o CET — alguns mods dependem dele.
+/// passa o `delta` (segundos desde o último) — alguns mods dependem dele.
 pub unsafe fn run_event(name: &str) {
     let mut g = LUA.lock().unwrap_or_else(|e| e.into_inner());
     // não inicializa o runtime só pra rodar evento (evita custo se não há mod).
@@ -1770,7 +1815,7 @@ pub unsafe fn run_event(name: &str) {
 /// estiver travado pela thread do jogo, PULA o frame em vez de travar o render.
 /// Só p/ "onDraw" (mods desenhando ImGui).
 pub unsafe fn run_event_draw() {
-    // Até 3 ms pela trava (o `onUpdate` do tick a segura): o CET espera a dele no `onDraw`; aqui o render não fica preso ao jogo.
+    // Até 3 ms pela trava (o `onUpdate` do tick a segura): sem espera ilimitada no `onDraw`, o render não fica preso ao jogo.
     let inicio = std::time::Instant::now();
     let mut g = loop {
         match LUA.try_lock() {
@@ -1804,524 +1849,138 @@ pub unsafe fn run_event_draw() {
     }
 }
 
-// GERADO de imgui-sys-0.12 bindings.rs — tabelas de enum p/ o Lua (paridade CET).
+// Os nomes são o contrato (o mod escreve `ImGuiWindowFlags.NoDocking`); os valores são do BWMS e nada os lê: a janela Lua aceita e
+// ignora flags. Membros em ordem alfabética: `None` vale 0, enum `*Flags*` dá um bit por membro, os outros contam 0, 1, 2...
+const IMGUI_ENUMS: &[(&str, &[&str])] = &[
+    ("ImGuiWindowFlags", &[
+        "AlwaysAutoResize", "AlwaysHorizontalScrollbar", "AlwaysVerticalScrollbar", "ChildMenu", "ChildWindow", "HorizontalScrollbar",
+        "MenuBar", "Modal", "NoBackground", "NoBringToFrontOnFocus", "NoCollapse", "NoDecoration", "NoDocking", "NoFocusOnAppearing",
+        "NoInputs", "NoMouseInputs", "NoMove", "NoNav", "NoNavFocus", "NoNavInputs", "NoResize", "NoSavedSettings", "NoScrollWithMouse",
+        "NoScrollbar", "NoTitleBar", "None", "Popup", "Tooltip", "UnsavedDocument",
+    ]),
+    ("ImGuiCol", &[
+        "Border", "BorderShadow", "Button", "ButtonActive", "ButtonHovered", "CheckMark", "ChildBg", "DragDropTarget", "FrameBg",
+        "FrameBgActive", "FrameBgHovered", "Header", "HeaderActive", "HeaderHovered", "MenuBarBg", "ModalWindowDimBg", "NavHighlight",
+        "NavWindowingDimBg", "NavWindowingHighlight", "PlotHistogram", "PlotHistogramHovered", "PlotLines", "PlotLinesHovered", "PopupBg",
+        "ResizeGrip", "ResizeGripActive", "ResizeGripHovered", "ScrollbarBg", "ScrollbarGrab", "ScrollbarGrabActive",
+        "ScrollbarGrabHovered", "Separator", "SeparatorActive", "SeparatorHovered", "SliderGrab", "SliderGrabActive", "Tab", "TabActive",
+        "TabHovered", "TabUnfocused", "TabUnfocusedActive", "TableBorderLight", "TableBorderStrong", "TableHeaderBg", "TableRowBg",
+        "TableRowBgAlt", "Text", "TextDisabled", "TextSelectedBg", "TitleBg", "TitleBgActive", "TitleBgCollapsed", "WindowBg",
+    ]),
+    ("ImGuiStyleVar", &[
+        "Alpha", "ButtonTextAlign", "ChildBorderSize", "ChildRounding", "DisabledAlpha", "FrameBorderSize", "FrameRounding", "GrabMinSize",
+        "GrabRounding", "IndentSpacing", "ItemInnerSpacing", "ItemSpacing", "PopupBorderSize", "PopupRounding", "ScrollbarRounding",
+        "ScrollbarSize", "SelectableTextAlign", "TabRounding", "WindowBorderSize", "WindowMinSize", "WindowRounding", "WindowTitleAlign",
+    ]),
+    ("ImGuiCond", &[
+        "Always", "Appearing", "FirstUseEver", "None", "Once",
+    ]),
+    ("ImGuiTreeNodeFlags", &[
+        "AllowItemOverlap", "Bullet", "CollapsingHeader", "DefaultOpen", "Framed", "Leaf", "NavLeftJumpsBackHere", "NoAutoOpenOnLog",
+        "NoTreePushOnOpen", "None", "OpenOnArrow", "OpenOnDoubleClick", "Selected", "SpanAvailWidth", "SpanFullWidth",
+    ]),
+    ("ImGuiInputTextFlags", &[
+        "AllowTabInput", "AlwaysOverwrite", "AutoSelectAll", "CallbackAlways", "CallbackCharFilter", "CallbackCompletion", "CallbackEdit",
+        "CallbackHistory", "CallbackResize", "CharsDecimal", "CharsHexadecimal", "CharsNoBlank", "CharsScientific", "CharsUppercase",
+        "CtrlEnterForNewLine", "EnterReturnsTrue", "EscapeClearsAll", "NoHorizontalScroll", "NoUndoRedo", "None", "Password", "ReadOnly",
+    ]),
+    ("ImGuiTableFlags", &[
+        "Borders", "BordersH", "BordersInner", "BordersInnerH", "BordersInnerV", "BordersOuter", "BordersOuterH", "BordersOuterV",
+        "BordersV", "ContextMenuInBody", "Hideable", "NoBordersInBody", "NoBordersInBodyUntilResize", "NoClip", "NoHostExtendX",
+        "NoHostExtendY", "NoKeepColumnsVisible", "NoPadInnerX", "NoPadOuterX", "NoSavedSettings", "None", "PadOuterX", "PreciseWidths",
+        "Reorderable", "Resizable", "RowBg", "ScrollX", "ScrollY", "SizingFixedFit", "SizingFixedSame", "SizingStretchProp",
+        "SizingStretchSame", "SortMulti", "SortTristate", "Sortable",
+    ]),
+    ("ImGuiTableColumnFlags", &[
+        "DefaultHide", "DefaultSort", "Disabled", "IndentDisable", "IndentEnable", "IsEnabled", "IsHovered", "IsSorted", "IsVisible",
+        "NoClip", "NoHeaderLabel", "NoHeaderWidth", "NoHide", "NoReorder", "NoResize", "NoSort", "NoSortAscending", "NoSortDescending",
+        "None", "PreferSortAscending", "PreferSortDescending", "WidthFixed", "WidthStretch",
+    ]),
+    ("ImGuiTableRowFlags", &[
+        "Headers", "None",
+    ]),
+    ("ImGuiTableBgTarget", &[
+        "CellBg", "None", "RowBg0", "RowBg1",
+    ]),
+    ("ImGuiSelectableFlags", &[
+        "AllowDoubleClick", "AllowItemOverlap", "Disabled", "DontClosePopups", "None", "SpanAllColumns",
+    ]),
+    ("ImGuiTabBarFlags", &[
+        "AutoSelectNewTabs", "FittingPolicyResizeDown", "FittingPolicyScroll", "NoCloseWithMiddleMouseButton", "NoTabListScrollingButtons",
+        "NoTooltip", "None", "Reorderable", "TabListPopupButton",
+    ]),
+    ("ImGuiTabItemFlags", &[
+        "Leading", "NoCloseWithMiddleMouseButton", "NoPushId", "NoReorder", "NoTooltip", "None", "SetSelected", "Trailing",
+        "UnsavedDocument",
+    ]),
+    ("ImGuiComboFlags", &[
+        "HeightLarge", "HeightLargest", "HeightRegular", "HeightSmall", "NoArrowButton", "NoPreview", "None", "PopupAlignLeft",
+    ]),
+    ("ImGuiHoveredFlags", &[
+        "AllowWhenBlockedByActiveItem", "AllowWhenBlockedByPopup", "AllowWhenDisabled", "AllowWhenOverlapped", "AnyWindow", "ChildWindows",
+        "DelayNormal", "DelayShort", "NoNavOverride", "NoPopupHierarchy", "NoSharedDelay", "None", "RectOnly", "RootAndChildWindows",
+        "RootWindow",
+    ]),
+    ("ImGuiFocusedFlags", &[
+        "AnyWindow", "ChildWindows", "NoPopupHierarchy", "None", "RootAndChildWindows", "RootWindow",
+    ]),
+    ("ImGuiDir", &[
+        "Down", "Left", "None", "Right", "Up",
+    ]),
+    ("ImGuiSliderFlags", &[
+        "AlwaysClamp", "Logarithmic", "NoInput", "NoRoundToFormat", "None",
+    ]),
+    ("ImGuiColorEditFlags", &[
+        "AlphaBar", "AlphaPreview", "AlphaPreviewHalf", "DisplayHSV", "DisplayHex", "DisplayRGB", "Float", "HDR", "InputHSV", "InputRGB",
+        "NoAlpha", "NoBorder", "NoDragDrop", "NoInputs", "NoLabel", "NoOptions", "NoPicker", "NoSidePreview", "NoSmallPreview", "NoTooltip",
+        "None", "PickerHueBar", "PickerHueWheel", "Uint8",
+    ]),
+    ("ImGuiMouseButton", &[
+        "Left", "Middle", "Right",
+    ]),
+    ("ImGuiMouseCursor", &[
+        "Arrow", "Hand", "None", "NotAllowed", "ResizeAll", "ResizeEW", "ResizeNESW", "ResizeNS", "ResizeNWSE", "TextInput",
+    ]),
+    ("ImGuiPopupFlags", &[
+        "AnyPopup", "AnyPopupId", "AnyPopupLevel", "MouseButtonLeft", "MouseButtonMiddle", "MouseButtonRight", "NoOpenOverExistingPopup",
+        "NoOpenOverItems", "None",
+    ]),
+    ("ImDrawFlags", &[
+        "Closed", "None", "RoundCornersAll", "RoundCornersBottom", "RoundCornersBottomLeft", "RoundCornersBottomRight", "RoundCornersLeft",
+        "RoundCornersNone", "RoundCornersRight", "RoundCornersTop", "RoundCornersTopLeft", "RoundCornersTopRight",
+    ]),
+    ("ImGuiKey", &[
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "Apostrophe", "B", "Backslash", "Backspace", "C", "CapsLock", "Comma", "D",
+        "Delete", "DownArrow", "E", "End", "Enter", "Equal", "Escape", "F", "F1", "F10", "F11", "F12", "F2", "F3", "F4", "F5", "F6", "F7",
+        "F8", "F9", "G", "GamepadBack", "GamepadDpadDown", "GamepadDpadLeft", "GamepadDpadRight", "GamepadDpadUp", "GamepadFaceDown",
+        "GamepadFaceLeft", "GamepadFaceRight", "GamepadFaceUp", "GamepadL1", "GamepadL2", "GamepadL3", "GamepadLStickDown",
+        "GamepadLStickLeft", "GamepadLStickRight", "GamepadLStickUp", "GamepadR1", "GamepadR2", "GamepadR3", "GamepadRStickDown",
+        "GamepadRStickLeft", "GamepadRStickRight", "GamepadRStickUp", "GamepadStart", "GraveAccent", "H", "Home", "I", "Insert", "J", "K",
+        "Keypad0", "Keypad1", "Keypad2", "Keypad3", "Keypad4", "Keypad5", "Keypad6", "Keypad7", "Keypad8", "Keypad9", "KeypadAdd",
+        "KeypadDecimal", "KeypadDivide", "KeypadEnter", "KeypadEqual", "KeypadMultiply", "KeypadSubtract", "L", "LeftAlt", "LeftArrow",
+        "LeftBracket", "LeftCtrl", "LeftShift", "LeftSuper", "M", "Menu", "Minus", "MouseLeft", "MouseMiddle", "MouseRight", "MouseWheelX",
+        "MouseWheelY", "MouseX1", "MouseX2", "N", "None", "NumLock", "O", "P", "PageDown", "PageUp", "Pause", "Period", "PrintScreen", "Q",
+        "R", "RightAlt", "RightArrow", "RightBracket", "RightCtrl", "RightShift", "RightSuper", "S", "ScrollLock", "Semicolon", "Slash",
+        "Space", "T", "Tab", "U", "UpArrow", "V", "W", "X", "Y", "Z",
+    ]),
+];
+
 fn setup_imgui_enums(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("NoTitleBar", 1i64)?;
-        t.set("NoResize", 2i64)?;
-        t.set("NoMove", 4i64)?;
-        t.set("NoScrollbar", 8i64)?;
-        t.set("NoScrollWithMouse", 16i64)?;
-        t.set("NoCollapse", 32i64)?;
-        t.set("AlwaysAutoResize", 64i64)?;
-        t.set("NoBackground", 128i64)?;
-        t.set("NoSavedSettings", 256i64)?;
-        t.set("NoMouseInputs", 512i64)?;
-        t.set("MenuBar", 1024i64)?;
-        t.set("HorizontalScrollbar", 2048i64)?;
-        t.set("NoFocusOnAppearing", 4096i64)?;
-        t.set("NoBringToFrontOnFocus", 8192i64)?;
-        t.set("AlwaysVerticalScrollbar", 16384i64)?;
-        t.set("AlwaysHorizontalScrollbar", 32768i64)?;
-        t.set("NoNavInputs", 262144i64)?;
-        t.set("NoNavFocus", 524288i64)?;
-        t.set("UnsavedDocument", 1048576i64)?;
-        t.set("NoDocking", 2097152i64)?;
-        t.set("NoNav", 786432i64)?;
-        t.set("NoDecoration", 43i64)?;
-        t.set("NoInputs", 786944i64)?;
-        t.set("ChildWindow", 16777216i64)?;
-        t.set("Tooltip", 33554432i64)?;
-        t.set("Popup", 67108864i64)?;
-        t.set("Modal", 134217728i64)?;
-        t.set("ChildMenu", 268435456i64)?;
-        lua.globals().set("ImGuiWindowFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("Text", 0i64)?;
-        t.set("TextDisabled", 1i64)?;
-        t.set("WindowBg", 2i64)?;
-        t.set("ChildBg", 3i64)?;
-        t.set("PopupBg", 4i64)?;
-        t.set("Border", 5i64)?;
-        t.set("BorderShadow", 6i64)?;
-        t.set("FrameBg", 7i64)?;
-        t.set("FrameBgHovered", 8i64)?;
-        t.set("FrameBgActive", 9i64)?;
-        t.set("TitleBg", 10i64)?;
-        t.set("TitleBgActive", 11i64)?;
-        t.set("TitleBgCollapsed", 12i64)?;
-        t.set("MenuBarBg", 13i64)?;
-        t.set("ScrollbarBg", 14i64)?;
-        t.set("ScrollbarGrab", 15i64)?;
-        t.set("ScrollbarGrabHovered", 16i64)?;
-        t.set("ScrollbarGrabActive", 17i64)?;
-        t.set("CheckMark", 18i64)?;
-        t.set("SliderGrab", 19i64)?;
-        t.set("SliderGrabActive", 20i64)?;
-        t.set("Button", 21i64)?;
-        t.set("ButtonHovered", 22i64)?;
-        t.set("ButtonActive", 23i64)?;
-        t.set("Header", 24i64)?;
-        t.set("HeaderHovered", 25i64)?;
-        t.set("HeaderActive", 26i64)?;
-        t.set("Separator", 27i64)?;
-        t.set("SeparatorHovered", 28i64)?;
-        t.set("SeparatorActive", 29i64)?;
-        t.set("ResizeGrip", 30i64)?;
-        t.set("ResizeGripHovered", 31i64)?;
-        t.set("ResizeGripActive", 32i64)?;
-        t.set("Tab", 33i64)?;
-        t.set("TabHovered", 34i64)?;
-        t.set("TabActive", 35i64)?;
-        t.set("TabUnfocused", 36i64)?;
-        t.set("TabUnfocusedActive", 37i64)?;
-        t.set("PlotLines", 38i64)?;
-        t.set("PlotLinesHovered", 39i64)?;
-        t.set("PlotHistogram", 40i64)?;
-        t.set("PlotHistogramHovered", 41i64)?;
-        t.set("TableHeaderBg", 42i64)?;
-        t.set("TableBorderStrong", 43i64)?;
-        t.set("TableBorderLight", 44i64)?;
-        t.set("TableRowBg", 45i64)?;
-        t.set("TableRowBgAlt", 46i64)?;
-        t.set("TextSelectedBg", 47i64)?;
-        t.set("DragDropTarget", 48i64)?;
-        t.set("NavHighlight", 49i64)?;
-        t.set("NavWindowingHighlight", 50i64)?;
-        t.set("NavWindowingDimBg", 51i64)?;
-        t.set("ModalWindowDimBg", 52i64)?;
-        lua.globals().set("ImGuiCol", t)?; }
-    { let t = lua.create_table()?;
-        t.set("Alpha", 0i64)?;
-        t.set("DisabledAlpha", 1i64)?;
-        t.set("WindowRounding", 3i64)?;
-        t.set("WindowBorderSize", 4i64)?;
-        t.set("WindowMinSize", 5i64)?;
-        t.set("WindowTitleAlign", 6i64)?;
-        t.set("ChildRounding", 7i64)?;
-        t.set("ChildBorderSize", 8i64)?;
-        t.set("PopupRounding", 9i64)?;
-        t.set("PopupBorderSize", 10i64)?;
-        t.set("FrameRounding", 12i64)?;
-        t.set("FrameBorderSize", 13i64)?;
-        t.set("ItemSpacing", 14i64)?;
-        t.set("ItemInnerSpacing", 15i64)?;
-        t.set("IndentSpacing", 16i64)?;
-        t.set("ScrollbarSize", 18i64)?;
-        t.set("ScrollbarRounding", 19i64)?;
-        t.set("GrabMinSize", 20i64)?;
-        t.set("GrabRounding", 21i64)?;
-        t.set("TabRounding", 22i64)?;
-        t.set("ButtonTextAlign", 23i64)?;
-        t.set("SelectableTextAlign", 24i64)?;
-        lua.globals().set("ImGuiStyleVar", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("Always", 1i64)?;
-        t.set("Once", 2i64)?;
-        t.set("FirstUseEver", 4i64)?;
-        t.set("Appearing", 8i64)?;
-        lua.globals().set("ImGuiCond", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("Selected", 1i64)?;
-        t.set("Framed", 2i64)?;
-        t.set("AllowItemOverlap", 4i64)?;
-        t.set("NoTreePushOnOpen", 8i64)?;
-        t.set("NoAutoOpenOnLog", 16i64)?;
-        t.set("DefaultOpen", 32i64)?;
-        t.set("OpenOnDoubleClick", 64i64)?;
-        t.set("OpenOnArrow", 128i64)?;
-        t.set("Leaf", 256i64)?;
-        t.set("Bullet", 512i64)?;
-        t.set("SpanAvailWidth", 2048i64)?;
-        t.set("SpanFullWidth", 4096i64)?;
-        t.set("NavLeftJumpsBackHere", 8192i64)?;
-        t.set("CollapsingHeader", 26i64)?;
-        lua.globals().set("ImGuiTreeNodeFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("CharsDecimal", 1i64)?;
-        t.set("CharsHexadecimal", 2i64)?;
-        t.set("CharsUppercase", 4i64)?;
-        t.set("CharsNoBlank", 8i64)?;
-        t.set("AutoSelectAll", 16i64)?;
-        t.set("EnterReturnsTrue", 32i64)?;
-        t.set("CallbackCompletion", 64i64)?;
-        t.set("CallbackHistory", 128i64)?;
-        t.set("CallbackAlways", 256i64)?;
-        t.set("CallbackCharFilter", 512i64)?;
-        t.set("AllowTabInput", 1024i64)?;
-        t.set("CtrlEnterForNewLine", 2048i64)?;
-        t.set("NoHorizontalScroll", 4096i64)?;
-        t.set("AlwaysOverwrite", 8192i64)?;
-        t.set("ReadOnly", 16384i64)?;
-        t.set("Password", 32768i64)?;
-        t.set("NoUndoRedo", 65536i64)?;
-        t.set("CharsScientific", 131072i64)?;
-        t.set("CallbackResize", 262144i64)?;
-        t.set("CallbackEdit", 524288i64)?;
-        t.set("EscapeClearsAll", 1048576i64)?;
-        lua.globals().set("ImGuiInputTextFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("Resizable", 1i64)?;
-        t.set("Reorderable", 2i64)?;
-        t.set("Hideable", 4i64)?;
-        t.set("Sortable", 8i64)?;
-        t.set("NoSavedSettings", 16i64)?;
-        t.set("ContextMenuInBody", 32i64)?;
-        t.set("RowBg", 64i64)?;
-        t.set("BordersInnerH", 128i64)?;
-        t.set("BordersOuterH", 256i64)?;
-        t.set("BordersInnerV", 512i64)?;
-        t.set("BordersOuterV", 1024i64)?;
-        t.set("BordersH", 384i64)?;
-        t.set("BordersV", 1536i64)?;
-        t.set("BordersInner", 640i64)?;
-        t.set("BordersOuter", 1280i64)?;
-        t.set("Borders", 1920i64)?;
-        t.set("NoBordersInBody", 2048i64)?;
-        t.set("NoBordersInBodyUntilResize", 4096i64)?;
-        t.set("SizingFixedFit", 8192i64)?;
-        t.set("SizingFixedSame", 16384i64)?;
-        t.set("SizingStretchProp", 24576i64)?;
-        t.set("SizingStretchSame", 32768i64)?;
-        t.set("NoHostExtendX", 65536i64)?;
-        t.set("NoHostExtendY", 131072i64)?;
-        t.set("NoKeepColumnsVisible", 262144i64)?;
-        t.set("PreciseWidths", 524288i64)?;
-        t.set("NoClip", 1048576i64)?;
-        t.set("PadOuterX", 2097152i64)?;
-        t.set("NoPadOuterX", 4194304i64)?;
-        t.set("NoPadInnerX", 8388608i64)?;
-        t.set("ScrollX", 16777216i64)?;
-        t.set("ScrollY", 33554432i64)?;
-        t.set("SortMulti", 67108864i64)?;
-        t.set("SortTristate", 134217728i64)?;
-        lua.globals().set("ImGuiTableFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("Disabled", 1i64)?;
-        t.set("DefaultHide", 2i64)?;
-        t.set("DefaultSort", 4i64)?;
-        t.set("WidthStretch", 8i64)?;
-        t.set("WidthFixed", 16i64)?;
-        t.set("NoResize", 32i64)?;
-        t.set("NoReorder", 64i64)?;
-        t.set("NoHide", 128i64)?;
-        t.set("NoClip", 256i64)?;
-        t.set("NoSort", 512i64)?;
-        t.set("NoSortAscending", 1024i64)?;
-        t.set("NoSortDescending", 2048i64)?;
-        t.set("NoHeaderLabel", 4096i64)?;
-        t.set("NoHeaderWidth", 8192i64)?;
-        t.set("PreferSortAscending", 16384i64)?;
-        t.set("PreferSortDescending", 32768i64)?;
-        t.set("IndentEnable", 65536i64)?;
-        t.set("IndentDisable", 131072i64)?;
-        t.set("IsEnabled", 16777216i64)?;
-        t.set("IsVisible", 33554432i64)?;
-        t.set("IsSorted", 67108864i64)?;
-        t.set("IsHovered", 134217728i64)?;
-        lua.globals().set("ImGuiTableColumnFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("Headers", 1i64)?;
-        lua.globals().set("ImGuiTableRowFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("RowBg0", 1i64)?;
-        t.set("RowBg1", 2i64)?;
-        t.set("CellBg", 3i64)?;
-        lua.globals().set("ImGuiTableBgTarget", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("DontClosePopups", 1i64)?;
-        t.set("SpanAllColumns", 2i64)?;
-        t.set("AllowDoubleClick", 4i64)?;
-        t.set("Disabled", 8i64)?;
-        t.set("AllowItemOverlap", 16i64)?;
-        lua.globals().set("ImGuiSelectableFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("Reorderable", 1i64)?;
-        t.set("AutoSelectNewTabs", 2i64)?;
-        t.set("TabListPopupButton", 4i64)?;
-        t.set("NoCloseWithMiddleMouseButton", 8i64)?;
-        t.set("NoTabListScrollingButtons", 16i64)?;
-        t.set("NoTooltip", 32i64)?;
-        t.set("FittingPolicyResizeDown", 64i64)?;
-        t.set("FittingPolicyScroll", 128i64)?;
-        lua.globals().set("ImGuiTabBarFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("UnsavedDocument", 1i64)?;
-        t.set("SetSelected", 2i64)?;
-        t.set("NoCloseWithMiddleMouseButton", 4i64)?;
-        t.set("NoPushId", 8i64)?;
-        t.set("NoTooltip", 16i64)?;
-        t.set("NoReorder", 32i64)?;
-        t.set("Leading", 64i64)?;
-        t.set("Trailing", 128i64)?;
-        lua.globals().set("ImGuiTabItemFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("PopupAlignLeft", 1i64)?;
-        t.set("HeightSmall", 2i64)?;
-        t.set("HeightRegular", 4i64)?;
-        t.set("HeightLarge", 8i64)?;
-        t.set("HeightLargest", 16i64)?;
-        t.set("NoArrowButton", 32i64)?;
-        t.set("NoPreview", 64i64)?;
-        lua.globals().set("ImGuiComboFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("ChildWindows", 1i64)?;
-        t.set("RootWindow", 2i64)?;
-        t.set("AnyWindow", 4i64)?;
-        t.set("NoPopupHierarchy", 8i64)?;
-        t.set("AllowWhenBlockedByPopup", 32i64)?;
-        t.set("AllowWhenBlockedByActiveItem", 128i64)?;
-        t.set("AllowWhenOverlapped", 256i64)?;
-        t.set("AllowWhenDisabled", 512i64)?;
-        t.set("NoNavOverride", 1024i64)?;
-        t.set("RectOnly", 416i64)?;
-        t.set("RootAndChildWindows", 3i64)?;
-        t.set("DelayNormal", 2048i64)?;
-        t.set("DelayShort", 4096i64)?;
-        t.set("NoSharedDelay", 8192i64)?;
-        lua.globals().set("ImGuiHoveredFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("ChildWindows", 1i64)?;
-        t.set("RootWindow", 2i64)?;
-        t.set("AnyWindow", 4i64)?;
-        t.set("NoPopupHierarchy", 8i64)?;
-        t.set("RootAndChildWindows", 3i64)?;
-        lua.globals().set("ImGuiFocusedFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", -1i64)?;
-        t.set("Left", 0i64)?;
-        t.set("Right", 1i64)?;
-        t.set("Up", 2i64)?;
-        t.set("Down", 3i64)?;
-        lua.globals().set("ImGuiDir", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("AlwaysClamp", 16i64)?;
-        t.set("Logarithmic", 32i64)?;
-        t.set("NoRoundToFormat", 64i64)?;
-        t.set("NoInput", 128i64)?;
-        lua.globals().set("ImGuiSliderFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("NoAlpha", 2i64)?;
-        t.set("NoPicker", 4i64)?;
-        t.set("NoOptions", 8i64)?;
-        t.set("NoSmallPreview", 16i64)?;
-        t.set("NoInputs", 32i64)?;
-        t.set("NoTooltip", 64i64)?;
-        t.set("NoLabel", 128i64)?;
-        t.set("NoSidePreview", 256i64)?;
-        t.set("NoDragDrop", 512i64)?;
-        t.set("NoBorder", 1024i64)?;
-        t.set("AlphaBar", 65536i64)?;
-        t.set("AlphaPreview", 131072i64)?;
-        t.set("AlphaPreviewHalf", 262144i64)?;
-        t.set("HDR", 524288i64)?;
-        t.set("DisplayRGB", 1048576i64)?;
-        t.set("DisplayHSV", 2097152i64)?;
-        t.set("DisplayHex", 4194304i64)?;
-        t.set("Uint8", 8388608i64)?;
-        t.set("Float", 16777216i64)?;
-        t.set("PickerHueBar", 33554432i64)?;
-        t.set("PickerHueWheel", 67108864i64)?;
-        t.set("InputRGB", 134217728i64)?;
-        t.set("InputHSV", 268435456i64)?;
-        lua.globals().set("ImGuiColorEditFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("Left", 0i64)?;
-        t.set("Right", 1i64)?;
-        t.set("Middle", 2i64)?;
-        lua.globals().set("ImGuiMouseButton", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", -1i64)?;
-        t.set("Arrow", 0i64)?;
-        t.set("TextInput", 1i64)?;
-        t.set("ResizeAll", 2i64)?;
-        t.set("ResizeNS", 3i64)?;
-        t.set("ResizeEW", 4i64)?;
-        t.set("ResizeNESW", 5i64)?;
-        t.set("ResizeNWSE", 6i64)?;
-        t.set("Hand", 7i64)?;
-        t.set("NotAllowed", 8i64)?;
-        lua.globals().set("ImGuiMouseCursor", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("MouseButtonLeft", 0i64)?;
-        t.set("MouseButtonRight", 1i64)?;
-        t.set("MouseButtonMiddle", 2i64)?;
-        t.set("NoOpenOverExistingPopup", 32i64)?;
-        t.set("NoOpenOverItems", 64i64)?;
-        t.set("AnyPopupId", 128i64)?;
-        t.set("AnyPopupLevel", 256i64)?;
-        t.set("AnyPopup", 384i64)?;
-        lua.globals().set("ImGuiPopupFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("Closed", 1i64)?;
-        t.set("RoundCornersTopLeft", 16i64)?;
-        t.set("RoundCornersTopRight", 32i64)?;
-        t.set("RoundCornersBottomLeft", 64i64)?;
-        t.set("RoundCornersBottomRight", 128i64)?;
-        t.set("RoundCornersNone", 256i64)?;
-        t.set("RoundCornersTop", 48i64)?;
-        t.set("RoundCornersBottom", 192i64)?;
-        t.set("RoundCornersLeft", 80i64)?;
-        t.set("RoundCornersRight", 160i64)?;
-        t.set("RoundCornersAll", 240i64)?;
-        lua.globals().set("ImDrawFlags", t)?; }
-    { let t = lua.create_table()?;
-        t.set("None", 0i64)?;
-        t.set("Tab", 512i64)?;
-        t.set("LeftArrow", 513i64)?;
-        t.set("RightArrow", 514i64)?;
-        t.set("UpArrow", 515i64)?;
-        t.set("DownArrow", 516i64)?;
-        t.set("PageUp", 517i64)?;
-        t.set("PageDown", 518i64)?;
-        t.set("Home", 519i64)?;
-        t.set("End", 520i64)?;
-        t.set("Insert", 521i64)?;
-        t.set("Delete", 522i64)?;
-        t.set("Backspace", 523i64)?;
-        t.set("Space", 524i64)?;
-        t.set("Enter", 525i64)?;
-        t.set("Escape", 526i64)?;
-        t.set("LeftCtrl", 527i64)?;
-        t.set("LeftShift", 528i64)?;
-        t.set("LeftAlt", 529i64)?;
-        t.set("LeftSuper", 530i64)?;
-        t.set("RightCtrl", 531i64)?;
-        t.set("RightShift", 532i64)?;
-        t.set("RightAlt", 533i64)?;
-        t.set("RightSuper", 534i64)?;
-        t.set("Menu", 535i64)?;
-        t.set("0", 536i64)?;
-        t.set("1", 537i64)?;
-        t.set("2", 538i64)?;
-        t.set("3", 539i64)?;
-        t.set("4", 540i64)?;
-        t.set("5", 541i64)?;
-        t.set("6", 542i64)?;
-        t.set("7", 543i64)?;
-        t.set("8", 544i64)?;
-        t.set("9", 545i64)?;
-        t.set("A", 546i64)?;
-        t.set("B", 547i64)?;
-        t.set("C", 548i64)?;
-        t.set("D", 549i64)?;
-        t.set("E", 550i64)?;
-        t.set("F", 551i64)?;
-        t.set("G", 552i64)?;
-        t.set("H", 553i64)?;
-        t.set("I", 554i64)?;
-        t.set("J", 555i64)?;
-        t.set("K", 556i64)?;
-        t.set("L", 557i64)?;
-        t.set("M", 558i64)?;
-        t.set("N", 559i64)?;
-        t.set("O", 560i64)?;
-        t.set("P", 561i64)?;
-        t.set("Q", 562i64)?;
-        t.set("R", 563i64)?;
-        t.set("S", 564i64)?;
-        t.set("T", 565i64)?;
-        t.set("U", 566i64)?;
-        t.set("V", 567i64)?;
-        t.set("W", 568i64)?;
-        t.set("X", 569i64)?;
-        t.set("Y", 570i64)?;
-        t.set("Z", 571i64)?;
-        t.set("F1", 572i64)?;
-        t.set("F2", 573i64)?;
-        t.set("F3", 574i64)?;
-        t.set("F4", 575i64)?;
-        t.set("F5", 576i64)?;
-        t.set("F6", 577i64)?;
-        t.set("F7", 578i64)?;
-        t.set("F8", 579i64)?;
-        t.set("F9", 580i64)?;
-        t.set("F10", 581i64)?;
-        t.set("F11", 582i64)?;
-        t.set("F12", 583i64)?;
-        t.set("Apostrophe", 584i64)?;
-        t.set("Comma", 585i64)?;
-        t.set("Minus", 586i64)?;
-        t.set("Period", 587i64)?;
-        t.set("Slash", 588i64)?;
-        t.set("Semicolon", 589i64)?;
-        t.set("Equal", 590i64)?;
-        t.set("LeftBracket", 591i64)?;
-        t.set("Backslash", 592i64)?;
-        t.set("RightBracket", 593i64)?;
-        t.set("GraveAccent", 594i64)?;
-        t.set("CapsLock", 595i64)?;
-        t.set("ScrollLock", 596i64)?;
-        t.set("NumLock", 597i64)?;
-        t.set("PrintScreen", 598i64)?;
-        t.set("Pause", 599i64)?;
-        t.set("Keypad0", 600i64)?;
-        t.set("Keypad1", 601i64)?;
-        t.set("Keypad2", 602i64)?;
-        t.set("Keypad3", 603i64)?;
-        t.set("Keypad4", 604i64)?;
-        t.set("Keypad5", 605i64)?;
-        t.set("Keypad6", 606i64)?;
-        t.set("Keypad7", 607i64)?;
-        t.set("Keypad8", 608i64)?;
-        t.set("Keypad9", 609i64)?;
-        t.set("KeypadDecimal", 610i64)?;
-        t.set("KeypadDivide", 611i64)?;
-        t.set("KeypadMultiply", 612i64)?;
-        t.set("KeypadSubtract", 613i64)?;
-        t.set("KeypadAdd", 614i64)?;
-        t.set("KeypadEnter", 615i64)?;
-        t.set("KeypadEqual", 616i64)?;
-        t.set("GamepadStart", 617i64)?;
-        t.set("GamepadBack", 618i64)?;
-        t.set("GamepadFaceLeft", 619i64)?;
-        t.set("GamepadFaceRight", 620i64)?;
-        t.set("GamepadFaceUp", 621i64)?;
-        t.set("GamepadFaceDown", 622i64)?;
-        t.set("GamepadDpadLeft", 623i64)?;
-        t.set("GamepadDpadRight", 624i64)?;
-        t.set("GamepadDpadUp", 625i64)?;
-        t.set("GamepadDpadDown", 626i64)?;
-        t.set("GamepadL1", 627i64)?;
-        t.set("GamepadR1", 628i64)?;
-        t.set("GamepadL2", 629i64)?;
-        t.set("GamepadR2", 630i64)?;
-        t.set("GamepadL3", 631i64)?;
-        t.set("GamepadR3", 632i64)?;
-        t.set("GamepadLStickLeft", 633i64)?;
-        t.set("GamepadLStickRight", 634i64)?;
-        t.set("GamepadLStickUp", 635i64)?;
-        t.set("GamepadLStickDown", 636i64)?;
-        t.set("GamepadRStickLeft", 637i64)?;
-        t.set("GamepadRStickRight", 638i64)?;
-        t.set("GamepadRStickUp", 639i64)?;
-        t.set("GamepadRStickDown", 640i64)?;
-        t.set("MouseLeft", 641i64)?;
-        t.set("MouseRight", 642i64)?;
-        t.set("MouseMiddle", 643i64)?;
-        t.set("MouseX1", 644i64)?;
-        t.set("MouseX2", 645i64)?;
-        t.set("MouseWheelX", 646i64)?;
-        t.set("MouseWheelY", 647i64)?;
-        lua.globals().set("ImGuiKey", t)?; }
+    for (nome, membros) in IMGUI_ENUMS {
+        let t = lua.create_table()?;
+        let bits = nome.contains("Flags");
+        let base = i64::from(membros.contains(&"None"));
+        let mut i = 0i64;
+        for m in *membros {
+            if *m == "None" {
+                t.set("None", 0i64)?;
+                continue;
+            }
+            t.set(*m, if bits { 1i64 << i } else { base + i })?;
+            i += 1;
+        }
+        lua.globals().set(*nome, t)?;
+    }
     Ok(())
 }
 
@@ -2558,7 +2217,7 @@ fn valor_do_flat(lua: &bwms_lua::Lua, path: &str) -> bwms_lua::Result<bwms_lua::
 unsafe fn gravar_flat(path: &str, v: &bwms_lua::Value, atualiza: bool) -> bool {
     let Some(texto) = texto_de_flat(v) else { return false };
     let ok = crate::tweakdb::escritor::gravar_texto(bwms_primitives::tweak_db_id(path), &texto);
-    crate::veredito_dev!("[cet] SetFlat {path} = {texto}: ok={ok}");
+    crate::veredito_dev!("[lua] SetFlat {path} = {texto}: ok={ok}");
     if ok && atualiza {
         if let Some((record, _)) = path.rsplit_once('.') {
             crate::tweakdb::update_record_by_id(bwms_primitives::tweak_db_id(record));
@@ -2591,16 +2250,16 @@ fn texto_de_flat(v: &bwms_lua::Value) -> Option<String> {
     })
 }
 
-const PASTA_DO_CET: &str = "bin/x64/plugins/cyber_engine_tweaks/mods";
+const PASTA_DOS_MODS_LUA: &str = "bin/x64/plugins/cyber_engine_tweaks/mods";
 
-/// Pastas dos mods CET (a que tem `init.lua`): as da árvore do jogo e as de `Mods/<mod>/`, onde o usuário solta o zip do mod. Nome repetido carrega
+/// Pastas dos mods Lua (a que tem `init.lua`): as da árvore do jogo e as de `Mods/<mod>/`, onde o usuário solta o zip do mod. Nome repetido carrega
 /// uma vez, a da árvore do jogo primeiro.
 fn pastas_de_mods() -> Vec<std::path::PathBuf> {
     let Some(g) = crate::arquivos_do_jogo::game_dir_from_dylib() else { return Vec::new() };
     let jogo = std::path::Path::new(&g);
-    let mut raizes = vec![jogo.join(PASTA_DO_CET)];
+    let mut raizes = vec![jogo.join(PASTA_DOS_MODS_LUA)];
     if let Ok(rd) = std::fs::read_dir(jogo.join("Mods")) {
-        let mut mods: Vec<_> = rd.flatten().map(|e| e.path().join(PASTA_DO_CET)).collect();
+        let mut mods: Vec<_> = rd.flatten().map(|e| e.path().join(PASTA_DOS_MODS_LUA)).collect();
         mods.sort();
         raizes.extend(mods);
     }
@@ -2618,7 +2277,7 @@ fn pastas_de_mods() -> Vec<std::path::PathBuf> {
     pastas
 }
 
-/// Carrega o `init.lua` de cada pasta de [`pastas_de_mods`] e dispara `onTweak` (o CET o dispara no load do TweakDB). Devolve quantos carregaram.
+/// Carrega o `init.lua` de cada pasta de [`pastas_de_mods`] e dispara `onTweak` (os mods o esperam no load do TweakDB). Devolve quantos carregaram.
 unsafe fn carregar_mods() -> usize {
     let pastas = pastas_de_mods();
     let mut n = 0;
@@ -2628,9 +2287,9 @@ unsafe fn carregar_mods() -> usize {
             Ok(src) => {
                 run_mod(&nome, &src, p);
                 n += 1;
-                crate::veredito_dev!("[cet] mod carregado: {nome}");
+                crate::veredito_dev!("[lua] mod carregado: {nome}");
             }
-            Err(e) => crate::log(&format!("[cet] {nome}: init.lua ilegível ({e})")),
+            Err(e) => crate::log(&format!("[lua] {nome}: init.lua ilegível ({e})")),
         }
     }
     if n > 0 {
@@ -2639,7 +2298,7 @@ unsafe fn carregar_mods() -> usize {
     n
 }
 
-/// Ciclo dos mods CET no tick (thread do jogo): carrega os mods na 1ª vez com os flats do TweakDB no ar ([`crate::tweakdb::carregado`]; o `onTweak` grava flats),
+/// Ciclo dos mods Lua no tick (thread do jogo): carrega os mods na 1ª vez com os flats do TweakDB no ar ([`crate::tweakdb::carregado`]; o `onTweak` grava flats),
 /// registra os `Observe` pedidos, despacha as teclas e, com o V no mundo, dispara `onInit` (uma vez) e `onUpdate`.
 pub(crate) unsafe fn tick(reg: &Registry, em_gameplay: bool) {
     static CARREGADOS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -2649,13 +2308,13 @@ pub(crate) unsafe fn tick(reg: &Registry, em_gameplay: bool) {
         }
         CARREGADOS.store(true, std::sync::atomic::Ordering::Relaxed);
         let n = carregar_mods();
-        crate::veredito_dev!("[cet] {n} mod(s) CET carregado(s)");
+        crate::veredito_dev!("[lua] {n} mod(s) Lua carregado(s)");
     }
-    // `onInit` como o CET: no 1º player nascido (`HookPlayerSpawned` da referência), não na carga; o `GameSession` dos mods conta com o V.
+    // `onInit` no 1º player nascido, não na carga; o `GameSession` dos mods conta com o V.
     static INICIADOS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if !crate::current_player().is_null() && !INICIADOS.swap(true, std::sync::atomic::Ordering::Relaxed) {
         run_event("onInit");
-        crate::veredito_dev!("[cet] onInit no 1º V no mundo");
+        crate::veredito_dev!("[lua] onInit no 1º V no mundo");
     }
     if observar::has_pending() {
         observar::drain_pending(reg);
@@ -2665,7 +2324,7 @@ pub(crate) unsafe fn tick(reg: &Registry, em_gameplay: bool) {
     if em_gameplay {
         medir_framework_no_motor();
     }
-    // `onUpdate` no ritmo de quadro como o CET (no máximo a cada 16 ms): o tick roda por contagem de chamadas do executor (`TICK_EVERY`), não por
+    // `onUpdate` no ritmo de quadro (no máximo a cada 16 ms): o tick roda por contagem de chamadas do executor (`TICK_EVERY`), não por
     // quadro, e cada `onUpdate` segura a trava do Lua que o `onDraw` precisa.
     static PROXIMO_UPDATE: Mutex<Option<std::time::Instant>> = Mutex::new(None);
     let agora = std::time::Instant::now();
@@ -2681,46 +2340,17 @@ pub(crate) unsafe fn tick(reg: &Registry, em_gameplay: bool) {
     }
 }
 
-/// O `init.lua` do JB Third Person (fonte de leitura em `_referencia-de-terceiro/`) carrega no ambiente do mod: os `require` da pasta
-/// `classes/` resolvem, e os eventos, teclas e `GetMod` registram sem erro. Não dispara evento: eles chamam o jogo.
+#[cfg(all(test, feature = "devtools"))]
+mod testes_com_mods_reais;
+
 #[cfg(test)]
-mod testes_do_jb {
+mod testes_da_api_lua {
     use super::*;
 
-    const JB: &str = "../_referencia-de-terceiro/mods-reais/JB Third Person Mod/bin/x64/plugins/cyber_engine_tweaks/mods/jb_third_person_mod";
-
-    #[test]
-    fn init_do_jb_carrega_no_ambiente_do_mod() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(JB);
-        let Ok(src) = std::fs::read_to_string(dir.join("init.lua")) else {
-            eprintln!("JB ausente em {}: teste pulado", dir.display());
-            return;
-        };
-        let lua = bwms_lua::Lua::new();
-        setup_api(&lua).expect("setup_api");
-        let env = ambiente_do_mod(&lua, &dir).expect("ambiente");
-        // Banco em memória: o `JB:new()` roda no `require` e grava as tabelas dele; nada vai para a pasta de referência.
-        let banco = std::sync::Arc::new(Mutex::new(banco::Banco::em_memoria()));
-        env.set("db", BancoDoMod(banco.clone(), "jb".into())).expect("db");
-        let r = lua.load(src).set_name("@jb/init.lua").set_environment(env.clone()).call::<bwms_lua::Value>(());
-        assert!(r.is_ok(), "init.lua do JB: {:?}", r.err());
-        let eventos: bwms_lua::Table = lua.globals().get("__events").expect("__events");
-        for ev in ["onTweak", "onInit", "onUpdate", "onDraw"] {
-            let lista: Option<bwms_lua::Table> = eventos.get(ev).expect("evento");
-            assert!(lista.is_some_and(|l| l.raw_len() > 0), "{ev} não registrou");
-        }
-        // O `JB:new()` criou as câmeras e os ajustes pelo SQL do mod.
-        let mut b = banco.lock().expect("banco");
-        assert_eq!(b.consultar("SELECT * FROM cameras").expect("cameras").linhas.len(), 10);
-        assert!(b.consultar("SELECT value FROM settings WHERE name = 'fov'").expect("fov").linhas.len() == 1);
-        // Os módulos de `classes/` ficam no ambiente do mod, não nos globais.
-        assert!(lua.globals().get::<bwms_lua::Value>("JB").expect("global").is_nil());
-    }
-
-    /// Os globais do CET que o JB chama em runtime existem depois do `setup_api` (o `ImGui` é a etapa R2). Os tipos do jogo (`Vector4`,
+    /// Os globais que os mods chamam em runtime existem depois do `setup_api` (o `ImGui` é a etapa R2). Os tipos do jogo (`Vector4`,
     /// `Quaternion`, `EulerAngles`) e as funções globais vêm do RTTI pelo metatable dos globais: só existem com o jogo.
     #[test]
-    fn globais_que_o_jb_chama_existem() {
+    fn globais_que_os_mods_chamam_existem() {
         let lua = bwms_lua::Lua::new();
         setup_api(&lua).expect("setup_api");
         let faltam: Vec<&str> = [
@@ -2734,9 +2364,33 @@ mod testes_do_jb {
         assert!(faltam.is_empty(), "faltam: {faltam:?}");
     }
 
-    /// `TweakDBID.new(path)`, `TweakDBID.new(base, sufixo)` e `TweakDBID(path)` dão o id do CET (o JB monta slot e item assim).
+    /// Um mod não sai da própria pasta: pelos globais (`_G`, `getfenv()`, `package.loaded`) não há `io`, `require` de arquivo nem `os`
+    /// além de relógio e data, o metatable dos globais não se entrega, e o `io.open` do ambiente recusa caminho fora da pasta.
     #[test]
-    fn tweakdbid_como_no_cet() {
+    fn mod_nao_alcanca_arquivo_fora_da_pasta() {
+        let lua = bwms_lua::Lua::new();
+        setup_api(&lua).expect("setup_api");
+        let dir = std::env::temp_dir().join(format!("bwms-sandbox-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("pasta do mod");
+        let env = ambiente_do_mod(&lua, &dir).expect("ambiente");
+        let codigo = br#"
+            local g = getfenv()
+            return _G.io == nil, g.io == nil, package.loaded.io == nil, g.require == nil,
+                   os.getenv == nil, os.execute == nil, _G.os.remove == nil, getmetatable(_G) == false,
+                   io.open("/etc/hosts") == nil, io.open("dentro.txt", "w") ~= nil
+        "#
+        .to_vec();
+        let (f, _) = carregar_no_ambiente(&lua, codigo, "=teste".into(), &env).expect("carregar");
+        let bwms_lua::Value::Function(f) = f else { panic!("o trecho de teste não compilou") };
+        let r: bwms_lua::MultiValue = f.call(()).expect("rodar");
+        let r: Vec<bool> = r.into_iter().map(|v| matches!(v, bwms_lua::Value::Boolean(true))).collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(r, vec![true; 10]);
+    }
+
+    /// `TweakDBID.new(path)`, `TweakDBID.new(base, sufixo)` e `TweakDBID(path)` dão o id que os mods esperam (há mod que monta slot e item assim).
+    #[test]
+    fn tweakdbid_na_forma_dos_mods() {
         let lua = bwms_lua::Lua::new();
         setup_api(&lua).expect("setup_api");
         let t: bwms_lua::Table = lua.globals().get("TweakDBID").expect("TweakDBID");
@@ -2750,9 +2404,9 @@ mod testes_do_jb {
         assert_eq!(id(novo.call(("AttachmentSlots", ".Head")).expect("new(base, sufixo)")), derivado);
     }
 
-    /// `tostring` de `CName` e `TweakDBID` no texto do CET (o JB recorta o nome do `CName` entre `--[[ ` e ` --]]`).
+    /// `tostring` de `CName` e `TweakDBID` no texto que os mods esperam (há mod que recorta o nome do `CName` entre `--[[ ` e ` --]]`).
     #[test]
-    fn tostring_como_no_cet() {
+    fn tostring_na_forma_dos_mods() {
         let lua = bwms_lua::Lua::new();
         let tostring: bwms_lua::Function = lua.globals().get("tostring").expect("tostring");
         let h = crate::cname::intern("TPP_Body");
@@ -2776,7 +2430,7 @@ mod testes_do_jb {
     }
 }
 
-/// O `db` de um mod ([`banco::Banco`]) com a API do lsqlite3 que o CET expõe: `exec` devolve 0 (ok) ou 1 (erro, logado); `rows` itera
+/// O `db` de um mod ([`banco::Banco`]) com a API de banco que os mods chamam: `exec` devolve 0 (ok) ou 1 (erro, logado); `rows` itera
 /// linhas como array, `nrows` como tabela por nome de coluna, `urows` com os valores soltos.
 struct BancoDoMod(std::sync::Arc<Mutex<banco::Banco>>, String);
 
@@ -2793,7 +2447,7 @@ impl BancoDoMod {
     fn consultar(&self, sql: &str) -> banco::Linhas {
         let mut b = self.0.lock().unwrap_or_else(|e| e.into_inner());
         b.consultar(sql).unwrap_or_else(|e| {
-            crate::log(&format!("[cet] {} db: {e} ({sql})", self.1));
+            crate::log(&format!("[lua] {} db: {e} ({sql})", self.1));
             banco::Linhas { colunas: Vec::new(), linhas: Vec::new() }
         })
     }
@@ -2823,7 +2477,7 @@ impl bwms_lua::UserData for BancoDoMod {
             Ok(match g.exec(&sql) {
                 Ok(()) => 0,
                 Err(e) => {
-                    crate::log(&format!("[cet] {} db: {e}", b.1));
+                    crate::log(&format!("[lua] {} db: {e}", b.1));
                     1
                 }
             })
@@ -2855,7 +2509,7 @@ impl bwms_lua::UserData for BancoDoMod {
     }
 }
 
-/// Erro de mod CET: logado até 5 vezes por origem (o `onUpdate` e o `onDraw` de um mod quebrado erram todo quadro) e o 1º de cada origem
+/// Erro de mod Lua: logado até 5 vezes por origem (o `onUpdate` e o `onDraw` de um mod quebrado erram todo quadro) e o 1º de cada origem
 /// no canal de veredito.
 fn erro_de_mod(origem: &str, e: &dyn std::fmt::Display) {
     static ERROS: Mutex<Vec<(String, u32)>> = Mutex::new(Vec::new());
@@ -2874,7 +2528,7 @@ fn erro_de_mod(origem: &str, e: &dyn std::fmt::Display) {
         crate::log(&format!("[lua] {origem} ERRO: {e}"));
     }
     if n == 1 {
-        crate::veredito_dev!("[cet] erro em {origem}: {e}");
+        crate::veredito_dev!("[lua] erro em {origem}: {e}");
     }
 }
 
@@ -2913,13 +2567,13 @@ fn chamar_hotkey(lua: &bwms_lua::Lua, id: &str) -> bool {
     true
 }
 
-/// `registerHotkey` pelo id, na thread do jogo (o comando de dev `cethotkey <id>`: prova sem tecla). `false` sem o id ou com o Lua ocupado.
+/// `registerHotkey` pelo id, na thread do jogo (o comando de dev `luatecla <id>`: prova sem tecla). `false` sem o id ou com o Lua ocupado.
 pub(crate) unsafe fn disparar_hotkey(id: &str) -> bool {
     let Ok(g) = LUA.try_lock() else { return false };
     g.as_ref().is_some_and(|s| chamar_hotkey(&s.0, id))
 }
 
-/// Medida do `CGameFramework` no `CBaseEngine` do Mac (no SDK do Windows, `engine+0x308`, com o `GameInstance*` em `+0x10`): com o V no
+/// Medida do `CGameFramework` no `CBaseEngine` do Mac (no Windows, `engine+0x308`, com o `GameInstance*` em `+0x10`): com o V no
 /// mundo, o offset do motor cujo ponteiro tem em `+0x10` o `GameInstance` do V. Uma vez por processo, no canal de veredito.
 #[cfg(feature = "devtools")]
 unsafe fn medir_framework_no_motor() {
@@ -2943,7 +2597,7 @@ unsafe fn medir_framework_no_motor() {
         .map(|k| format!("+{k:#x}"))
         .collect();
     crate::veredito_dev!(
-        "[cet] VEREDITO-FRAMEWORK GameInstance {gi:p}; framework no motor em: {}; pelo motor {:?}, igual={}",
+        "[lua] VEREDITO-FRAMEWORK GameInstance {gi:p}; framework no motor em: {}; pelo motor {:?}, igual={}",
         if achados.is_empty() { "nenhum".into() } else { achados.join(" ") },
         crate::jogo::motor::game_instance(),
         crate::jogo::motor::game_instance() == Some(gi)
@@ -2955,10 +2609,10 @@ fn nome_do_cname(h: u64) -> Option<String> {
     crate::cname::name_of(h).or_else(|| crate::registry().is_some().then(|| crate::cname::resolve_cname(h)).filter(|s| !s.is_empty()))
 }
 
-/// Quadros em que o `onDraw` rodou e em que pulou por não pegar a trava do Lua em 3 ms (o `cetdraw` de dev mostra).
+/// Quadros em que o `onDraw` rodou e em que pulou por não pegar a trava do Lua em 3 ms (o `luadraw` de dev mostra).
 pub(crate) static QUADROS_DO_ONDRAW: [std::sync::atomic::AtomicU64; 2] = [std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0)];
 
-/// `Observe` de prova (o comando de dev `cetobserve <classe> <método>`): callback vazio feito no Rust; o 1º disparo sai no canal de veredito.
+/// `Observe` de prova (o comando de dev `luaobserva <classe> <método>`): callback vazio feito no Rust; o 1º disparo sai no canal de veredito.
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn observar_de_prova(classe: &str, metodo: &str) -> bool {
     let Ok(g) = LUA.try_lock() else { return false };

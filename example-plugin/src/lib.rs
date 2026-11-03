@@ -1,6 +1,6 @@
 //! example-plugin — dylib de 3o-autor MÍNIMA, fora da árvore do cp77-console, sem linkar
 //! nenhum crate nosso. Só declara a MESMA struct BwmsApi (repr(C), ABI estável) e o entry
-//! `bwms_plugin_main`. Prova o gap `red4ext-3rdparty-plugin-proof` (F1, trilha C): um plugin
+//! `bwms_plugin_main`. Prova (F1, trilha C) que um plugin
 //! de verdade consegue (1) logar via a API e (2) registrar uma native NOVA no RTTI, chamável
 //! do redscript, sem nenhum acoplamento ao código interno do BWMS.
 //!
@@ -12,7 +12,7 @@ use std::os::raw::c_char;
 
 type NativeHandler = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void, i64);
 
-// `red4ext-api-prove-hooks-extplugin` (fatia inline_hook): pra chamar `api.inline_hook` num
+// Prova dos hooks via plugin externo (fatia inline_hook): pra chamar `api.inline_hook` num
 // alvo REAL do jogo, o plugin precisa converter o VM addr estático (do binário) pro endereço
 // de runtime (desloca por ASLR) — SEM linkar nada do core, só APIs públicas do `libSystem`
 // (`_dyld_get_image_header` etc.), mesma técnica que `cp77_console::rebase` usa internamente.
@@ -38,7 +38,7 @@ unsafe fn game_base() -> usize {
 }
 const LINK_BASE: u64 = 0x1_0000_0000;
 /// `AlignedFree(void*,void*)@0x100fa6f00` — MESMO alvo já provado seguro internamente
-/// (`red4ext-reloc-prove-ingame`, `test_relocator_cbz`): wrapper de 4 instruções (prólogo CBZ),
+/// (prova do relocador in-game, `test_relocator_cbz`): wrapper de 4 instruções (prólogo CBZ),
 /// hook+revert imediato sem nunca chamar através dele.
 const ALIGNED_FREE_VM: u64 = 0x1_00fa_6f00;
 unsafe fn rebase(vmaddr: u64) -> *mut c_void {
@@ -66,7 +66,7 @@ fn write_field(buf: &mut [u8], s: &str) {
 }
 
 /// Entry OPCIONAL (v9): o loader chama ANTES de `bwms_plugin_main` se este símbolo existir.
-/// Prova `red4ext-sdk-plumbing` (PluginInfo) ponta-a-ponta — um dylib de 3o-autor genuíno se
+/// Prova o `PluginInfo` ponta-a-ponta — um dylib de 3o-autor genuíno se
 /// descrevendo pro loader, sem precisar linkar nada do core.
 #[no_mangle]
 pub unsafe extern "C" fn bwms_plugin_query(info: *mut PluginInfo) -> bool {
@@ -116,7 +116,7 @@ pub struct BwmsApi {
     pub janela_texto: unsafe extern "C" fn(*const c_char),
     pub janela_fechar: unsafe extern "C" fn(),
     pub scripts_add: unsafe extern "C" fn(*const c_char) -> bool,
-    /// v12: registra callbacks de lifecycle de estado de jogo (red4ext-gamestates-add).
+    /// v12: registra callbacks de lifecycle de estado de jogo.
     /// state_type: 2=Running, 3=Shutdown. on_enter/update/exit são Optional.
     pub add_game_state: unsafe extern "C" fn(
         state_type: u32,
@@ -124,7 +124,7 @@ pub struct BwmsApi {
         on_update: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
         on_exit: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
     ) -> bool,
-    /// v13 (RED4ext.SDK `#31`, `Hooking::Detach`): handle ÚNICO deste plugin — atribuído pelo
+    /// v13: handle ÚNICO deste plugin — atribuído pelo
     /// loader (1 cópia pessoal de `BwmsApi` por plugin agora, não mais uma static compartilhada).
     pub my_handle: u64,
     pub inline_hook_owned: unsafe extern "C" fn(u64, *mut c_void, *mut c_void) -> *mut c_void,
@@ -179,7 +179,7 @@ unsafe extern "C" fn example_ping_handler(_ctx: *mut c_void, _frame: *mut c_void
     }
 }
 
-/// `red4ext-api-prove-hooks-extplugin` (fatia field_ptr, 2026-07-13): registrado em
+/// Prova dos hooks via plugin externo (fatia field_ptr, 2026-07-13): registrado em
 /// `PlayerPuppet` — `ctx` aqui é o objeto REAL do player vivo. Lê o campo `inCrouch` (Bool,
 /// campo de script real, nome sem `m_`) via `field_ptr` (a MESMA API que um plugin de 3o usaria
 /// pra ler qualquer campo por nome, sem precisar saber o offset) e loga o byte lido.
@@ -196,7 +196,7 @@ unsafe extern "C" fn example_field_handler(ctx: *mut c_void, _frame: *mut c_void
         } else if let Ok(msg) = CString::new("[example-plugin] field_ptr(ctx, 'inCrouch') -> null (campo não achado)") {
             ((*api).log)(msg.as_ptr());
         }
-        // `red4ext-api-prove-hooks-extplugin` (fatia final, vtable_hook): `ctx` é o PlayerPuppet
+        // Prova dos hooks via plugin externo (fatia final, vtable_hook): `ctx` é o PlayerPuppet
         // vivo. Slot 30 é o mesmo slot que o self-test INTERNO (`gum::vtable_selftest`, gated
         // `~/.bwms-vtable-test`) já confirmou ser o 1º slot in-module (`__DATA_CONST`) na faixa
         // [30,64) desta classe, nesta versão do jogo (2.3.1) — descoberto ao vivo antes de
@@ -219,7 +219,7 @@ unsafe extern "C" fn example_field_handler(ctx: *mut c_void, _frame: *mut c_void
             )) {
                 ((*api).log)(msg.as_ptr());
             }
-            // RED4ext.SDK `#31`: mesma prova de ownership, via vtable (slot 30, já restaurado
+            // Mesma prova de ownership, via vtable (slot 30, já restaurado
             // pelo teste acima).
             let my_handle = (*api).my_handle;
             let fake_handle = my_handle.wrapping_add(999);
@@ -240,8 +240,8 @@ unsafe extern "C" fn example_field_handler(ctx: *mut c_void, _frame: *mut c_void
                 ((*api).log)(msg.as_ptr());
             }
         }
-        // `red4ext-api-prove-hooks-extplugin` (fatia inline_hook): alvo REAL `AlignedFree`
-        // (mesmo endereço já provado seguro por `red4ext-reloc-prove-ingame`), instalado+
+        // Prova dos hooks via plugin externo (fatia inline_hook): alvo REAL `AlignedFree`
+        // (mesmo endereço já provado seguro pela prova do relocador in-game), instalado+
         // revertido IMEDIATAMENTE (nunca chamado através do hook) — mesma disciplina do
         // self-test interno (`test_relocator`/`test_relocator_cbz`), mas via a API PÚBLICA de
         // um dylib de 3o-autor genuíno (slide de ASLR calculado com `_dyld_get_image_header`,
@@ -262,7 +262,7 @@ unsafe extern "C" fn example_field_handler(ctx: *mut c_void, _frame: *mut c_void
                 ((*api).log)(msg.as_ptr());
             }
         }
-        // RED4ext.SDK `#31` (`Hooking::Detach`, PluginHandle real, 2026-08-11): MESMO alvo
+        // PluginHandle real (2026-08-11): MESMO alvo
         // AlignedFree (já restaurado pelo teste acima) — instala via `inline_hook_owned` com o
         // handle DESTE plugin, tenta soltar com um handle ALHEIO simulado (deve RECUSAR e manter
         // o hook intacto), depois solta com o handle CERTO (deve suceder e restaurar o byte
@@ -288,7 +288,7 @@ unsafe extern "C" fn example_field_handler(ctx: *mut c_void, _frame: *mut c_void
                 ((*api).log)(msg.as_ptr());
             }
         }
-        // `red4ext-api-prove-hooks-extplugin` (fatia call_method, SEM args — complementa
+        // Prova dos hooks via plugin externo (fatia call_method, SEM args — complementa
         // `call_method_args` já provado no handler de gameGodModeSystem): `GetEntityID()` é
         // zero-arg, read-only, presente em qualquer IScriptable/Entity real.
         let method0 = CString::new("GetEntityID").unwrap();
@@ -312,7 +312,7 @@ unsafe extern "C" fn example_method_handler(ctx: *mut c_void, _frame: *mut c_voi
         if let Ok(msg) = CString::new("[example-plugin] ExamplePluginMethod handler rodou (metodo em classe existente)") {
             ((*api).log)(msg.as_ptr());
         }
-        // `red4ext-callmethod-args` (2026-07-13): `ctx` AQUI é o objeto REAL (gameGodModeSystem
+        // `call_method_args` (2026-07-13): `ctx` AQUI é o objeto REAL (gameGodModeSystem
         // vivo, o mesmo `this` que o motor passou pra native) — prova que um plugin de 3o-autor
         // consegue usar `call_method_args` (não só `call_method` sem args) pra chamar OUTRO
         // método no MESMO objeto, com um arg TIPADO real (CName), tudo via a API pública, sem
@@ -336,7 +336,7 @@ unsafe extern "C" fn example_method_handler(ctx: *mut c_void, _frame: *mut c_voi
     }
 }
 
-/// `cet-thirdparty-mod-api`: lifecycle onUpdate de VERDADE — o CORE chama esta native TODO TICK
+/// Lifecycle onUpdate de VERDADE — o CORE chama esta native TODO TICK
 /// (não só 1x em `bwms_plugin_main`). Prova que um plugin de 3o-autor recebe um evento contínuo
 /// pós-boot via `BwmsApi`, sem CallbackSystem/IScriptable, só `register_native` + o dispatcher do
 /// core resolvendo o nome pela MESMA via de `callg` (`register::get_function`+`rtti::call_func`).
@@ -378,7 +378,7 @@ extern "C" fn example_draw_callback() {
     unsafe { late_registration_probe_once(api) };
 }
 
-/// CET item #46 (`PENDENCIAS-UNIFICADAS.md`) — janela de registro restrita ao load. Este draw
+/// Item #46 (`PENDENCIAS-UNIFICADAS.md`) — janela de registro restrita ao load. Este draw
 /// callback só roda DEPOIS que `bwms_plugin_main` já retornou (1x/frame, contínuo), então
 /// chamar `register_native` daqui é EXATAMENTE o cenário de "registro tardio" que a janela
 /// deve recusar. Roda só 1x (guard atômico) pra não spammar o log a cada frame.
@@ -397,7 +397,7 @@ unsafe fn late_registration_probe_once(api: *mut BwmsApi) {
     }
 }
 
-/// `red4ext-gamestates-add` (v12): contadores e handlers de lifecycle registrados via add_game_state.
+/// v12: contadores e handlers de lifecycle registrados via add_game_state.
 static GAMESTATE_ENTERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static GAMESTATE_UPDATES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
@@ -441,7 +441,7 @@ unsafe extern "C" fn gs_running_on_exit(_player: *mut c_void) -> bool {
     true
 }
 
-/// RED4ext.SDK #32/#36/#37/#38 (2026-08-11): cobertura BaseInitialization(0)/Initialization(1).
+/// 2026-08-11: cobertura BaseInitialization(0)/Initialization(1).
 unsafe extern "C" fn gs_baseinit_on_enter(_player: *mut c_void) -> bool {
     let api = API_PTR.load(std::sync::atomic::Ordering::Relaxed);
     if !api.is_null() {
@@ -478,7 +478,7 @@ unsafe extern "C" fn gs_init_on_enter(_player: *mut c_void) -> bool {
     true
 }
 
-/// RED4ext.SDK `#37` (2026-08-11): prova de `GameStates.OnUpdate` pra `Initialization`(1) —
+/// 2026-08-11: prova de `GameStates.OnUpdate` pra `Initialization`(1) —
 /// item novo desta rodada, testado junto com `gs_init_on_enter`/`gs_init_on_exit` já existentes.
 static GS_INIT_UPDATE_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -519,7 +519,7 @@ unsafe extern "C" fn gs_shutdown_on_enter(_player: *mut c_void) -> bool {
     true
 }
 
-/// Entry OPCIONAL (RED4ext.SDK `#45`, `EMainReason::Unload`): o core chama isto ANTES do
+/// Entry OPCIONAL (unload): o core chama isto ANTES do
 /// processo morrer (dentro de `exit_replacement`, motor ainda intacto) se o símbolo existir.
 /// Prova que um plugin de 3o-autor genuíno recebe sinal de unload (nenhum recebia antes).
 #[no_mangle]
@@ -558,7 +558,7 @@ pub unsafe extern "C" fn bwms_plugin_main(api: *const BwmsApi) -> i32 {
         ((*api).log)(msg.as_ptr());
     }
     // Capacidade 6 (2026-07-13): registra em PlayerPuppet — `ctx` vira o player vivo quando
-    // chamado — pra exercitar `field_ptr` (fatia final de `red4ext-api-prove-hooks-extplugin`).
+    // chamado — pra exercitar `field_ptr` (fatia final da prova dos hooks via plugin externo).
     let pclass = CString::new("PlayerPuppet").unwrap();
     let pfull = CString::new("PlayerPuppet::ExamplePluginFieldTest").unwrap();
     let pshort = CString::new("ExamplePluginFieldTest").unwrap();
@@ -566,7 +566,7 @@ pub unsafe extern "C" fn bwms_plugin_main(api: *const BwmsApi) -> i32 {
     if let Ok(msg) = CString::new(format!("[example-plugin] register_method ExamplePluginFieldTest -> {pok}")) {
         ((*api).log)(msg.as_ptr());
     }
-    // `cet-thirdparty-mod-api`: registra a native global que o CORE vai chamar a CADA TICK (ver
+    // Registra a native global que o CORE vai chamar a CADA TICK (ver
     // cp77_tick em lib.rs) — o lifecycle onUpdate contínuo, não só esta chamada única de boot.
     let ofull = CString::new("BwmsPluginOnUpdate").unwrap();
     let oshort = CString::new("BwmsPluginOnUpdate").unwrap();
@@ -576,7 +576,7 @@ pub unsafe extern "C" fn bwms_plugin_main(api: *const BwmsApi) -> i32 {
     }
     // Capacidade 4 (v8): ler um flat TweakDB conhecido (deepWaterDepth, já provado = -0.5 em
     // sessões anteriores) de um dylib GENUINAMENTE de terceiros, sem tocar nada do TweakDB
-    // internamente — prova `tweakxl-mod-api` ponta-a-ponta.
+    // internamente — prova a API de TweakDB ponta-a-ponta.
     let field = CString::new("Items.GrenadeIncendiarySticky.deepWaterDepth").unwrap();
     let mut bits: u32 = 0;
     let got = ((*api).tweakdb_get_flat)(field.as_ptr(), &mut bits);
@@ -586,7 +586,7 @@ pub unsafe extern "C" fn bwms_plugin_main(api: *const BwmsApi) -> i32 {
     {
         ((*api).log)(msg.as_ptr());
     }
-    // Capacidade 5 (v9): logger por-nível + SemVer runtime — parte de `red4ext-sdk-plumbing`.
+    // Capacidade 5 (v9): logger por-nível + SemVer runtime.
     if let Ok(msg) = CString::new("[example-plugin] teste de log_level (nivel WARN)") {
         ((*api).log_level)(3, msg.as_ptr());
     }
@@ -607,7 +607,7 @@ pub unsafe extern "C" fn bwms_plugin_main(api: *const BwmsApi) -> i32 {
     if let Ok(msg) = CString::new(format!("[example-plugin] register_draw_callback -> {dok}")) {
         ((*api).log)(msg.as_ptr());
     }
-    // `red4ext-scripts-add` (v11, 2026-07-18): registra um `.reds` que vive FORA de r6/scripts
+    // v11 (2026-07-18): registra um `.reds` que vive FORA de r6/scripts
     // — ao lado do PRÓPRIO dylib deste plugin (`red4ext/plugins/example-plugin-scripts/`, o
     // padrão real de um mod de 3os que shipa dylib+reds juntos), achado via `_dyld_get_image_
     // name` da PRÓPRIA imagem (mesma técnica já usada em `game_base()` acima pra achar o
@@ -628,10 +628,10 @@ pub unsafe extern "C" fn bwms_plugin_main(api: *const BwmsApi) -> i32 {
     {
         ((*api).log)(msg.as_ptr());
     }
-    // v12: red4ext-gamestates-add — registra callbacks de lifecycle de estado de jogo de um
+    // v12: registra callbacks de lifecycle de estado de jogo de um
     // dylib de 3o-autor genuíno. state_type=2=Running, state_type=3=Shutdown.
     // Os handlers logarão ">>> RUNNING.OnEnter/OnExit/SHUTDOWN.OnEnter PASS <<<" ao vivo.
-    // 2026-08-11: +state_type=0=BaseInitialization, 1=Initialization (cobertura #32/#36/#37/#38).
+    // 2026-08-11: +state_type=0=BaseInitialization, 1=Initialization.
     let gs_base = ((*api).add_game_state)(
         0,
         Some(gs_baseinit_on_enter),

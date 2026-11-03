@@ -1,6 +1,6 @@
-// Codeware #90 — a superfície de `inkComponent` por composição: `IsAttached()` e os dois `Reparent`, com nome BWMS.
+// A superfície de `inkComponent` por composição: `IsAttached()` e os dois `Reparent`, com nome BWMS.
 //
-// O Codeware forja a classe `inkComponent` (com o campo `detached` e um `OnConstruct`); aqui ela não é declarada, porque `inkComponent`
+// A classe `inkComponent` não é declarada aqui, porque `inkComponent`
 // não existe no corpus vanilla (a categoria do `CMesh`, que derruba o bind). Os dois `Reparent` já são nativas vanilla:
 //
 //   core/ui/baseWidgets/abstractWidgets.script:225
@@ -11,9 +11,8 @@
 // O `opt index` cobre as duas formas (com e sem índice). `IsAttached` é `IsDefined(BwmsWidgetParent(w))`: a native sobe um nível
 // lendo o `parentWidget` que o motor tem.
 //
-// Diferença de semântica: o `IsAttached` do Codeware é `widget && !detached`, com `detached` marcado pelo ciclo de vida da classe
-// forjada; o daqui é "o widget está pendurado numa árvore". Pra saber se dá pra reparentar ou se já saiu da tela, os dois respondem
-// igual; pro ciclo de vida de um `inkComponent` em particular, não.
+// Semântica: o `IsAttached` daqui é "o widget está pendurado numa árvore", não um campo `detached` marcado pelo ciclo de vida
+// de uma classe forjada. Responde se dá pra reparentar ou se já saiu da tela; não segue o ciclo de vida de um `inkComponent` em particular.
 
 // PARÂMETRO `ref<IScriptable>` NAS FUNÇÕES GLOBAIS: `ref<inkWidget>` como parâmetro
 // de função GLOBAL é o padrão que derrubou o boot no `#91`. O cast

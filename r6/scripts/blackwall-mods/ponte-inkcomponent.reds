@@ -1,7 +1,7 @@
-// ponte-inkcomponent.reds — `inkComponent`, o componente de UI que mods do Windows (Virtual Atelier) estendem sem importar módulo.
+// ponte-inkcomponent.reds — `inkComponent`, o componente de UI que mods do Windows estendem sem importar módulo.
 //
 // Forma do plugue: `new X()` e `Reparent(pai)`; o mod devolve a raiz no `cb func OnCreate() -> ref<inkWidget>` e recebe `OnInitialize` e
-// `OnUninitialize`. O componente é um controller do motor: `BwmsWidgetAttachController` (C#175) o põe como `logicController` da raiz, então a
+// `OnUninitialize`. O componente é um controller do motor: `BwmsWidgetAttachController` o põe como `logicController` da raiz, então a
 // árvore de widgets segura o componente vivo, o motor chama `OnInitialize`/`OnUninitialize` quando a raiz entra ou sai de uma árvore na tela
 // (gancho do `Reparent`, `bwms-widget-building.reds`) e os eventos que o controller pai enfileira chegam aos `cb func` tipados do mod.
 // `QueueEvent`, `PlaySound`, `SpawnFromExternal` e os callbacks globais são as natives vanilla do `inkLogicController`.

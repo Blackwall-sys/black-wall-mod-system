@@ -1,4 +1,4 @@
-// bwms-delay.reds — agendamento com atraso (catálogo Codeware #56).
+// bwms-delay.reds — agendamento com atraso.
 //
 // O QUE FALTAVA: o jogo tem `DelaySystem.DelayCallback(cb, segundos, ...)`
 // (`redscript-all.reds:14521`), mas usá-lo exige que o mod escreva uma subclasse de

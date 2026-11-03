@@ -1,8 +1,8 @@
-//! Leitor do `GarmentProcessingContext` — ArchiveXL `#4` e `#5`.
+//! Leitor do `GarmentProcessingContext`.
 //!
-//! **O que os itens pedem.** `#4` descreve o contexto COMPLETO que `ProcessGarment` e
+//! **O que se pede.** O contexto COMPLETO que `ProcessGarment` e
 //! `ExtractComponentsJob` usam (componentes, meshes, templates, recursos, definição de aparência,
-//! request, job), e `#5` os PARÂMETROS de entrada dessas funções — o objeto central do pipeline
+//! request, job), e os PARÂMETROS de entrada dessas funções — o objeto central do pipeline
 //! de montagem de garment. Os dois fecharam ao vivo em 2026-09-06 (critério em `resumo()`).
 //!
 //! **Por que a decodificação mora aqui, fora do runtime.** Ler struct por offset é onde este
@@ -11,14 +11,14 @@
 //! sem o jogo. Este módulo NÃO desreferencia nada: recebe bytes já lidos e diz o que eles
 //! significam.
 //!
-//! **Offsets vêm do header vendorizado**, não de chute — estão transcritos no item `#4` e
-//! repetidos abaixo em constantes com nome, pra um erro de digitação virar teste vermelho e não
+//! **Offsets não são chute** — estão
+//! abaixo em constantes com nome, pra um erro de digitação virar teste vermelho e não
 //! um campo lido do lugar errado. Os 4 arrays saem pelo decodificador único de `DynArray`
 //! (`crate::dynarray`), o mesmo cujo crivo o runtime usa.
 
 use crate::dynarray::DynArray;
 
-/// Offsets do `GarmentProcessingContext`, conforme o header do ArchiveXL (item `#4`).
+/// Offsets do `GarmentProcessingContext`.
 pub mod off {
     pub const UNK00: usize = 0x00; // SharedPtr<void>
     pub const COMPONENTS: usize = 0x10; // DynArray<Handle<IComponent>>
@@ -99,7 +99,7 @@ impl GarmentContext {
     /// Resumo de uma linha para log — a forma em que o veredito ao vivo vai aparecer. Os dois
     /// crivos saem separados para o log dizer qual caiu; nenhum deles confirma o layout. O que
     /// confirmou em 2026-09-06 foi critério externo: os 4 `size` iguais entre si em 6 disparos de
-    /// tamanhos distintos (`cp77-symbols/notes/proofs/20260906-archivexl-4-5-garment-contexto-PROVADO.log`).
+    /// tamanhos distintos (prova de 2026-09-06 do contexto de garment).
     pub fn resumo(&self) -> String {
         format!(
             "components={} meshes={} templates={} resources={} definition={:#x} job={:#x} estrutura_valida={} capacidade_plausivel={}",
@@ -264,7 +264,7 @@ mod tests {
 
     #[test]
     fn offsets_batem_com_o_header_do_item() {
-        // Transcrição literal do item `#4`. Um erro de digitação aqui vira teste vermelho, não
+        // Transcrição literal dos offsets. Um erro de digitação aqui vira teste vermelho, não
         // um campo lido do lugar errado.
         assert_eq!(off::COMPONENTS, 0x10);
         assert_eq!(off::MESHES, 0x20);

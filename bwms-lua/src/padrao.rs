@@ -1,6 +1,6 @@
-//! Biblioteca padrão que os mods de CET usam: base, `string`, `table`, `math`, `os`, `io`, `bit`, `package`.
+//! Biblioteca padrão que os mods Lua usam: base, `string`, `table`, `math`, `os`, `io`, `bit`, `package`.
 
-use crate::padroes::{self, Captura, Casamento};
+use crate::casador::{Casamento, Padrao, Trecho};
 use crate::{Dados, Error, Function, Lua, LuaString, MultiValue, Result, Table, UserData, UserDataMethods, Value};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -496,126 +496,170 @@ fn subtexto(s: &[u8], i: f64, j: f64) -> &[u8] {
     if ini > fim { &[] } else { &s[ini as usize - 1..fim as usize] }
 }
 
-fn valor_de_captura(t: &[u8], c: Captura) -> Value {
-    match c {
-        Captura::Texto(a, b) => valor_de_bytes(&t[a..b]),
-        Captura::Posicao(p) => Value::Number((p + 1) as f64),
+/// Sem nenhum destes bytes o `find` procura o padrão como texto puro.
+const BYTES_DE_PADRAO: &[u8] = b"^$*+?.([%-";
+
+/// `init` do `find`/`match` em índice 0-based; `None` = além de `#s + 1`, devolve `nil` sem procurar.
+fn inicio_da_busca(lua: &Lua, a: &[Value], tam: usize, funcao: &str) -> Result<Option<usize>> {
+    let ini = posicao(opt_num(lua, a, 2, funcao, 1.0)?, tam).max(1);
+    Ok((ini <= tam as i64 + 1).then(|| ini as usize - 1))
+}
+
+fn valor_de_trecho(s: &[u8], t: &Trecho) -> Value {
+    match *t {
+        Trecho::Texto(a, b) => valor_de_bytes(&s[a..b]),
+        Trecho::Posicao(p) => Value::Number(p as f64),
     }
 }
 
-fn capturas(t: &[u8], c: &Casamento) -> Vec<Value> {
-    if c.caps.is_empty() {
-        return vec![valor_de_bytes(&t[c.ini..c.fim])];
+/// As capturas do casamento; padrão sem captura devolve o trecho casado inteiro.
+fn capturas_ou_tudo(s: &[u8], c: &Casamento) -> Vec<Value> {
+    if c.capturas.is_empty() {
+        return vec![valor_de_bytes(&s[c.inicio..c.fim])];
     }
-    c.caps.iter().map(|x| valor_de_captura(t, *x)).collect()
+    c.capturas.iter().map(|t| valor_de_trecho(s, t)).collect()
 }
 
-fn achar_cru(t: &[u8], p: &[u8], ini: usize) -> Option<usize> {
-    if p.is_empty() {
-        return Some(ini);
-    }
-    t[ini..].windows(p.len()).position(|w| w == p).map(|i| i + ini)
+fn compilar_padrao(lua: &Lua, p: &[u8], ancora_permitida: bool) -> Result<Padrao> {
+    Padrao::compilar(p, ancora_permitida).map_err(|m| lua.erro(m))
 }
 
+/// `string.find` (`achar`) e `string.match`.
 fn buscar(lua: &Lua, a: Vec<Value>, funcao: &str, achar: bool) -> Saida {
-    let t = arg_texto(lua, &a, 0, funcao)?;
+    let s = arg_texto(lua, &a, 0, funcao)?;
     let p = arg_texto(lua, &a, 1, funcao)?;
-    let ini = (posicao(opt_num(lua, &a, 2, funcao, 1.0)?, t.len()).max(1) - 1) as usize;
-    if ini > t.len() {
-        return Ok(vec![Value::Nil]);
-    }
-    if achar && (a.get(3).is_some_and(Value::verdadeiro) || !p.iter().any(|c| b"^$*+?.([%-".contains(c))) {
-        return Ok(match achar_cru(&t, &p, ini) {
-            Some(i) => vec![Value::Number((i + 1) as f64), Value::Number((i + p.len()) as f64)],
+    let Some(de) = inicio_da_busca(lua, &a, s.len(), funcao)? else { return Ok(vec![Value::Nil]) };
+    if achar && (a.get(3).is_some_and(Value::verdadeiro) || !p.iter().any(|b| BYTES_DE_PADRAO.contains(b))) {
+        let achado = if p.is_empty() { Some(0) } else { s[de..].windows(p.len()).position(|w| *w == *p) };
+        return Ok(match achado {
+            Some(k) => vec![Value::Number((de + k + 1) as f64), Value::Number((de + k + p.len()) as f64)],
             None => vec![Value::Nil],
         });
     }
-    match padroes::procurar(&t, &p, ini).map_err(|m| lua.erro(m))? {
-        None => Ok(vec![Value::Nil]),
-        Some(c) if achar => {
-            let mut r = vec![Value::Number((c.ini + 1) as f64), Value::Number(c.fim as f64)];
-            r.extend(c.caps.iter().map(|x| valor_de_captura(&t, *x)));
-            Ok(r)
-        }
-        Some(c) => Ok(capturas(&t, &c)),
+    let padrao = compilar_padrao(lua, &p, true)?;
+    let Some(c) = padrao.procurar(&s, de).map_err(|m| lua.erro(m))? else { return Ok(vec![Value::Nil]) };
+    if !achar {
+        return Ok(capturas_ou_tudo(&s, &c));
     }
+    let mut r = vec![Value::Number((c.inicio + 1) as f64), Value::Number(c.fim as f64)];
+    r.extend(c.capturas.iter().map(|t| valor_de_trecho(&s, t)));
+    Ok(r)
+}
+
+/// `string.gmatch`: o iterador guarda a posição da próxima busca; passou do fim, devolve `nil` para sempre.
+fn gmatch(lua: &Lua, a: Vec<Value>) -> Saida {
+    let s = arg_texto(lua, &a, 0, "gmatch")?;
+    let p = arg_texto(lua, &a, 1, "gmatch")?;
+    let padrao = compilar_padrao(lua, &p, false)?;
+    let proxima = Cell::new(0usize);
+    let iterador = lua.funcao_rust(Box::new(move |lua, _| {
+        let de = proxima.get();
+        if de > s.len() {
+            return Ok(vec![Value::Nil]);
+        }
+        match padrao.procurar(&s, de).map_err(|m| lua.erro(m))? {
+            None => {
+                proxima.set(s.len() + 1);
+                Ok(vec![Value::Nil])
+            }
+            Some(c) => {
+                // Casamento vazio não anda o texto: sem o +1 o próximo achado seria o mesmo.
+                proxima.set(if c.fim == c.inicio { c.fim + 1 } else { c.fim });
+                Ok(capturas_ou_tudo(&s, &c))
+            }
+        }
+    }));
+    Ok(vec![Value::Function(iterador)])
+}
+
+/// Texto de troca do `gsub`: `%0` = casado inteiro, `%1`…`%9` = captura, `%` + outro byte = o byte.
+fn expandir_troca(lua: &Lua, s: &[u8], c: &Casamento, molde: &[u8], saida: &mut Vec<u8>) -> Result<()> {
+    let mut i = 0;
+    while i < molde.len() {
+        let b = molde[i];
+        i += 1;
+        if b != b'%' {
+            saida.push(b);
+            continue;
+        }
+        let Some(&prox) = molde.get(i) else { return Err(lua.erro("texto de troca termina em '%'")) };
+        i += 1;
+        if !prox.is_ascii_digit() {
+            saida.push(prox);
+            continue;
+        }
+        let n = usize::from(prox - b'0');
+        let trecho = match n {
+            0 => Trecho::Texto(c.inicio, c.fim),
+            1 if c.capturas.is_empty() => Trecho::Texto(c.inicio, c.fim),
+            _ => *c.capturas.get(n - 1).ok_or_else(|| lua.erro(format!("texto de troca pede a captura %{n}, que o padrão não tem")))?,
+        };
+        match trecho {
+            Trecho::Texto(a, b) => saida.extend_from_slice(&s[a..b]),
+            Trecho::Posicao(p) => saida.extend_from_slice(numero_em_texto(p as f64).as_bytes()),
+        }
+    }
+    Ok(())
+}
+
+/// Uma troca do `gsub`. Tabela e função: `nil`/`false` mantêm o trecho original.
+fn trocar(lua: &Lua, s: &[u8], c: &Casamento, troca: &Value, saida: &mut Vec<u8>) -> Result<()> {
+    let novo = match troca {
+        Value::String(t) => return expandir_troca(lua, s, c, &t.0, saida),
+        Value::Number(_) | Value::Integer(_) => return expandir_troca(lua, s, c, troca.to_string()?.as_bytes(), saida),
+        Value::Table(_) => {
+            let chave = capturas_ou_tudo(s, c).into_iter().next().unwrap_or(Value::Nil);
+            lua.indexar(troca, &chave)?
+        }
+        Value::Function(f) => lua.chamar_funcao(f, capturas_ou_tudo(s, c))?.into_iter().next().unwrap_or(Value::Nil),
+        outro => return Err(lua.erro(format!("valor de troca inválido ({})", outro.nome_do_tipo()))),
+    };
+    match &novo {
+        Value::Nil | Value::Boolean(false) => saida.extend_from_slice(&s[c.inicio..c.fim]),
+        Value::String(t) => saida.extend_from_slice(&t.0),
+        Value::Number(_) | Value::Integer(_) => saida.extend_from_slice(novo.to_string()?.as_bytes()),
+        outro => return Err(lua.erro(format!("valor de troca inválido ({})", outro.nome_do_tipo()))),
+    }
+    Ok(())
 }
 
 fn gsub(lua: &Lua, a: Vec<Value>) -> Saida {
-    let t = arg_texto(lua, &a, 0, "gsub")?;
+    let s = arg_texto(lua, &a, 0, "gsub")?;
     let p = arg_texto(lua, &a, 1, "gsub")?;
-    let troca = a.get(2).cloned().unwrap_or(Value::Nil);
-    if !matches!(troca, Value::String(_) | Value::Number(_) | Value::Integer(_) | Value::Table(_) | Value::Function(_)) {
-        return Err(erro_de_argumento(lua, 2, "gsub", "string/function/table", a.get(2)));
-    }
-    let maximo = opt_num(lua, &a, 3, "gsub", f64::INFINITY)?;
-    let ancora = p.first() == Some(&b'^');
-    let pi = usize::from(ancora);
-    let (mut s, mut n, mut saida) = (0, 0f64, Vec::with_capacity(t.len()));
-    while n < maximo {
-        let c = padroes::em(&t, &p, pi, s).map_err(|m| lua.erro(m))?;
-        if let Some(c) = &c {
-            n += 1.0;
-            substituir(lua, &t, c, &troca, &mut saida)?;
-        }
-        match c {
-            Some(c) if c.fim > s => s = c.fim,
-            _ if s < t.len() => {
-                saida.push(t[s]);
-                s += 1;
+    let troca = match a.get(2) {
+        Some(v @ (Value::String(_) | Value::Number(_) | Value::Integer(_) | Value::Table(_) | Value::Function(_))) => v.clone(),
+        v => return Err(erro_de_argumento(lua, 2, "gsub", "string/function/table", v)),
+    };
+    let maximo = match a.get(3) {
+        None | Some(Value::Nil) => usize::MAX,
+        _ => arg_num(lua, &a, 3, "gsub")?.max(0.0) as usize,
+    };
+    let padrao = compilar_padrao(lua, &p, true)?;
+    let (mut saida, mut pos, mut feitas) = (Vec::with_capacity(s.len()), 0usize, 0usize);
+    while feitas < maximo {
+        let casado = padrao.casar_em(&s, pos).map_err(|m| lua.erro(m))?;
+        let fim = match casado {
+            Some(c) => {
+                feitas += 1;
+                trocar(lua, &s, &c, &troca, &mut saida)?;
+                c.fim
             }
-            _ => break,
+            None => pos,
+        };
+        if fim > pos {
+            pos = fim;
+        } else if pos < s.len() {
+            saida.push(s[pos]);
+            pos += 1;
+        } else {
+            break;
         }
-        if ancora {
+        if padrao.ancorado() {
             break;
         }
     }
-    saida.extend_from_slice(&t[s.min(t.len())..]);
-    Ok(vec![valor_de_bytes(&saida), Value::Number(n)])
-}
-
-fn substituir(lua: &Lua, t: &[u8], c: &Casamento, troca: &Value, saida: &mut Vec<u8>) -> Result<()> {
-    let primeira = capturas(t, c).into_iter().next().unwrap_or(Value::Nil);
-    let r = match troca {
-        Value::Table(_) => lua.indexar(troca, &primeira)?,
-        Value::Function(f) => lua.chamar_funcao(f, capturas(t, c))?.into_iter().next().unwrap_or(Value::Nil),
-        Value::String(_) | Value::Number(_) | Value::Integer(_) => {
-            let molde = troca.to_string()?;
-            let molde = molde.as_bytes();
-            let mut i = 0;
-            while i < molde.len() {
-                if molde[i] != b'%' {
-                    saida.push(molde[i]);
-                    i += 1;
-                    continue;
-                }
-                i += 1;
-                match molde.get(i) {
-                    Some(b'0') => saida.extend_from_slice(&t[c.ini..c.fim]),
-                    Some(d @ b'1'..=b'9') => {
-                        let n = usize::from(d - b'1');
-                        let v = match capturas(t, c).into_iter().nth(n) {
-                            Some(v) => v,
-                            None => return Err(lua.erro(format!("invalid capture index %{}", n + 1))),
-                        };
-                        saida.extend_from_slice(v.to_string()?.as_bytes());
-                    }
-                    Some(x) => saida.push(*x),
-                    None => return Err(lua.erro("invalid use of '%' in replacement string")),
-                }
-                i += 1;
-            }
-            return Ok(());
-        }
-        _ => Value::Nil,
-    };
-    match &r {
-        Value::Nil | Value::Boolean(false) => saida.extend_from_slice(&t[c.ini..c.fim]),
-        Value::String(s) => saida.extend_from_slice(&s.0),
-        Value::Number(_) | Value::Integer(_) => saida.extend_from_slice(r.to_string()?.as_bytes()),
-        v => return Err(lua.erro(format!("invalid replacement value (a {})", v.nome_do_tipo()))),
-    }
-    Ok(())
+    saida.extend_from_slice(&s[pos..]);
+    Ok(vec![valor_de_bytes(&saida), Value::Number(feitas as f64)])
 }
 
 fn inteiro_de(n: f64) -> i64 {
@@ -805,24 +849,7 @@ fn instalar_string(lua: &Lua, g: &Table) -> Table {
     registrar(lua, &t, "find", |lua, a| buscar(lua, a, "find", true));
     registrar(lua, &t, "match", |lua, a| buscar(lua, a, "match", false));
     registrar(lua, &t, "gsub", gsub);
-    registrar(lua, &t, "gmatch", |lua, a| {
-        let texto = arg_texto(lua, &a, 0, "gmatch")?;
-        let padrao = arg_texto(lua, &a, 1, "gmatch")?;
-        let pos = Cell::new(0);
-        let f = lua.funcao_rust(Box::new(move |lua, _| {
-            let mut s = pos.get();
-            while s <= texto.len() {
-                if let Some(c) = padroes::em(&texto, &padrao, 0, s).map_err(|m| lua.erro(m))? {
-                    pos.set(if c.fim == s { s + 1 } else { c.fim });
-                    return Ok(capturas(&texto, &c));
-                }
-                s += 1;
-            }
-            pos.set(texto.len() + 1);
-            Ok(vec![Value::Nil])
-        }));
-        Ok(vec![Value::Function(f)])
-    });
+    registrar(lua, &t, "gmatch", gmatch);
     g.d.borrow_mut().por(Value::texto("string"), Value::Table(t.clone()));
     let meta = lua.tabela_nova();
     meta.d.borrow_mut().por(Value::texto("__index"), Value::Table(t.clone()));
@@ -1476,7 +1503,7 @@ fn instalar_bit(lua: &Lua, g: &Table) {
         let h = &h[8 - casas..];
         Ok(vec![Value::texto(&if n < 0 { h.to_uppercase() } else { h.to_string() })])
     });
-    // O CET entrega aos mods esta mesma biblioteca com o nome `bit32`.
+    // Os mods também chamam esta mesma biblioteca pelo nome `bit32`.
     g.d.borrow_mut().por(Value::texto("bit32"), Value::Table(t.clone()));
     g.d.borrow_mut().por(Value::texto("bit"), Value::Table(t));
 }

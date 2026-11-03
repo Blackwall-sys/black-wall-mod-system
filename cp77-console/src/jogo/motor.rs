@@ -2,7 +2,7 @@
 //! do app (`0x104d6a564`) e o `OnUpdate` de Running leem; o `buildString` dele em `+0x150` é o do executável ("3.0.5814798 …" na 2.5; o 2.31 dava
 //! "3.0.5314055 … (FINAL)" no boot 288), vtable estática `0x10784d418`.
 //!
-//! Screenshot (RED4ext `#473`): o slot `+0xE8` (`0x10158d7d0`) recebe (motor, modo, caminho `CString`, callback de 0x50 B), monta o
+//! Screenshot: o slot `+0xE8` (`0x10158d7d0`) recebe (motor, modo, caminho `CString`, callback de 0x50 B), monta o
 //! `rendSingleScreenShotData` (modo em `+0x34`, caminho de saída em `+0x38`, formato em `+0x8C`: PNG nos modos normais, EXR nos 5 e 6) e o
 //! entrega ao objeto em `motor+0x390` (`0x104d56010`); sem esse objeto a chamada não faz nada. No SDK do Windows o slot é o `+0xE0`; no Mac o
 //! destrutor ocupa dois slots.
@@ -137,7 +137,7 @@ pub(crate) fn teste_tick() {
 const FRAMEWORK_NO_MOTOR: usize = 0x378;
 const GAME_INSTANCE_NO_FRAMEWORK: usize = 0x10;
 
-/// `GameInstance*` do motor (`motor → framework → gameInstance`), o do CET: existe no menu, antes do V.
+/// `GameInstance*` do motor (`motor → framework → gameInstance`), o da camada Lua: existe no menu, antes do V.
 pub(crate) fn game_instance() -> Option<*mut c_void> {
     let m = motor();
     if m.is_null() {

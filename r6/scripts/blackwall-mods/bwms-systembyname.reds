@@ -1,7 +1,7 @@
-// bwms-systembyname.reds — `BwmsGetSystemByName`, Codeware itens #75/#76/#138/#139/#141/#143.
+// bwms-systembyname.reds — `BwmsGetSystemByName`.
 //
 // Generaliza pro redscript o comando de diagnóstico `sysbymap`/`gisysmapdump` (já provado ao
-// vivo, RED4ext `#472`) — lê `GameInstance+0x08` (`systemMap: HashMap<IType*,
+// vivo) — lê `GameInstance+0x08` (`systemMap: HashMap<IType*,
 // Handle<IGameSystem>>`) por NOME, sem executar nenhum código do motor (mesma disciplina
 // read-only já estabelecida). Cobre a lacuna real: `GameInstance.GetXSystem()` só existe pra uma
 // fração dos ~149 sistemas registrados — qualquer sistema SEM accessor vanilla dedicado

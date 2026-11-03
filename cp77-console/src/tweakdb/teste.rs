@@ -195,7 +195,7 @@ pub(crate) fn tick_recarga() {
     }
 }
 
-/// Crescimento do buffer de valores (`~/.bwms-hook-tdb-buffer-teste`, RED4ext `#334`/`#348`): o buffer cresce à força pro máximo e o jogo
+/// Crescimento do buffer de valores (`~/.bwms-hook-tdb-buffer-teste`): o buffer cresce à força pro máximo e o jogo
 /// tem que continuar lendo tudo — o valor antigo pelo índice e, pelo caminho do próprio motor (o getter `DeepWaterDepth()` do record, que lê
 /// pela cópia do ponteiro em `TweakDB+0x00`), um valor gravado DEPOIS do crescimento, que só existe no buffer novo. Depois o diário desfaz.
 pub(crate) fn tick_buffer() {
@@ -255,6 +255,66 @@ unsafe fn rodar_buffer() -> String {
          gravado depois do crescimento {gravou} -> getter {getter_depois:?} (esperado {novo_valor}), desfez {desfez} -> {getter_volta:?}; \
          buffer-ok={ok}",
         estatico == novo
+    )
+}
+
+/// UpdateRecord (`~/.bwms-hook-tdb-updaterecord-teste`): o flat `deepWaterDepth` da granada é re-apontado direto no índice, sem o escritor (sem
+/// subir a versão do TweakDB); o getter nativo `DeepWaterDepth()` do record tem que ler o valor novo depois do `UpdateRecord`, e o de antes
+/// depois da volta do offset e de outro `UpdateRecord`. A prova de 2026-07-18 refeita na 2.5.
+pub(crate) fn tick_updaterecord() {
+    static VOLTAS: AtomicU64 = AtomicU64::new(0);
+    static FEITO: AtomicBool = AtomicBool::new(false);
+    static INICIO: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    if FEITO.load(Ordering::Relaxed) || !crate::tempo::a_cada(VOLTAS.fetch_add(1, Ordering::Relaxed), 30) || !crate::marcador_individual("tdb-updaterecord-teste") {
+        return;
+    }
+    if !crate::selftest::trava_de_save_confirmada() || !crate::inicio::boot::gameplay_real() || INICIO.get_or_init(std::time::Instant::now).elapsed().as_secs() < 35 {
+        return;
+    }
+    FEITO.store(true, Ordering::Relaxed);
+    let linha = unsafe { rodar_updaterecord() };
+    crate::log_veredito(&linha);
+}
+
+unsafe fn rodar_updaterecord() -> String {
+    let (Some(t), Some(reg)) = (singleton(), crate::rtti::Registry::obtain()) else {
+        return "[tdbu] VEREDITO-TDBU sem TweakDB ou registry; updaterecord-ok=false".into();
+    };
+    let record = tweak_db_id("Items.GrenadeIncendiarySticky");
+    let flat = tweak_db_id("Items.GrenadeIncendiarySticky.deepWaterDepth");
+    let instancia = super::get_record_instance(t, record);
+    let getter = crate::rtti::resolve_func(&reg, "gamedataGrenade_Record", "DeepWaterDepth");
+    let ler_getter = || -> Option<f32> {
+        let rf = getter.as_ref()?;
+        let b = crate::rtti::call_func(rf, instancia as *mut core::ffi::c_void, &[])?;
+        Some(f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let versao = || *t.add(super::VERSION_BYTE_OFF);
+    let Some(off0) = offset(t as *const u8, flat) else {
+        return "[tdbu] VEREDITO-TDBU flat deepWaterDepth não achado; updaterecord-ok=false".into();
+    };
+    let antes = ler_getter();
+    let novo = if antes == Some(5.5) { 6.5f32 } else { 5.5 };
+    let mut dados = [0u8; 8];
+    dados[..4].copy_from_slice(&novo.to_le_bytes());
+    let Some(off_novo) = super::create_flat_value_by_id(t, flat, &dados, 8) else {
+        return "[tdbu] VEREDITO-TDBU valor novo não criado; updaterecord-ok=false".into();
+    };
+    let v0 = versao();
+    let reapontou = super::set_flat_offset_by_id(t, flat, off_novo as u32);
+    // Controle: sem a subida, o campo do record ainda tem o offset velho em cache (o getter devolve o valor de antes).
+    let sem_update = ler_getter();
+    let atualizou = super::update_record_by_id(record);
+    let v1 = versao();
+    let depois = ler_getter();
+    let voltou = super::set_flat_offset_by_id(t, flat, off0);
+    let atualizou_volta = super::update_record_by_id(record);
+    let volta = ler_getter();
+    let ok = !instancia.is_null() && antes.is_some() && reapontou && atualizou && depois == Some(novo) && voltou && atualizou_volta && volta == antes;
+    format!(
+        "[tdbu] VEREDITO-TDBU DeepWaterDepth() {antes:?}; flat re-apontado sem subir a versão {reapontou} -> getter {sem_update:?} (controle, \
+         esperado o de antes); UpdateRecord {atualizou}, versão +0x160 {v0:#04x} -> {v1:#04x} -> getter {depois:?} (esperado {novo}); volta \
+         {voltou}/{atualizou_volta} -> {volta:?}; updaterecord-ok={ok}"
     )
 }
 
@@ -324,7 +384,7 @@ unsafe fn rodar() -> String {
 
 const PADROES: &str = "Modifiers.BwmsTestePadroes270:\n  $type: ConstantStatModifier\n  value: 7\n";
 
-/// TweakXL `#14` (`~/.bwms-hook-tdb-padroes-teste`): um record de `$type` sem `$base` nasce com o valor padrão do tipo em cada flat (o
+/// Padrões do tipo (`~/.bwms-hook-tdb-padroes-teste`): um record de `$type` sem `$base` nasce com o valor padrão do tipo em cada flat (o
 /// `defaultValues` do TweakDB), e não com os valores do record vivo da classe usado como estrutura; o flat que o arquivo define fica com o
 /// valor do arquivo. Controle: o modelo tem pelo menos um flat fora do padrão, senão o teste não diria nada.
 pub(crate) fn tick_padroes() {
@@ -397,7 +457,7 @@ pub(crate) fn tick_padroes() {
     }
 }
 
-/// RED4ext `#345` (`~/.bwms-hook-tdb-remover-teste`): um clone de mod sai dos dois mapas do TweakDB (o `RecordExists` e o `GetRecord` do motor
+/// Remoção de record (`~/.bwms-hook-tdb-remover-teste`): um clone de mod sai dos dois mapas do TweakDB (o `RecordExists` e o `GetRecord` do motor
 /// deixam de achar, o array do tipo perde um), o registro esquece a genealogia, record do jogo é recusado, e o mesmo id volta a ser criado e
 /// removido (o nó livre do mapa por id é reusado).
 pub(crate) fn tick_remover() {
@@ -626,7 +686,7 @@ pub(crate) unsafe fn conferir_flat_referenciado(flat: &str, indice: &str, prop: 
 }
 
 /// `iconconf <record>`: o caminho que o jogo usa para o ícone do item (`"UIIcon." + iconPath`) chega a um `gamedataUIIcon_Record` vivo, e é
-/// o mesmo record que a propriedade `.icon` aponta (o `icon:` em linha do TweakXL, wiki "Item icons").
+/// o mesmo record que a propriedade `.icon` aponta (o `icon:` em linha do arquivo de tweak).
 pub(crate) unsafe fn conferir_icone(record: &str) -> String {
     let fila = super::arquivos_em_aplicacao();
     let Some(t) = singleton() else {

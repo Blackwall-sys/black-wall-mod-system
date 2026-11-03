@@ -1,10 +1,10 @@
-// ponte-entitybuilderwrapper.reds — Codeware `#8`/`#25`/`#130` (`EntityBuilderWrapper`, `EntityBuilderEvent`), API do BWMS sobre o `EntityBuilder` vivo.
+// ponte-entitybuilderwrapper.reds — `EntityBuilderWrapper`, `EntityBuilderEvent`: API do BWMS sobre o `EntityBuilder` vivo.
 //
 // O `Entity/Extract` sai do hook do corpo do job de componentes do builder (`0x100ca41e0`), antes da original; o evento entrega um
 // `EntityBuilderWrapper` que lê o builder real (layout do header conferido no desmonte do job no Mac) e trava o builder pelo `WeakPtr` a cada leitura —
 // com o builder morto, os getters devolvem vazio.
 //
-// Formas próprias do BWMS onde o corpus vanilla NÃO declara o tipo de retorno da referência (declarar tipo sem presença no corpus é a categoria do
+// Formas próprias do BWMS onde o corpus vanilla NÃO declara o tipo de retorno (declarar tipo sem presença no corpus é a categoria do
 // `CMesh`): `GetResourcePath()` no lugar de `GetResource()` (template e aparência), `GetDefinitionName()` no lugar de `GetDefinition()`,
 // `HasEntityParams()` no lugar de `GetEntityParams()`.
 

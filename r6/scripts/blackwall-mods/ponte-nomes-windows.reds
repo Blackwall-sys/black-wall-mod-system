@@ -1,7 +1,7 @@
-// ponte-nomes-windows.reds — nomes que os mods do Windows chamam (Codeware/TweakXL), sobre natives que o BWMS já tem com nome
-// próprio. Do Windows vem só a forma do plugue (nome + assinatura); o corpo é do BWMS. Mods-alvo: Virtual Atelier e Equipment-EX
-// (erros de compilação da F0, `tmp/f0-scc/`). O `module Codeware` não é declarado de propósito: `ModuleExists("Codeware")` segue
-// `false` e mod com `@if` nesse módulo fica no ramo que roda hoje (medido no scc em 2026-09-28).
+// ponte-nomes-windows.reds — nomes que os mods do Windows chamam, sobre natives que o BWMS já tem com nome
+// próprio. Do Windows vem só a forma do plugue (nome + assinatura); o corpo é do BWMS
+// (erros de compilação da F0, `tmp/f0-scc/`). O módulo raiz da fachada de versão não é declarado de propósito: o `ModuleExists`
+// dele segue `false` e mod com `@if` nesse módulo fica no ramo que roda hoje (medido no scc em 2026-09-28).
 //
 // Resultado de native vai para um `let` antes de comparar ou repassar (memórias bwms-comparacao-inline-native e
 // cp77-native-paramend-args-deslocados).
@@ -59,7 +59,7 @@ public static func GetRecords(type: CName) -> array<ref<TweakDBRecord>> {
   return saida;
 }
 
-// Codeware 1.21.1: posição do filho no widget composto, -1 se não for filho. O campo `children` não é declarado para script na 2.5, então
+// Posição do filho no widget composto, -1 se não for filho. O campo `children` não é declarado para script na 2.5, então
 // a busca vai pelos natives do jogo.
 @addMethod(inkCompoundWidget)
 public func GetChildIndex(child: wref<inkWidget>) -> Int32 {

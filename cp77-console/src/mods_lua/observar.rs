@@ -1,4 +1,4 @@
-//! hooks.rs — Observe / ObserveAfter / Override: o CORAÇÃO do CET.
+//! hooks.rs — Observe / ObserveAfter / Override: o CORAÇÃO da camada Lua.
 //!
 //! Roteia chamadas de método do jogo para callbacks Lua. O insight: o executor
 //! universal (@0x2173120) é chamado com `(CBaseFunction*, ctx, frame, res, retType)`,
@@ -49,7 +49,7 @@ struct Entry {
     /// resolveu), = casa QUALQUER classe (fallback p/ hooks por nome puro).
     ///
     /// É Vec (não u64) porque o MESMO método pode ser vigiado em classes DIFERENTES (ex.: o
-    /// NativeSettings observa `OnMenuItemActivated` em PauseMenuGameController E em
+    /// mod de menu de opções observa `OnMenuItemActivated` em PauseMenuGameController E em
     /// gameuiMenuItemListGameController) — a Entry é indexada pelo CName do método, então as duas
     /// compartilham. Com u64 só a 1ª classe valia e a ativação do menu principal era pulada.
     ///
@@ -151,10 +151,10 @@ pub unsafe fn drain_pending(reg: &Registry) {
         DIRTY.store(true, Ordering::Relaxed);
     }
     WATCH_COUNT.store(map.len(), Ordering::Relaxed);
-    crate::veredito_dev!("[cet] Observe registrados: {} método(s)", map.len());
+    crate::veredito_dev!("[lua] Observe registrados: {} método(s)", map.len());
     // O `cp77-watch.txt` era export pra SONDA FRIDA (morta) ler o set vigiado — sem leitor hoje
     // (o dispatch in-process usa WATCH_COUNT + o map direto). Export + log só em dev: em jogo
-    // normal o registro dos ~21 hooks do NativeSettings roda CALADO. `swap` roda antes do `&&`
+    // normal o registro dos ~21 hooks de um mod de menu de opções roda CALADO. `swap` roda antes do `&&`
     // (curto-circuito) → DIRTY sempre reseta, sem mudança de semântica.
     if DIRTY.swap(false, Ordering::Relaxed) && crate::dev_mode() {
         let mut s = String::new();
@@ -246,7 +246,7 @@ pub unsafe fn dispatch_before(
             // casa qualquer classe (hooks por nome puro seguem funcionando). Tudo gum-safe.
             // CAMINHO A — relaxação TARGETED do filtro: os métodos de ATIVAÇÃO de item de menu
             // (OnMenuItemActivated/HandleMenuItemActivate) BYPASSAM o filtro de classe. Justificativa:
-            // o callback do NativeSettings JÁ checa `data.label=="Mods"` sozinho — over-fire é
+            // o callback do mod de menu de opções JÁ checa `data.label=="Mods"` sozinho — over-fire é
             // INOFENSIVO (só liga/desliga fromMods pelo label) — e o filtro pode pular ctx VÁLIDO se
             // `class_of` cair no fallback e devolver a classe BASE (rtti.rs:549). Não toca os demais
             // métodos (a proteção de overload segue onde importa).
@@ -279,13 +279,13 @@ pub unsafe fn dispatch_before(
                 primeiro_disparo(mcname, &e.name);
             }
             for k in &e.before {
-                crate::cet::call_hook(k, ctx, &params);
+                crate::mods_lua::call_hook(k, ctx, &params);
             }
             if e.over.is_empty() {
                 crate::trace(&format!("{}:done-observe", e.name));
                 return e.suppress;
             }
-            // Override (CET) flag-based: `call_hook_override` chama o callback UMA vez com
+            // Override flag-based: `call_hook_override` chama o callback UMA vez com
             // (this, ...args, wrapped), captura se ele chamou `wrapped()` (→ WRAPPED_CALLED) E
             // o valor de retorno. Se for override-TOTAL (sem wrapped) de retorno POD de largura
             // conhecida, JÁ grava o `res` (aOut) com a largura certa e sinaliza suppress; senão
@@ -294,7 +294,7 @@ pub unsafe fn dispatch_before(
             WRAPPED_CALLED.store(false, Ordering::Relaxed);
             let mut any_suppress_value = false;
             for k in &e.over {
-                let (_w, sv) = crate::cet::call_hook_override(k, ctx, &params, func, res);
+                let (_w, sv) = crate::mods_lua::call_hook_override(k, ctx, &params, func, res);
                 any_suppress_value |= sv;
             }
             // SUPPRESS — SEGURO porque o nosso `exec_replacement` controla o retorno: no suppress
@@ -335,7 +335,7 @@ pub unsafe fn dispatch_after(mcname: u64, ctx: *mut c_void) {
                 primeiro_disparo(mcname, &e.name);
             }
             for k in &e.after {
-                crate::cet::call_hook(k, ctx, &[]); // ObserveAfter: args = futuro
+                crate::mods_lua::call_hook(k, ctx, &[]); // ObserveAfter: args = futuro
             }
         }
     }
@@ -380,7 +380,7 @@ pub unsafe fn dispatch_override(mcname: u64, ctx: *mut c_void, res: *mut c_void)
                 return;
             }
             for k in &e.over {
-                crate::cet::call_hook_ret(k, ctx, res);
+                crate::mods_lua::call_hook_ret(k, ctx, res);
             }
         }
     }
@@ -392,6 +392,6 @@ fn primeiro_disparo(mcname: u64, nome: &str) {
     let mut v = VISTOS.lock().unwrap_or_else(|e| e.into_inner());
     if !v.contains(&mcname) {
         v.push(mcname);
-        crate::veredito_dev!("[cet] Observe disparou: {nome}");
+        crate::veredito_dev!("[lua] Observe disparou: {nome}");
     }
 }

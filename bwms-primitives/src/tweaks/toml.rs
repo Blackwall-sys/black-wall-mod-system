@@ -1,6 +1,6 @@
 //! Parser de TOML mínimo para os tweaks declarativos — front-end alternativo ao
-//! [`crate::tweakxl::yaml`]. Produz a **mesma** AST ([`yaml::Node`]), então o
-//! [`crate::tweakxl::interpret`] roda sem nenhuma mudança. Zero dependências (só
+//! [`crate::tweaks::yaml`]. Produz a **mesma** AST ([`yaml::Node`]), então o
+//! [`crate::tweaks::interpret`] roda sem nenhuma mudança. Zero dependências (só
 //! `std`), igual ao `yaml.rs`.
 //!
 //! Subset suportado (suficiente p/ os tweaks offline):
@@ -22,7 +22,7 @@
 //! NÃO suporta (erro claro, sem parse silencioso errado): array-of-tables
 //! `[[x]]`, strings multi-linha `"""`, datetimes, dotted-keys aninhadas.
 
-use crate::tweakxl::yaml::{Kind, Node};
+use crate::tweaks::yaml::{Kind, Node};
 
 /// Parseia um documento TOML em um [`Node`] raiz (sempre um mapa, como no YAML).
 pub fn parse(text: &str) -> Result<Node, String> {

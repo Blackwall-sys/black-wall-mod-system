@@ -17,11 +17,11 @@ fn main() {
     let Some(caminho) = std::env::args().nth(1) else { return eprintln!("uso: ops_do_yaml <arquivo.yaml>") };
     let texto = std::fs::read_to_string(&caminho).unwrap_or_else(|e| panic!("{caminho}: {e}"));
     let ops = if caminho.ends_with(".tweak") {
-        bwms_primitives::tweakxl::tweak_source::parse(&texto)
+        bwms_primitives::tweaks::tweak_source::parse(&texto)
     } else {
-        bwms_primitives::tweakxl::yaml::parse(&texto)
-            .and_then(|r| bwms_primitives::tweakxl::template::expand(&r))
-            .and_then(|r| bwms_primitives::tweakxl::interpret_from(&r, &caminho))
+        bwms_primitives::tweaks::yaml::parse(&texto)
+            .and_then(|r| bwms_primitives::tweaks::template::expand(&r))
+            .and_then(|r| bwms_primitives::tweaks::interpret_from(&r, &caminho))
     };
     match ops {
         Ok(ops) => {

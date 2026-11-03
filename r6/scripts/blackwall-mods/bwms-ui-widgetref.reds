@@ -1,4 +1,4 @@
-// bwms-ui-widgetref.reds — referência de widget (`inkWidgetRef` e as filhas tipadas) a partir de um widget criado pelo mod (catálogo Codeware #95).
+// bwms-ui-widgetref.reds — referência de widget (`inkWidgetRef` e as filhas tipadas) a partir de um widget criado pelo mod.
 //
 // O jogo só preenche `inkWidgetRef` pelo editor: é o campo `edit` de um controller, ligado ao widget na hora em que a biblioteca é instanciada.
 // Script não tem como montar um pra um widget criado em runtime, e metade da API de UI do jogo (tudo que recebe `inkTextRef`, `inkImageRef`,

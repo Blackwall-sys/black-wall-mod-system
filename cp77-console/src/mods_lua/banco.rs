@@ -1,5 +1,5 @@
-//! `db` dos mods CET: o SQL que os mods usam (`CREATE TABLE`, `INSERT … VALUES`, `INSERT … SELECT … WHERE NOT EXISTS (…)`, `UPDATE … SET …
-//! WHERE`, `SELECT … FROM … WHERE`, `DELETE FROM … WHERE`), um banco por mod gravado em `<mod>/db.bwms`. O CET usa SQLite; aqui é Rust.
+//! `db` dos mods Lua: o SQL que os mods usam (`CREATE TABLE`, `INSERT … VALUES`, `INSERT … SELECT … WHERE NOT EXISTS (…)`, `UPDATE … SET …
+//! WHERE`, `SELECT … FROM … WHERE`, `DELETE FROM … WHERE`), um banco por mod gravado em `<mod>/db.bwms`. Os mods esperam SQLite; aqui é Rust.
 //! Semântica do SQLite onde o mod depende dela: `exec` com vários comandos para no primeiro erro (o `CREATE TABLE` de uma tabela que já
 //! existe falha e pula os `INSERT` do mesmo `exec`), `true`/`false` valem 1/0 e `"texto"` sem coluna desse nome é texto.
 
@@ -651,10 +651,10 @@ fn desescapar(s: &str) -> String {
 mod testes {
     use super::*;
 
-    /// O ciclo do JB Third Person: criação com dados, `CREATE` repetido que aborta o resto do `exec`, `INSERT … WHERE NOT EXISTS`, `UPDATE`
+    /// O ciclo de um mod de câmera: criação com dados, `CREATE` repetido que aborta o resto do `exec`, `INSERT … WHERE NOT EXISTS`, `UPDATE`
     /// e `SELECT` por nome, e o arquivo lido de volta igual.
     #[test]
-    fn ciclo_do_jb() {
+    fn ciclo_do_mod_de_camera() {
         let mut b = Banco::em_memoria();
         let criar = "CREATE TABLE settings(id, name, value);\n INSERT INTO settings VALUES(0, \"isTppEnabled\", false);\n INSERT INTO settings VALUES(1, \"weaponOverride\", true);";
         b.exec(criar).unwrap();

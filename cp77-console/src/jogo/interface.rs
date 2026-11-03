@@ -37,7 +37,7 @@ pub(crate) const ASYNC_SPAWN_FROM_EXTERNAL_PROLOGO: u32 = 0xd101_83ff;
 pub(crate) const ENTREGA_DO_SPAWN_ASSINCRONO_VM: u64 = 0x1_0436_8f34;
 pub(crate) const ENTREGA_DO_SPAWN_ASSINCRONO_PROLOGO: u32 = 0xd101_43ff;
 
-/// Bytes de liga/desliga, em `__common`, dos pedaços nativos do 2.5 que repetem o ArchiveXL e o Codeware: `Item:Controller` no spawn e na entrega
+/// Bytes de liga/desliga, em `__common`, dos pedaços nativos do 2.5 que repetem o que o BWMS faz: `Item:Controller` no spawn e na entrega
 /// (`0x109d03e78`), anexar a árvore no `Reparent`/`AddChild` e filtrar o `OnInitialize` legado (`0x109d03e64`) e o `OnInputKey` antes do
 /// `ProcessCharacterEvent` (`0x109d03e68`). No binário só escrevem neles os pares liga/desliga (`0x104156600`/`0x104156610`, `0x10415413c`/`0x10415414c`,
 /// `0x104154b2c`/`0x104154b3c`), slots `+0x20`/`+0x28` de vtables (`0x107bea168`, `0x107bea2d8`, `0x107bea428`) que nenhum código nem fixup cita: sem
@@ -81,8 +81,8 @@ pub(crate) fn bytes_nativos_tick(com_player: bool) {
     );
 }
 
-/// Cache do ponteiro `Red::InkSystem*` já cross-validado nesta sessão de boot (2026-08-14,
-/// Codeware `#100`/`#120`) — `ink_system()` grava aqui na 1ª descoberta bem
+/// Cache do ponteiro `Red::InkSystem*` já cross-validado nesta sessão de boot (2026-08-14)
+/// — `ink_system()` grava aqui na 1ª descoberta bem
 /// sucedida pra nunca re-varrer a BSS a cada chamada de `GetLayers`/`GetLayer`/etc. 0 = ainda
 /// não resolvido nesta sessão.
 pub(crate) static INKSYSTEM_CACHED: AtomicU64 = AtomicU64::new(0);
@@ -91,10 +91,9 @@ pub(crate) static INKSYSTEM_CACHED: AtomicU64 = AtomicU64::new(0);
 /// "isto PARECE um `Red::InkSystem*` vivo?", read-only, sem crash possível (só
 /// `ganchos::is_readable` + reads).
 ///
-/// Layout confirmado no header vendorizado REAL (`enablers/Codeware/src/Red/InkSystem.hpp`,
-/// não chutado): `inputWidget: WeakHandle<inkWidget>@0x2E8` (16B: {instance*,rc_block*}),
+/// Layout confirmado (não chutado): `inputWidget: WeakHandle<inkWidget>@0x2E8` (16B: {instance*,rc_block*}),
 /// `keyboardState: KeyboardState@0x2F8` (u16 bitfield, só 6 bits reais + 10 bits SEMPRE
-/// reservados/zero, `enablers/Codeware/src/Red/Input.hpp`), `requestsHandler:
+/// reservados/zero), `requestsHandler:
 /// WeakHandle<ISystemRequestsHandler>@0x370` (16B), `layerManagers:
 /// DynArray<SharedPtr<InkLayerManager>>@0x380` (16B: {entries*,cap:u32,size:u32}).
 /// `InkSystem::Instance` é `Core::RawPtr` (ponteiro GLOBAL cru, MESMA categoria de
@@ -116,15 +115,15 @@ pub(crate) static INKSYSTEM_CACHED: AtomicU64 = AtomicU64::new(0);
 ///    parece ponteiro mas não aponta pra memória mapeada é descartado na hora, não só aceito
 ///    como "ponteiro plausível" (o critério antigo, que nunca lia o que o ponteiro apontava).
 /// 2. **Invariante de nulidade PAREADA nos 2 `WeakHandle`** (`inputWidget`/`requestsHandler`):
-///    por `SharedPtrBase<T>` (`RED4ext.SDK/Memory/SharedPtr.hpp`), TODO construtor real seta
+///    por `SharedPtrBase<T>`, TODO construtor real seta
 ///    `instance`/`refCount` JUNTOS — nunca um null e o outro não (ctor default: os 2 null;
 ///    copy/move/swap: os 2 sempre movidos/copiados como par). Exigir `(instance==0) ==
 ///    (refCount==0)` elimina candidatos onde só 1 dos 2 slots vira ponteiro por coincidência.
 /// 3. **`RefCnt` plausível quando presente**: se `refCount!=0`, lê os 2 `u32`
-///    (`strongRefs`/`weakRefs`, `RED4ext.SDK/Memory/SharedPtr.hpp::RefCnt`) e exige valores
+///    (`strongRefs`/`weakRefs` do `RefCnt`) e exige valores
 ///    pequenos e sãos (`<=10_000` cada) — um refcount real nunca tem bilhões de referências.
 /// 4. **`keyboardState` — os 10 bits reservados TÊM que ser 0**: `Red::KeyboardState`
-///    (`Red/Input.hpp`) só define 6 bits reais (`shiftLeft/Right`,`controlLeft/Right`,
+///    só define 6 bits reais (`shiftLeft/Right`,`controlLeft/Right`,
 ///    `altLeft/Right`); os outros 10 (`b10`) são padding NUNCA escrito pelo motor — exigir
 ///    `kb & 0xFC00 == 0` é invariante estrutural rígido, não heurística frouxa.
 /// 5. **`layerManagers` NÃO-VAZIO** (`cap>=1`, ERA `cap>=0`): a lista de layer managers
@@ -229,7 +228,7 @@ pub(crate) unsafe fn inksystem_shape_matches(candidate: u64) -> Option<(u16, u32
     Some((kb, lm_cap, lm_size))
 }
 
-/// `ink_system(reg)` (2026-08-14, Codeware `#100`/`#120`, continuação da sessão que
+/// `ink_system(reg)` (2026-08-14, continuação da sessão que
 /// CONFIRMOU `Red::InkSystem::Get()` via `findinksystembss`+`inksystemvalidate`) — versão
 /// CHAMÁVEL/CACHEADA do mesmo mecanismo de descoberta decisivo (varredura de forma na BSS +
 /// cross-validação contra `BwmsGetSystemRequestsHandler()` no MESMO instante), pra qualquer

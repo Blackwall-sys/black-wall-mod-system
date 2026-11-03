@@ -1,7 +1,7 @@
-// ponte-casts.reds — `Utils/Casts.reds` do Codeware (item #63) e os utilitários de hash da mesma família.
-// `Cast()` no Codeware é açúcar sobre identidade de 8 bytes: CName/CRUID/NodeRef/EntityID/TweakDBID são todos um hash/u64.
-// Aqui cada direção tem nome próprio e explícito: o `scc` resolve sobrecarga só por PARÂMETRO, não por tipo de retorno, e o
-// `Cast(value: Uint64) -> X` do Codeware depende disso (`let cruid: CRUID = BwmsCast(h)` escolheria o 1º overload declarado).
+// ponte-casts.reds — conversões por hash e os utilitários de hash da mesma família.
+// `Cast()` é açúcar sobre identidade de 8 bytes: CName/CRUID/NodeRef/EntityID/TweakDBID são todos um hash/u64.
+// Aqui cada direção tem nome próprio e explícito: o `scc` resolve sobrecarga só por PARÂMETRO, não por tipo de retorno, e um
+// `Cast(value: Uint64) -> X` genérico depende disso (`let cruid: CRUID = BwmsCast(h)` escolheria o 1º overload declarado).
 native func BwmsHashToName(hash: Uint64) -> CName
 native func BwmsNameToHash(value: CName) -> Uint64
 native func BwmsHashToCRUID(hash: Uint64) -> CRUID
@@ -22,34 +22,33 @@ public func BwmsEntityIDToNodeRef(value: EntityID) -> NodeRef = BwmsHashToNodeRe
 public func BwmsTweakDBIDToUint64(value: TweakDBID) -> Uint64 = TDBID.ToNumber(value)
 // `Uint64->TweakDBID`: a mesma identidade de 8 bytes dos outros pares.
 native func BwmsHashToTweakDBID(hash: Uint64) -> TweakDBID
-// `ResRef` é um `ResourcePath` (hash) só; `GetPath()` do `ResourceAsyncRef` do Codeware é identidade pura. Nome próprio hash<->ResRef
-// (o `ResourceAsyncRef` do Codeware não é modelado no BWMS).
+// `ResRef` é um `ResourcePath` (hash) só; `GetPath()` de um `ResourceAsyncRef` é identidade pura. Nome próprio hash<->ResRef
+// (o `ResourceAsyncRef` não é modelado no BWMS).
 native func BwmsHashToResRef(hash: Uint64) -> ResRef
 native func BwmsResRefToHash(value: ResRef) -> Uint64
 
 // `PersistentID.ToHash` (item #31) — algoritmo de `PersistentID::GetHash()`, ver a nota do `PersistentID` mais abaixo.
 native func BwmsPersistentIDHash(entityHash: Uint64, componentHash: Uint64) -> Uint64
 
-// Codeware `#69` (`TweakDBID.reds`, `@addMethod(TDBID) FromNumber`): nome do Codeware sobre `BwmsHashToTweakDBID`.
+// `@addMethod(TDBID) FromNumber`: o nome que os mods chamam, sobre `BwmsHashToTweakDBID`.
 @addMethod(TDBID)
 public static func FromNumber(number: Uint64) -> TweakDBID = BwmsHashToTweakDBID(number)
 
-// Codeware `#65` (`Utils/EntityID.reds`). O Codeware passa por `EntityID.FromHash` (método só dele, não vanilla); aqui vai direto
-// no destino. Sobrecarga por PARÂMETRO (Uint64 vs NodeRef), que o `scc` resolve.
+// `ToEntityID`: vai direto no destino, sem passar por `EntityID.FromHash` (que não é vanilla). Sobrecarga por PARÂMETRO (Uint64 vs NodeRef), que o `scc` resolve.
 public func ToEntityID(value: Uint64) -> EntityID = BwmsHashToEntityID(value)
 public func ToEntityID(value: NodeRef) -> EntityID = BwmsNodeRefToEntityID(value)
 
-// Codeware `#26` (`Entity/EntityID.reds`): `EntityID.FromHash`/`.ToHash`. Os nomes de MÉTODO são do Codeware (zero colisão com o
-// corpus vanilla). Diferença de assinatura: `EntityID` por valor, não `script_ref<EntityID>`; do lado do mod a chamada é igual,
+// `EntityID.FromHash`/`.ToHash`. Os nomes de MÉTODO são os que os mods chamam (zero colisão com o
+// corpus vanilla). Assinatura: `EntityID` por valor, não `script_ref<EntityID>`; do lado do mod a chamada é igual,
 // `EntityID.ToHash(id)`.
 @addMethod(EntityID)
 public static func FromHash(hash: Uint64) -> EntityID = BwmsHashToEntityID(hash)
 @addMethod(EntityID)
 public static func ToHash(id: EntityID) -> Uint64 = BwmsEntityIDToHash(id)
 
-// Codeware `#31` (`Entity/PersistentID.reds`) — `ForEntity`/`ForComponent`/`ToHash`.
+// `PersistentID` — `ForEntity`/`ForComponent`/`ToHash`.
 // `ForEntity` é o `Cast(EntityID)->PersistentID` vanilla (`orphans.script:16770`): devolve um `PersistentID` do próprio motor.
-// `ForComponent` recebe o componente (`ref<IComponent>`), não `(id: EntityID, component: CName)` como o Codeware, que depende de um
+// `ForComponent` recebe o componente (`ref<IComponent>`), não `(id: EntityID, component: CName)`, que dependeria de um
 // `HashMap` interno: o `PersistentID` sai do `GameComponent.GetPersistentID()` vanilla, calculado pelo motor. Componente que não é
 // `GameComponent` (a maioria dos `entMeshComponent`) volta com `PersistentID` indefinido — o motor não tem um pra ele.
 // `ToHash` segue o `PersistentID::GetHash()` do header gerado da reflection (`gamePersistentID.hpp`, MurmurHash64A-like,
@@ -75,9 +74,9 @@ public static func ForComponent(component: ref<IComponent>) -> PersistentID {
 
 // `String↔LocalizationString` (parte do #63) mora em `ponte-localizationstring.reds`.
 
-// Codeware `Utils/CName.reds`/`Utils/CRUID.reds`/`Utils/NodeRef.reds` — os nomes GLOBAIS do Codeware (funções soltas, não
-// `@addMethod`), sem colisão com o corpus vanilla. `CreateNodeRef(path: String)` recebe `String` por valor (o Codeware usa
-// `script_ref<String>`).
+// CName/CRUID/NodeRef — os nomes GLOBAIS que os mods chamam (funções soltas, não
+// `@addMethod`), sem colisão com o corpus vanilla. `CreateNodeRef(path: String)` recebe `String` por valor, não
+// `script_ref<String>`.
 public func HashToName(value: Uint64) -> CName = BwmsHashToName(value)
 public func NameToHash(value: CName) -> Uint64 = BwmsNameToHash(value)
 public func ToName(value: Uint64) -> CName = BwmsHashToName(value)
@@ -96,6 +95,6 @@ public func ToNodeRef(value: EntityID) -> NodeRef = BwmsEntityIDToNodeRef(value)
 public func CreateNodeRef(path: String) -> NodeRef = BwmsCreateNodeRef(path)
 public func ToNodeRef(value: String) -> NodeRef = BwmsCreateNodeRef(value)
 
-// Codeware `#101` (`GameInstance.GetSystemRequestsHandler()`): o handler de pedidos do sistema, pelo mesmo caminho que os menus do
+// `GameInstance.GetSystemRequestsHandler()`: o handler de pedidos do sistema, pelo mesmo caminho que os menus do
 // jogo usam (`GetSystemRequestsHandler()` de um `inkMenuScenario`), como função global do BWMS.
 public func BwmsGetSystemRequestsHandler() -> wref<inkISystemRequestsHandler> = new inkMenuScenario().GetSystemRequestsHandler()

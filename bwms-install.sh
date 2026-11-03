@@ -110,9 +110,9 @@ if [ "$MODE" = install ] && [ -f "$FINGERPRINT" ]; then
 fi
 
 # ---------------------------------------------------------------- third-party framework gate
-# Decision of 2026-10-27: BWMS already does what TweakXL, ArchiveXL and Codeware do. A macOS port of one of them (red4ext/plugins/<name>/,
-# where the macOS RED4ext loads plugins) or its scripts (r6/scripts/<name>/, the Windows copy included) fights BWMS over the same script
-# classes and hooks. Install refuses until it is removed; uninstall always works.
+# Decision of 2026-10-27: another script framework in the game, as a plugin (red4ext/plugins/<name>/) or as scripts
+# (r6/scripts/<name>/, the Windows copy included), fights BWMS over the same script classes and hooks. Install refuses until it is
+# removed; uninstall always works.
 if [ "$MODE" = install ]; then
   terceiros=""
   for nome in TweakXL ArchiveXL Codeware; do
@@ -125,9 +125,8 @@ if [ "$MODE" = install ]; then
     echo "STOPPED — another mod framework is installed in this game:"
     printf "%b" "$terceiros"
     echo
-    echo "BWMS already does what TweakXL, ArchiveXL and Codeware do, under the same names mods use. Two of them in the same"
-    echo "game fight over the same classes and hooks: scripts stop compiling or the game crashes. Move the folders above to"
-    echo "the Trash and run the installer again. Nothing was modified: your game is untouched."
+    echo "It and BWMS fight over the same classes and hooks in the same game: scripts stop compiling or the game crashes."
+    echo "Move the folders above to the Trash and run the installer again. Nothing was modified: your game is untouched."
     echo "───────────────────────────────────────────────────────────────"
     exit 1
   fi
@@ -487,7 +486,7 @@ if [ -n "$REDS_SRC" ]; then
   DEST="$GAME_DIR/r6/scripts/blackwall-mods"
   mkdir -p "$DEST"
   # Files an earlier BWMS installed and this version no longer ships. The install copies file by file,
-  # so without this list an old file stays behind on update: codeware-ui-customcontroller.reds from
+  # so without this list an old file stays behind on update: one of the files from
   # 0.1.3 declares the same `module Codeware.UI` classes as ponte-modulo-ui.reds, and no script
   # compiles while both are there. The list is explicit on purpose: other redscript mods may keep
   # their own files in this folder, and those are not ours to remove.
@@ -619,7 +618,9 @@ if [ -n "$REDS_SRC" ]; then
       tweakxl-facade.reds \
       tweakxl-scriptinterface.reds \
       ponte-codeware-ui.reds \
-      bwms-mod-settings.reds ; do
+      bwms-mod-settings.reds \
+      bwms-security-reset.reds \
+      bwms-district.reds ; do
     [ -f "$DEST/$legado" ] && rm -f "$DEST/$legado" && echo "  · removed (from a previous version): $legado"
   done
   cp -f "$REDS_SRC/blackwall-mods/"*.reds "$DEST/" 2>/dev/null || true

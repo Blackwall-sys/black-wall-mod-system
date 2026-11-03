@@ -48,12 +48,11 @@ pub(crate) unsafe extern "C" fn tramp_tpp_state(_c: *mut c_void, _f: *mut c_void
 
 
 
-/// Codeware `#133` (`DynamicEntityTarget::Matches`, 2026-08-12) — lê o `EntityID` (hash `u64`) do
-/// campo REAL `Entity::entityID`, offset confirmado no header vendorizado (`enablers/Codeware/src/
-/// Red/Entity.hpp`: `using EntityID = Core::OffsetPtr<0x48, Red::EntityID>;`). É campo de DADO, não
+/// `DynamicEntityTarget::Matches` (2026-08-12) — lê o `EntityID` (hash `u64`) do
+/// campo REAL `Entity::entityID`, em `+0x48`. É campo de DADO, não
 /// slot de vtable — não sofre o shift Itanium Mac=Windows+0x08 (regra já estabelecida neste projeto
 /// pra offsets de campo, ex. `Vehicle::RecordID@+0x638` acima; o do puppet é +0x25C no Mac, não o +0x260 do header). `Red::
-/// EntityID` é `{hash: u64}` (RED4ext.SDK `entEntityID.hpp`, já confirmado/usado pelo
+/// EntityID` é `{hash: u64}` (já confirmado/usado pelo
 /// `DynamicEntitySystem`/`#73` — mesma chave `id` que `dynent_tags()` já indexa) — leitura direta
 /// de 8 bytes, sem RTTI/vtable nenhum (mais barata e mais segura que `categoria_e_record`, que resolve a classe pelo RTTI).
 pub(crate) unsafe fn entity_id_hash(entity_ptr: *mut c_void) -> Option<u64> {
@@ -78,10 +77,10 @@ pub(crate) unsafe fn event_component_ptr(args: &[rtti::Arg]) -> Option<*mut c_vo
 
 /// Coleta o par de critérios `(key, action)` de todos os `InputTarget` em `target_ptrs` — busca
 /// por VALOR em `INPUTTARGET_STATES`, nunca dereferencia o objeto C++ (mesma técnica dos outros 3
-/// filtros). `IK_None`/`IACT_None`, o não-setado da referência, saem como `None`. Um alvo
+/// filtros). `IK_None`/`IACT_None`, o não-setado do filtro, saem como `None`. Um alvo
 /// `.Axis(axis, threshold)` entra com ação `None`: o 4º campo dele é
 /// `threshold` em bits, NÃO um `action` — ler aquilo como enum compararia lixo (ver
-/// `InputTargetCriterion`). Isso reproduz o C++, onde `Axis()` deixa `action` no default.
+/// `InputTargetCriterion`). O alvo de eixo não filtra por ação.
 pub(crate) unsafe fn inputtarget_criteria(target_ptrs: &[usize]) -> Vec<(Option<u32>, Option<u32>)> {
     if target_ptrs.is_empty() {
         return Vec::new();
@@ -137,8 +136,8 @@ pub(crate) static CAMINHO_CASA_CRITERIOS: AtomicU64 = AtomicU64::new(0);
 #[cfg(feature = "devtools")]
 pub(crate) static CAMINHO_CASA_PADRAO: AtomicU64 = AtomicU64::new(0);
 
-/// Caminho do evento contra o do alvo. Com texto registrado com `*` ou `regex:`, o padrão sobre o texto do caminho do evento: sem texto não casa, como
-/// na referência (`ResourceTarget.hpp:33`), e padrão recusado também não. Sem padrão, hash igual.
+/// Caminho do evento contra o do alvo. Com texto registrado com `*` ou `regex:`, o padrão sobre o texto do caminho do evento: sem texto não casa
+/// (padrão não decide sobre hash), e padrão recusado também não. Sem padrão, hash igual.
 // TODO: o padrão é compilado a cada evento. Guardar o `CompiledResourceTarget` por hash só depois que `CAMINHO_CASA_PADRAO` (comando `bateria`)
 // mostrar o ramo vivo num boot sem o teste c6, que hoje é o único a registrar texto de padrão.
 pub(crate) fn caminho_casa(alvo: u64, evento: u64) -> bool {
@@ -169,8 +168,8 @@ pub(crate) unsafe fn event_resource_path(args: &[rtti::Arg]) -> Option<u64> {
         .and_then(|states| states.iter().rev().find(|(p, _)| *p == inst as usize).map(|(_, path)| *path))
 }
 
-/// Alvos `inkWidgetTarget` entre os alvos do handler, como `(libraryPath, itemName, controllerType)`; valor 0 é o não-setado da referência
-/// (`if (libraryPath && ...)`, `InkWidgetTarget.hpp:16-24`) e sai `None`.
+/// Alvos `inkWidgetTarget` entre os alvos do handler, como `(libraryPath, itemName, controllerType)`; valor 0 é o não-setado da fábrica
+/// e sai `None`.
 pub(crate) fn inkwidgettarget_alvos(target_ptrs: &[usize]) -> Vec<(Option<u64>, Option<u64>, Option<u64>)> {
     let Ok(states) = INKWIDGETTARGET_STATES.lock() else { return Vec::new() };
     let setado = |v: u64| (v != 0).then_some(v);
@@ -234,7 +233,7 @@ pub(crate) enum FamiliaDoAlvo {
     Widget,
 }
 
-/// `Supports` de cada família na referência.
+/// Eventos que cada família de alvo sabe filtrar; os outros passam pelo alvo sem consulta.
 pub(crate) fn familia_suporta(f: FamiliaDoAlvo, t: TipoDoEvento) -> bool {
     use TipoDoEvento::*;
     match f {
@@ -291,7 +290,7 @@ pub(crate) fn familia_do_alvo(p: usize) -> Option<FamiliaDoAlvo> {
 }
 
 pub(crate) fn campos_do_alvo_de_entidade(p: usize) -> CamposDoAlvoDeEntidade {
-    // Valor 0 é o não-setado da referência (`if (entityID && ...)`, `if (recordID)`, `if (appearancePath || definitionName)`; `EntityTarget.hpp:25-109`).
+    // Valor 0 é o não-setado de cada fábrica (`EntityTarget.ID(0)`, `.Definition(0, 0)`): não vira filtro de valor 0.
     let setado = |v: u64| (v != 0).then_some(v);
     let mut c = CamposDoAlvoDeEntidade::default();
     if let Ok(s) = ENTITYTARGET_STATES.lock() {
@@ -316,10 +315,10 @@ pub(crate) fn campos_do_alvo_de_entidade(p: usize) -> CamposDoAlvoDeEntidade {
 /// despacho nunca casa e o alvo bloqueia todo evento; 0 continua sendo o critério não-setado.
 pub(crate) const CLASSE_NAO_RESOLVIDA: u64 = u64::MAX;
 
-/// Valor que as fábricas `EntityTarget.Type` e `ResourceTarget.Type` gravam: a classe de `nome` resolvida uma vez, como o `GetClass` da fábrica
-/// da referência (`EntityTarget.hpp:175`, `ResourceTarget.hpp:92`), e o despacho compara ponteiro por evento. `n"None"` (hash 0) fica 0, o
-/// não-setado. Nome que não resolve vira `CLASSE_NAO_RESOLVIDA` e bloqueia: a referência guarda nulo e desliga o filtro, e o BWMS não copia isso
-/// (F1-02, selftests c6 e 134). O veredito sai 1× por alvo, porque a fábrica roda uma vez por alvo.
+/// Valor que as fábricas `EntityTarget.Type` e `ResourceTarget.Type` gravam: a classe de `nome` resolvida uma vez na fábrica, e o despacho
+/// compara ponteiro por evento. `n"None"` (hash 0) fica 0, o não-setado. Nome que não resolve vira `CLASSE_NAO_RESOLVIDA` e bloqueia: guardar
+/// nulo desligaria o filtro e o handler dispararia para toda entidade (F1-02, selftests c6 e 134). O veredito sai 1× por alvo, porque a
+/// fábrica roda uma vez por alvo.
 pub(crate) unsafe fn classe_do_alvo(nome: u64, fabrica: &str) -> u64 {
     if nome == 0 {
         return 0;
@@ -335,76 +334,100 @@ pub(crate) unsafe fn classe_do_alvo(nome: u64, fabrica: &str) -> u64 {
     CLASSE_NAO_RESOLVIDA
 }
 
-/// `recordID` de um device como a referência: propriedade `controller` do device, o estado persistente dele (`GetPS`) e a propriedade
-/// `tweakDBRecord` do estado.
+/// `u64` da propriedade `nome` de `obj`, pelo RTTI da classe dele (propriedade de script mora no holder de `obj+0x38`).
+unsafe fn propriedade_u64(obj: *mut c_void, nome: &str) -> Option<u64> {
+    let (voff, _, holder) = rtti::resolve_prop_in_class(rtti::class_of(obj), nome)?;
+    let campo = rtti::field_ptr(obj, voff, holder);
+    if campo.is_null() {
+        return None;
+    }
+    crate::memoria::read_u64(campo as usize)
+}
+
+/// Record de um device: o `tweakDBRecord` do estado persistente que o `GetPS` do `controller` devolve.
 pub(crate) unsafe fn record_do_device(device: *mut c_void) -> Option<u64> {
-    let valor = |obj: *mut c_void, campo: &str| -> Option<u64> {
-        let (off, _, no_holder) = rtti::resolve_prop_in_class(rtti::class_of(obj), campo)?;
-        let base = if no_holder { read_u64_field(obj, 0x38)? as *mut c_void } else { obj };
-        if base.is_null() {
-            return None;
-        }
-        read_u64_field(base, off as usize)
-    };
-    let controller = valor(device, "controller")? as *mut c_void;
+    let controller = propriedade_u64(device, "controller")? as *mut c_void;
     if !rtti::sane(controller) {
         return None;
     }
-    let rf = rtti::resolve_in_class(rtti::class_of(controller), "GetPS")?;
-    let r = rtti::call_func(&rf, controller, &[])?;
-    let mut ps = [u64::from_le_bytes(r[0..8].try_into().ok()?), u64::from_le_bytes(r[8..16].try_into().ok()?)];
-    let record = if rtti::sane(ps[0] as *mut c_void) { valor(ps[0] as *mut c_void, "tweakDBRecord") } else { None };
-    crate::jogo::objetos::soltar_handle(&mut ps);
+    let get_ps = rtti::resolve_in_class(rtti::class_of(controller), "GetPS")?;
+    let retorno = rtti::call_func(&get_ps, controller, &[])?;
+    let mut estado = [
+        u64::from_le_bytes(retorno[0..8].try_into().ok()?),
+        u64::from_le_bytes(retorno[8..16].try_into().ok()?),
+    ];
+    let record = if rtti::sane(estado[0] as *mut c_void) { propriedade_u64(estado[0] as *mut c_void, "tweakDBRecord") } else { None };
+    // O `GetPS` entrega o handle com +1 forte: sem soltar, o estado persistente do device nunca morre.
+    crate::jogo::objetos::soltar_handle(&mut estado);
     record
 }
 
-/// `EntityTarget::Matches` no ramo dos eventos de entidade.
+/// Alvo de entidade contra a entidade de um evento de ciclo de vida, de componente ou de luz de veículo.
 pub(crate) unsafe fn alvo_de_entidade_casa_entidade(c: &CamposDoAlvoDeEntidade, entidade: *mut c_void) -> bool {
-    let campo = |off: usize| read_u64_field(entidade, off).unwrap_or(0);
-    // Offsets do `Entity` (`Entity.hpp:50-52`).
-    let evento = CamposDoEventoDeEntidade { entity_id: campo(0x48), template_path: campo(0x60), appearance_name: campo(0x50) };
+    let ler = |off: usize| read_u64_field(entidade, off).unwrap_or(0);
+    let evento = CamposDoEventoDeEntidade { entity_id: ler(0x48), template_path: ler(0x60), appearance_name: ler(0x50) };
     if !bwms_primitives::targets::entity_evento_bate(c, &evento) {
         return false;
     }
-    if c.tipo.is_some_and(|classe| !class_is_kind_of(rtti::class_of(entidade), classe as *mut c_void)) {
-        return false;
-    }
-    if c.record_id.is_none() {
-        return true;
-    }
-    let (categoria, record) = categoria_e_record(entidade);
-    bwms_primitives::targets::entity_record_bate(c.record_id, categoria, record)
-}
-
-/// `EntityTarget::Matches` no ramo do `EntityBuilderEvent`, com o builder travado pelo despacho.
-pub(crate) unsafe fn alvo_de_entidade_casa_builder(c: &CamposDoAlvoDeEntidade, builder: u64) -> bool {
-    use bwms_primitives::targets::AparenciaCandidata;
-    let req = eb_u64(builder, EB_REQUEST);
-    if c.entity_id.is_some_and(|id| req != 0 && id != eb_u64(req, EBR_ENTITY_ID)) {
-        return false;
-    }
-    if let Some(classe) = c.tipo {
-        let (raiz, _) = eb_raiz_e_componentes(builder);
-        if eb_u64(builder, EB_EXTRATOR) == 0 || raiz == 0 || !class_is_kind_of(rtti::class_of(raiz as *mut c_void), classe as *mut c_void) {
+    if let Some(tipo) = c.tipo {
+        if !class_is_kind_of(rtti::class_of(entidade), tipo as *mut c_void) {
             return false;
         }
     }
-    // A regra do `campo_bate` (`bwms_primitives::targets`), escrita aqui para ler o template só com o critério setado: cada `eb_u64` é uma syscall.
-    if c.template_path.is_some_and(|caminho| caminho != eb_u64(eb_u64(builder, EB_TEMPLATE), RES_CAMINHO)) {
+    // Categoria e record pedem RTTI e, no device, uma chamada de script: só com o filtro de record setado.
+    if c.record_id.is_some() {
+        let (categoria, record) = categoria_e_record(entidade);
+        return bwms_primitives::targets::entity_record_bate(c.record_id, categoria, record);
+    }
+    true
+}
+
+/// Teto de aparências lidas da lista do builder: acima disso a lista é lixo, não conteúdo.
+const BUILDER_APARENCIAS_MAX: usize = 256;
+
+/// Aparência candidata de um `EntityBuilderAppearance` em `aparencia`: caminho do recurso e nome da definição.
+unsafe fn candidata_do_builder(aparencia: u64) -> bwms_primitives::targets::AparenciaCandidata {
+    bwms_primitives::targets::AparenciaCandidata {
+        resource_path: eb_u64(eb_u64(aparencia, EBA_RECURSO), RES_CAMINHO),
+        definition_name: eb_u64(eb_u64(aparencia, EBA_DEFINICAO), DEF_NOME),
+    }
+}
+
+/// Alvo de entidade contra o builder travado do `EntityBuilderEvent`. Os critérios do request só valem com request.
+pub(crate) unsafe fn alvo_de_entidade_casa_builder(c: &CamposDoAlvoDeEntidade, builder: u64) -> bool {
+    let request = eb_u64(builder, EB_REQUEST);
+    let do_request_difere = |filtro: Option<u64>, off: u64| filtro.is_some_and(|v| request != 0 && eb_u64(request, off) != v);
+    if do_request_difere(c.entity_id, EBR_ENTITY_ID) {
         return false;
     }
-    if c.appearance_name.is_some_and(|nome| req != 0 && nome != eb_u64(req, EBR_APARENCIA)) {
+    if let Some(tipo) = c.tipo {
+        if eb_u64(builder, EB_EXTRATOR) == 0 {
+            return false;
+        }
+        let raiz = eb_raiz_e_componentes(builder).0;
+        if raiz == 0 || !class_is_kind_of(rtti::class_of(raiz as *mut c_void), tipo as *mut c_void) {
+            return false;
+        }
+    }
+    if c.template_path.is_some_and(|t| eb_u64(eb_u64(builder, EB_TEMPLATE), RES_CAMINHO) != t) {
         return false;
     }
-    if c.record_id.is_some_and(|record| req != 0 && record != eb_u64(req, EBR_RECORD)) {
+    if do_request_difere(c.appearance_name, EBR_APARENCIA) || do_request_difere(c.record_id, EBR_RECORD) {
         return false;
     }
-    let candidata = |a: u64| AparenciaCandidata { resource_path: eb_u64(eb_u64(a, EBA_RECURSO), RES_CAMINHO), definition_name: eb_u64(eb_u64(a, EBA_DEFINICAO), DEF_NOME) };
     let aparencia = builder + EB_APARENCIA;
-    let unica = (eb_u64(aparencia, EBA_RECURSO) != 0).then(|| candidata(aparencia));
-    let entradas = eb_u64(builder + EB_APARENCIAS, 0);
-    let lista: Vec<AparenciaCandidata> = if entradas == 0 { Vec::new() } else { (0..(eb_u64(builder + EB_APARENCIAS, 0x08) >> 32).min(256)).map(|i| candidata(entradas + i * EBA_TAM)).collect() };
-    bwms_primitives::targets::entity_builder_aparencia_bate(c.appearance_path, c.definition_name, unica, &lista)
+    let unica = (eb_u64(aparencia, EBA_RECURSO) != 0).then(|| candidata_do_builder(aparencia));
+    // A lista só decide sem aparência única e com filtro de caminho; cada candidata custa 4 leituras protegidas.
+    if c.appearance_path.is_none() || unica.is_some() {
+        return bwms_primitives::targets::entity_builder_aparencia_bate(c.appearance_path, c.definition_name, unica, &[]);
+    }
+    let (entradas, tam) = (eb_u64(builder + EB_APARENCIAS, 0), ((eb_u64(builder + EB_APARENCIAS, 0x08) >> 32) as usize).min(BUILDER_APARENCIAS_MAX));
+    let mut lista = [bwms_primitives::targets::AparenciaCandidata { resource_path: 0, definition_name: 0 }; BUILDER_APARENCIAS_MAX];
+    let n = if entradas == 0 { 0 } else { tam };
+    for (i, candidata) in lista.iter_mut().enumerate().take(n) {
+        *candidata = candidata_do_builder(entradas + i as u64 * EBA_TAM);
+    }
+    bwms_primitives::targets::entity_builder_aparencia_bate(c.appearance_path, c.definition_name, unica, &lista[..n])
 }
 
 /// Builder travado do `EntityBuilderEvent` em despacho: evento → wrapper → builder.
@@ -421,14 +444,14 @@ pub(crate) unsafe fn alvo_casa(p: usize, f: FamiliaDoAlvo, tipo: TipoDoEvento, a
             let campos = campos_do_alvo_de_entidade(p);
             match tipo {
                 TipoDoEvento::Builder => builder_do_evento(args).is_some_and(|b| alvo_de_entidade_casa_builder(&campos, b)),
-                // `EntityComponentEvent` e `VehicleLightControlEvent` herdam o `EntityLifecycleEvent`: casam pela entidade dona, como na referência.
+                // `EntityComponentEvent` e `VehicleLightControlEvent` herdam o `EntityLifecycleEvent`: casam pela entidade dona.
                 TipoDoEvento::Ciclo | TipoDoEvento::Componente | TipoDoEvento::LuzDoVeiculo => event_entity_ptr(args).is_some_and(|e| alvo_de_entidade_casa_entidade(&campos, e)),
                 _ => true,
             }
         }
         FamiliaDoAlvo::EntidadeDinamica | FamiliaDoAlvo::EntidadeEstatica => {
             let (alvos, tabela) = if f == FamiliaDoAlvo::EntidadeDinamica { (&DYNAMICENTITYTARGET_STATES, dynent_tags()) } else { (&STATICENTITYTARGET_STATES, statent_tags()) };
-            // `Matches` com `tags` vazio casa sem ler a entidade do evento (`DynamicEntityTarget.hpp:18-19`, `StaticEntityTarget.hpp:18-19`).
+            // `Tags([])` casa sem ler a entidade do evento: lista vazia não restringe, e o evento sem entidade também passa.
             let le_a_entidade = alvos.lock().is_ok_and(|s| s.iter().any(|e| e.0 == p && !e.1.is_empty()));
             // O `IsTagged` do sistema de entidades do alvo, pelo id da entidade do evento: a tabela do `DynamicEntitySystem` ou a do `StaticEntitySystem`.
             // Lida antes de travar a tabela de alvos para comparar: nenhuma trava fica aninhada neste ramo.
@@ -442,14 +465,14 @@ pub(crate) unsafe fn alvo_casa(p: usize, f: FamiliaDoAlvo, tipo: TipoDoEvento, a
             })
         }
         FamiliaDoAlvo::Componente => {
-            // Valor 0 é o não-setado da referência (`if (componentName && ...)`) e fica `None`.
+            // Valor 0 é o não-setado da fábrica e fica `None`.
             let criterio = COMPONENTTARGET_STATES.lock().ok().and_then(|s| s.iter().find(|e| e.0 == p).copied()).filter(|e| e.2 != 0);
             let (nome, id) = match criterio {
                 Some((_, ComponentTargetCriterion::Name, v)) => (Some(v), None),
                 Some((_, ComponentTargetCriterion::Id, v)) => (None, Some(v)),
                 None => (None, None),
             };
-            // `ComponentTarget::Matches` só lê o componente para campo setado (`ComponentTarget.hpp:16-22`): o alvo todo curinga casa
+            // O componente só é lido para campo setado: o alvo todo curinga casa
             // sem dado do evento. Campo setado com componente que não resolve continua filtrado.
             if nome.is_none() && id.is_none() {
                 return true;
@@ -458,7 +481,7 @@ pub(crate) unsafe fn alvo_casa(p: usize, f: FamiliaDoAlvo, tipo: TipoDoEvento, a
         }
         FamiliaDoAlvo::Tecla => {
             let Some((tecla, acao)) = inputtarget_criteria(&[p]).first().copied() else { return false };
-            // `InputTarget::Matches` só lê o evento para campo setado (`InputTarget.hpp:16-22`): o alvo todo curinga casa sem tecla
+            // O evento só é lido para campo setado: o alvo todo curinga casa sem tecla
             // registrada. Campo setado com evento sem tecla continua filtrado.
             if tecla.is_none() && acao.is_none() {
                 return true;
@@ -470,9 +493,9 @@ pub(crate) unsafe fn alvo_casa(p: usize, f: FamiliaDoAlvo, tipo: TipoDoEvento, a
             }
         }
         FamiliaDoAlvo::Recurso => {
-            // `ResourceTarget::Matches`: todo critério do alvo bate — caminho igual (ou pelo padrão registrado) e classe do recurso derivada da
+            // Todo critério do alvo bate — caminho igual (ou pelo padrão registrado) e classe do recurso derivada da
             // classe que a fábrica resolveu (`classe_do_alvo`).
-            // Valor 0 é critério não-setado e não filtra, como o `if (path)` e o `if (type && ...)` da referência (`ResourceTarget.hpp:28`, `:46`):
+            // Valor 0 é critério não-setado e não filtra:
             // `Path(r"")` chega com hash 0 e `caminho_casa(0, _)` casa só evento de caminho 0: hash 0 não é registrado e cai no `alvo == evento`.
             let criterios: Vec<(ResourceTargetCriterion, u64)> =
                 RESOURCETARGET_STATES.lock().map_or(Vec::new(), |s| s.iter().filter(|e| e.0 == p).map(|e| (e.1, e.2)).collect());
@@ -490,12 +513,12 @@ pub(crate) unsafe fn alvo_casa(p: usize, f: FamiliaDoAlvo, tipo: TipoDoEvento, a
     }
 }
 
-/// Os alvos de um handler cuja família suporta o evento, na ordem do handler: os que o `AddTarget` da referência aceitaria.
+/// Os alvos de um handler cuja família suporta o evento, na ordem do handler.
 pub(crate) fn alvos_que_suportam(alvos: &[usize], tipo: TipoDoEvento) -> impl Iterator<Item = (usize, FamiliaDoAlvo)> + '_ {
     alvos.iter().filter_map(|p| familia_do_alvo(*p).map(|f| (*p, f))).filter(move |(_, f)| familia_suporta(*f, tipo))
 }
 
-/// Os alvos de um handler contra o evento, como o `CallbackSystemHandler::operator()` (`CallbackSystemHandler.hpp:56-65`). `true` = handler
+/// Os alvos de um handler contra o evento. `true` = handler
 /// filtrado: algum alvo suporta o evento e nenhum casa; `false` = dispara. Uma passada, que para no 1º alvo que casa.
 pub(crate) unsafe fn alvos_barram_o_disparo(alvos: &[usize], tipo: TipoDoEvento, args: &[rtti::Arg]) -> bool {
     let mut tem_suportado = false;
@@ -508,7 +531,7 @@ pub(crate) unsafe fn alvos_barram_o_disparo(alvos: &[usize], tipo: TipoDoEvento,
     tem_suportado
 }
 
-/// ArchiveXL `#47` (`CustomizationExtension`, 2026-08-14): `CustomizationEvent extends
+/// Extensão de customização (2026-08-14): `CustomizationEvent extends
 /// CallbackSystemEvent` — MESMA receita robusta (parent nativo real já forjado). Forja MÍNIMA,
 /// zero método próprio (herda `GetEventName()` do parent, mesmo padrão de `GameSessionEvent`) —
 /// serve só de ENVELOPE pra `fire_event_args` despachar os 3 eventos nativos reais de
@@ -611,271 +634,74 @@ pub unsafe fn drain_customization_edges() {
 
 pub(crate) const TPL_ROOT_INDEX: u64 = 0x1d8;
 
-/// ArchiveXL `#40` (2026-08-19, continuação direta) — composição REAL da metade "extra-slots" de
-/// `AttachmentExtension::OnAttachTPP` (Extension.cpp:140-185), usando o hook confirmado ao vivo
-/// `crate::jogo::anexos::ANEXO_AO_ANEXAR_VM` (2 disparos reais, padrão consistente com `OnAttach` genuíno, sessão de
-/// hoje mais cedo) como gatilho. Reproduz fielmente a fonte C++ real (comentário na fonte):
-///
-/// `for slotID in {HeadSlot,FaceSlot}: subSlots = s_extraSlots[slotID]; for subSlotID in subSlots:`
-/// `affectedAppearanceSlots.PushBack(subSlotID) se ainda não tiver; se slotData.itemObject, chama`
-/// `RegisterAffectedItem(component, itemID, itemObject)`.
-///
-/// Peças usadas, TODAS já provadas nesta sessão/anteriores, ZERO endereço nativo novo:
-/// - `TPPAffectedSlots={Head,Eyes}` — constante hardcoded (hash já conhecido).
-/// - "extra slots via `.parentSlot`" — em vez de hookar `AttachmentSlots::InitializeSlots`
-///   (endereço Mac desconhecido, gap SEPARADO) e manter um mapa `s_extraSlots` cacheado, fazemos a
-///   MESMA pergunta on-demand pra cada slot REAL do player (via `find_attachslots_component`, já
-///   provado ontem/hoje, item #54): `get_flat_tdbid(t, tweak_db_id_derive(slotID, ".parentSlot"))`
-///   — leitura dinâmica de flat já provada (`tramp_get_flat_float`, TweakXL #43), mesma técnica.
-///   Equivalente semântico exato (mesma pergunta, resolvida sob demanda em vez de cacheada).
-/// - `FindSlotData(owner, slotID==subSlotID)` — em vez do vtable call nativo (endereço não
-///   resolvido, e a predicate/lambda C++ não é chamável em ABI seguro do Rust sem RE nova), fazemos
-///   a MESMA busca por composição pura: scan do array `AttachmentSlotData` real (já provado #54).
-/// - `itemID = ItemObject::ItemID(itemObject).tdbid` — offset `0x288` (`Raw::ItemObject::ItemID`,
-///   `enablers/ArchiveXL/src/Red/ItemObject.hpp`, campo de dado, confiança alta).
-/// - `affectedAppearanceSlots.PushBack` — `dynarray_push_ptr` (já provado, usado por `AddTag`/etc.),
-///   sobre o campo REAL `TPPRepresentationComponent+0xB0` (`DynArray<TweakDBID>`, offset CONFIRMADO
-///   pelo header GERADO da reflection real do jogo — `TPPRepresentationComponent.hpp`).
-///
-/// `RegisterAffectedItem` = `0x101ea0738` (identificado em 2026-09-11, chamado via `tpp_attach.rs`): o item
-/// achado no sub-slot é registrado de verdade. O dono vem do próprio componente (`IComponent+0x50`).
-/// Achado OFFLINE decisivo desta mesma sessão (grep exaustivo em `tweakdbstr.kark`, 3.529.116
-/// nomes conhecidos): ZERO record `AttachmentSlots.*` do jogo base (2.31) tem flat
-/// `.parentSlot`/`.dependencySlots` definido — confirmado que `s_extraSlots` fica SEMPRE VAZIO pra
-/// conteúdo vanilla (a feature só existe pra sub-slots que um MOD declare via `.xl`/TweakDB). Esta
-/// função reconfirma isso AO VIVO por mecanismo INDEPENDENTE (lookup por-slot em vez de busca
-/// global de nome).
-pub unsafe fn onattachtpp_compose(reg: &crate::rtti::Registry, a_component: *mut c_void) -> String {
-    if a_component.is_null() || !crate::memoria::is_readable(a_component as *const c_void, 0xC0) {
-        return "[axl-40-onattachtpp] aComponent inválido/ilegível, abortado".to_string();
-    }
-    let head = bwms_primitives::tweak_db_id("AttachmentSlots.Head");
-    let eyes = bwms_primitives::tweak_db_id("AttachmentSlots.Eyes");
+/// Teto de slots lidos do `AttachmentSlots` do dono na composição: o V usa ~30.
+const TPP_SLOTS_MAX: usize = 64;
 
-    // O dono do componente (`IComponent+0x50`); o player global só se o componente não tiver dono.
-    let dono = rd_u64(a_component as *const c_void, 0x50) as *mut c_void;
-    let player = if dono.is_null() { crate::current_player() } else { dono };
-    let attach_inst = match find_attachslots_component(reg, player) {
-        Some(p) => p,
-        None => return "[axl-40-onattachtpp] AttachmentSlots do dono não achado, abortado".to_string(),
+/// Depois do `OnAttach` do `TPPRepresentationComponent`: todo slot do dono cujo `.parentSlot` (flat de mod) é Head ou Eyes entra em
+/// `affectedAppearanceSlots` do componente, e o item que já está nele é registrado como afetado. Conteúdo vanilla não tem `.parentSlot`
+/// e não escreve nada. Devolve o relatório do veredito.
+pub unsafe fn compor_slots_da_terceira_pessoa(reg: &crate::rtti::Registry, componente: *mut c_void) -> String {
+    use crate::roupas_e_armas::terceira_pessoa as tpp;
+    if componente.is_null() || !crate::memoria::is_readable(componente as *const c_void, 0xC0) {
+        return format!("[tpp-slots] compor: componente {componente:p} ilegível, nada feito");
+    }
+    let mut dono = rd_u64(componente as *const c_void, tpp::COMPONENTE_DONO_OFF) as *mut c_void;
+    if dono.is_null() {
+        dono = crate::current_player();
+    }
+    let Some(slots) = find_attachslots_component(reg, dono) else {
+        return format!("[tpp-slots] compor: componente {componente:p} dono {dono:p} sem AttachmentSlots, nada feito");
     };
-    let t = match crate::tweakdb::singleton() {
-        Some(s) => s,
-        None => return "[axl-40-onattachtpp] TweakDB singleton indisponível, abortado".to_string(),
-    };
-
-    let arr1_ptr = (attach_inst as *const u8).add(0xB0).cast::<u64>().read_unaligned();
-    let arr1_capsize = (attach_inst as *const u8).add(0xB8).cast::<u64>().read_unaligned();
-    let arr1_cap = (arr1_capsize & 0xFFFF_FFFF) as u32;
-    let arr1_size = (arr1_capsize >> 32) as u32;
-    if arr1_ptr == 0 {
-        return format!("[axl-40-onattachtpp] aComponent={a_component:p}: array de AttachmentSlotData vazio");
+    if crate::tweakdb::singleton().is_none() {
+        return format!("[tpp-slots] compor: componente {componente:p} sem TweakDB, nada feito");
     }
-    let n = arr1_size.min(arr1_cap).min(64) as usize;
-
-    let mut found: Vec<(u64, u64, u64)> = Vec::new(); // (base_slot, sub_slot, item_obj_instance)
-    let mut checked = 0usize;
-    for i in 0..n {
-        let base = arr1_ptr as usize + i * 0x90;
-        if !crate::memoria::is_readable(base as *const c_void, 0x90) {
-            continue;
-        }
-        let rd = |off: usize| ((base + off) as *const u64).read_unaligned();
-        let slot_id = rd(0x00);
-        if slot_id == 0 {
-            continue;
-        }
-        checked += 1;
-        let parent_flat_id = bwms_primitives::tweak_db_id_derive(slot_id, ".parentSlot");
-        if let Some(parent_val) = crate::tweakdb::get_flat_tdbid(t, parent_flat_id) {
-            if parent_val == head || parent_val == eyes {
-                found.push((parent_val, slot_id, rd(0x08)));
+    let dados = (slots as *const u8).add(tpp::ATTACHSLOTS_DADOS_OFF);
+    let (entradas, n) = ((dados as *const u64).read_unaligned() as *const u8, (dados.add(0x0C) as *const u32).read_unaligned() as usize);
+    let afetados = tpp::slots_afetados();
+    let mut sub = [0u64; TPP_SLOTS_MAX];
+    let (mut checados, mut achados) = (0usize, 0usize);
+    if !entradas.is_null() {
+        for i in 0..n.min(TPP_SLOTS_MAX) {
+            let e = entradas.add(i * tpp::SLOTDATA_TAM);
+            if !crate::memoria::is_readable(e as *const c_void, 8) {
+                continue;
+            }
+            let slot = (e as *const u64).read_unaligned();
+            if slot == 0 {
+                continue;
+            }
+            checados += 1;
+            // A mesma regra dos handlers de equip e unequip: os dois caminhos têm de concordar sobre o que é sub-slot.
+            if tpp::precisa_ramo_afetado(slot, tpp::slot_base(slot), afetados) {
+                sub[achados] = slot;
+                achados += 1;
             }
         }
     }
-
-    let mut out = format!(
-        "[axl-40-onattachtpp] aComponent={a_component:p} AttachmentSlots={attach_inst:p} slots_checados={checked} extra_slots_achados={}",
-        found.len()
-    );
-
-    if found.is_empty() {
-        out.push_str(" — ZERO extra-slots (esperado: nenhum record AttachmentSlots.* do jogo base tem .parentSlot; s_extraSlots morto pra conteúdo vanilla, confirmado offline+ao-vivo)");
-        return out;
+    if achados == 0 {
+        return format!("[tpp-slots] compor: componente {componente:p} AttachmentSlots {slots:p} slots_checados={checados} extra_slots_achados=0 — zero extra-slots, nada escrito");
     }
-
-    // Composição real: dedupe + PushBack em affectedAppearanceSlots@+0xB0 do TPPRepresentationComponent
-    // (offset confirmado pelo header GERADO da reflection real do jogo).
-    let aff_arr = (a_component as *mut u8).add(0xB0) as *mut c_void;
-    for (base_slot, sub_slot, item_obj) in &found {
-        out.push_str(&format!(
-            "\n  extra_slot base={base_slot:#018x} sub={sub_slot:#018x} item_obj={item_obj:#018x}"
-        ));
-        let aff_entries = rd_u64(aff_arr, 0x00) as *const u8;
-        let aff_size = core::ptr::read_unaligned((aff_arr as *const u8).add(0x0C) as *const u32);
-        let mut already = false;
-        if !aff_entries.is_null() {
-            for j in 0..aff_size.min(4096) {
-                let ev = (aff_entries.add(j as usize * 8) as *const u64).read_unaligned();
-                if ev == *sub_slot {
-                    already = true;
-                    break;
-                }
-            }
-        }
-        if already {
-            out.push_str(" (já em affectedAppearanceSlots, dedupe correto — nada escrito)");
-        } else {
-            match dynarray_push_ptr(aff_arr, *sub_slot) {
-                Some(idx) => out.push_str(&format!(" -> PushBack em affectedAppearanceSlots[{idx}] OK")),
-                None => out.push_str(" -> PushBack FALHOU (array ilegível)"),
-            }
-        }
-        if *item_obj != 0 {
-            match crate::roupas_e_armas::terceira_pessoa::registrar_item_do_slot(a_component, *sub_slot) {
-                Ok(item_id) => out.push_str(&format!(" — RegisterAffectedItem(itemID.tdbid={item_id:#018x}) chamado")),
-                Err(motivo) => out.push_str(&format!(" — RegisterAffectedItem não chamado: {motivo}")),
-            }
-        }
+    let lista = (componente as *mut u8).add(tpp::SLOTS_AFETADOS_OFF) as *mut c_void;
+    let mut relato = Vec::with_capacity(achados);
+    for &slot in &sub[..achados] {
+        let chave = bwms_primitives::tweak_db_id_chave(slot);
+        let (ini, tam) = (rd_u64(lista, 0) as *const u64, rd_u32(lista, 0x0C) as usize);
+        let ja_esta = !ini.is_null()
+            && crate::memoria::is_readable(ini as *const c_void, tam * 8)
+            && (0..tam).any(|k| bwms_primitives::tweak_db_id_chave(ini.add(k).read_unaligned()) == chave);
+        let anexou = !ja_esta && dynarray_push_ptr(lista, slot).is_some();
+        let item = crate::roupas_e_armas::terceira_pessoa::registrar_item_do_slot(componente, slot);
+        relato.push(format!("{slot:#x}: anexado={anexou} já_estava={ja_esta} item={item:x?}"));
     }
-
-    out
+    format!(
+        "[tpp-slots] compor: componente {componente:p} AttachmentSlots {slots:p} slots_checados={checados} extra_slots_achados={achados} [{}]",
+        relato.join("; ")
+    )
 }
 
-/// Escolha do `FixCustomizationAppearance` pelo texto do seletor e pelos nomes das definições do recurso: `(índice da fonte, texto do meshAppearance)`;
-/// `None` quando a referência sai sem mexer (recurso sem definição ou texto curto). `NN_resto` usa a 2ª definição (a 1ª se só há uma) e o `resto`;
-/// `prefixo__resto` usa a definição cujo nome começa pelo `prefixo` (a única, se só há uma; senão a padrão) e o `resto` sem o `NN_` inicial.
-pub(crate) fn es20_fonte_de_customizacao(seletor: &str, nomes: &[String]) -> Option<(usize, String)> {
-    if nomes.is_empty() {
-        return None;
-    }
-    let numerado = |t: &str| t.len() >= 3 && t.as_bytes()[2] == b'_' && t.as_bytes()[0].is_ascii_digit();
-    let padrao = usize::from(nomes.len() > 1);
-    if seletor.len() < 3 {
-        return None;
-    }
-    if numerado(seletor) {
-        return Some((padrao, seletor.get(3..)?.to_string()));
-    }
-    let Some(pos) = seletor.rfind("__") else { return Some((padrao, seletor.to_string())) };
-    let fonte = if nomes.len() == 1 {
-        Some(0)
-    } else {
-        nomes.iter().position(|n| n.len() >= pos && n.as_bytes()[..pos] == seletor.as_bytes()[..pos])
-    };
-    let mut resto = seletor.get(pos + 2..)?;
-    if resto.len() < 3 {
-        return None;
-    }
-    if numerado(resto) {
-        resto = resto.get(3..)?;
-    }
-    Some((fonte.unwrap_or(padrao), resto.to_string()))
-}
 
 pub(crate) type Es20Escopos = std::collections::HashMap<u64, std::collections::HashSet<u64>>;
 
-/// `ResourceMetaExtension::CustomizationApp`.
-pub(crate) const ES20_ESCOPO_DE_CUSTOMIZACAO: u64 = bwms_primitives::resource_path_hash("player_customization.app");
-
-/// `Es20Customizacao` pelo RTTI, com o tamanho dos 2 tipos conferido (`GetSize` `vt+0x18`).
-pub(crate) unsafe fn es20_tipos_de_customizacao(reg: &rtti::Registry) -> Option<Es20Customizacao> {
-    let tipo = |nome: &str, tamanho: u32| {
-        let c = reg.class_by_name(nome);
-        if c.is_null() {
-            return None;
-        }
-        let obter: extern "C" fn(*mut c_void) -> u32 = std::mem::transmute(rd_u64(rd_u64(c as *const c_void, 0) as *const c_void, 0x18));
-        (obter(c) == tamanho).then_some(c as usize)
-    };
-    let [nome, aparencia, _] = es20_campos_de_componente(reg)?;
-    Some(Es20Customizacao { tipos: [tipo("appearanceAppearancePartOverrides", 0x18)?, tipo("appearancePartComponentOverrides", 0x50)?], campos: [nome, aparencia] })
-}
-
-/// Constrói um valor do tipo em `vaga` pelo construtor do RTTI (`vt+0x40`), como o `EmplaceBack`.
-pub(crate) unsafe fn es20_construir(tipo: usize, vaga: *mut u8) {
-    let construir: extern "C" fn(*mut c_void, *mut c_void) = std::mem::transmute(rd_u64(rd_u64(tipo as *const c_void, 0) as *const c_void, 0x40));
-    construir(tipo as *mut c_void, vaga as *mut c_void);
-}
-
-/// Leitores do `compiledData` no Mac: `(vtable estática, GetType, maker)`. O maker é o `BufferReader::MakeType0`/`MakeType1` da referência: `x0` = campos do
-/// leitor de origem a partir do `+0x08`, `x8` = saída do leitor novo (RE em `DATABASE.md`).
-pub(crate) const ES20_LEITORES: [(u64, u8, u64); 2] = [(0x1_0783_87d0, 0, 0x1_0121_743c), (0x1_0783_8788, 1, 0x1_0121_74ac)];
-
-/// `IsFixedCustomizationAppearance`: 1 override de parte com 1 override de componente sem `componentName`.
-pub(crate) unsafe fn es20_customizacao_fixa(c: &Es20Customizacao, definicao: *const u8) -> bool {
-    let externo = definicao.add(crate::jogo::aparencia::APPDEF_PARTSOVERRIDES_OFF);
-    let b = rd_u64(externo as *const c_void, 0) as *const u8;
-    if b.is_null() || (externo.add(0x0c) as *const u32).read_unaligned() != 1 {
-        return false;
-    }
-    let cb = rd_u64(b.add(8) as *const c_void, 0) as *const u8;
-    !cb.is_null() && (b.add(0x14) as *const u32).read_unaligned() == 1 && (cb.add(c.campos[0]) as *const u64).read_unaligned() == 0
-}
-
-/// `FixCustomizationAppearance(recurso, definição, seletor)` com a saída ainda vazia: `Some(anexada)` quando pôs uma definição na saída (a nova, anexada ao
-/// recurso, ou a própria fonte), `None` quando a referência sai sem mexer. Recurso fora do escopo `player_customization.app` não muda. Divergência: leitor
-/// nulo na fonte não é clonado (a referência chama o `Clone` sem conferir).
-pub(crate) unsafe fn es20_consertar_customizacao(c: &Es20Customizacao, recurso: *mut u8, saida: *mut [u64; 2], seletor: u64) -> Option<bool> {
-    let arr = recurso.add(crate::jogo::aparencia::APPRESOURCE_APPEARANCES_OFF);
-    if saida.is_null() || rd_u64(arr as *const c_void, 0) == 0 || (arr.add(0x0c) as *const u32).read_unaligned() == 0 {
-        return None;
-    }
-    if !es20_no_escopo(ES20_ESCOPO_DE_CUSTOMIZACAO, (recurso.add(0x30) as *const u64).read_unaligned()) {
-        return None;
-    }
-    let texto = crate::cname::name_of(seletor)?;
-    if texto.len() < 3 {
-        return None;
-    }
-    es22_com_trava(recurso, || {
-        let b = rd_u64(arr as *const c_void, 0) as *const u64;
-        let n = ((arr.add(0x0c) as *const u32).read_unaligned() as usize).min(65536);
-        let handles: Vec<[u64; 2]> = (0..n).map(|i| [b.add(i * 2).read_unaligned(), b.add(i * 2 + 1).read_unaligned()]).collect();
-        let nome_de = |h: &[u64; 2]| ((h[0] as usize + crate::jogo::aparencia::APPDEF_NAME_OFF) as *const u64).read_unaligned();
-        let nomes: Vec<String> = handles.iter().map(|h| if h[0] == 0 { String::new() } else { crate::cname::name_of(nome_de(h)).unwrap_or_default() }).collect();
-        let (i, aparencia) = es20_fonte_de_customizacao(&texto, &nomes)?;
-        let fonte = handles[i];
-        if fonte[0] == 0 {
-            return None;
-        }
-        let definicao = fonte[0] as *mut u8;
-        let externo = definicao.add(crate::jogo::aparencia::APPDEF_PARTSOVERRIDES_OFF);
-        let mesh = crate::cname::registrar_no_pool(&aparencia);
-        if (externo.add(0x0c) as *const u32).read_unaligned() > 0 {
-            if es20_customizacao_fixa(c, definicao) {
-                handle_strong_soma(&fonte, 1);
-                *saida = fonte;
-                return Some(false);
-            }
-            let nova = es22_definicao_nova(definicao as *mut c_void, seletor, true)?;
-            es20_clonar_leitor((nova[0] as usize + ES20_DEF_LEITOR) as *mut u64, rd_u64(definicao as *const c_void, ES20_DEF_LEITOR) as *const u8);
-            let p = rd_u64((nova[0] as *const u8).add(crate::jogo::aparencia::APPDEF_PARTSOVERRIDES_OFF) as *const c_void, 0) as *const u8;
-            if !p.is_null() {
-                let cb = rd_u64(p.add(8) as *const c_void, 0) as *mut u8;
-                let cn = if cb.is_null() { 0 } else { (p.add(0x14) as *const u32).read_unaligned() as usize };
-                for k in 0..cn.min(4096) {
-                    (cb.add(k * 0x50 + c.campos[1]) as *mut u64).write_unaligned(mesh);
-                }
-            }
-            let anexada = es22_anexar_definicao_travado(recurso, nova);
-            *saida = nova;
-            return Some(anexada);
-        }
-        (definicao.add(crate::jogo::aparencia::APPDEF_NAME_OFF) as *mut u64).write_unaligned(seletor);
-        let parte = es22_vaga_no_fim(externo, 0x18)?;
-        es20_construir(c.tipos[0], parte);
-        (externo.add(0x0c) as *mut u32).write_unaligned((externo.add(0x0c) as *const u32).read_unaligned() + 1);
-        let componentes = parte.add(8);
-        let componente = es22_vaga_no_fim(componentes, 0x50)?;
-        es20_construir(c.tipos[1], componente);
-        (componentes.add(0x0c) as *mut u32).write_unaligned((componentes.add(0x0c) as *const u32).read_unaligned() + 1);
-        (componente.add(c.campos[1]) as *mut u64).write_unaligned(mesh);
-        handle_strong_soma(&fonte, 1);
-        *saida = fonte;
-        Some(false)
-    })
-}
 
 pub(crate) const ES22_RECURSO_TRAVA: usize = 0xf0;
 
@@ -998,14 +824,16 @@ pub(crate) unsafe fn cust_arr(a: usize) -> (usize, usize, usize) {
     (cu64(a) as usize, ((a + 0xc) as *const u32).read_unaligned() as usize, ((a + 8) as *const u32).read_unaligned() as usize)
 }
 
-/// Garante espaço pra mais 1 no `DynArray` pelo reserve do motor (mover nulo: a realocação move os bytes), crescendo como o SDK (`+metade`, mínimo 4).
+/// Garante 1 vaga no fim do `DynArray`. Cheio, cresce pelo reserve do motor: o buffer novo sai do alocador do motor, que é quem o solta.
 pub(crate) unsafe fn cust_reservar_mais_um(arr: usize, passo: usize) -> bool {
-    let (_, n, cap) = cust_arr(arr);
-    if n < cap {
+    let (_, tamanho, capacidade) = cust_arr(arr);
+    if tamanho < capacidade {
         return true;
     }
-    crate::jogo::listas::reservar(arr as *mut c_void, (cap + cap / 2).max(n + 1).max(4) as u32, passo as u32, 8, std::ptr::null());
-    cust_arr(arr).2 > n
+    // Meia capacidade a mais: a mescla anexa uma a uma, e dobrar a lista de opções do jogo a cada estouro desperdiça a metade.
+    let nova = (capacidade + capacidade / 2).max(tamanho + 1).max(4);
+    crate::jogo::listas::reservar(arr as *mut c_void, nova as u32, passo as u32, 8, std::ptr::null());
+    cust_arr(arr).2 > tamanho
 }
 
 /// `vt+off` do tipo (`0x40` Construct, `0x48` Destruct).
@@ -1092,7 +920,8 @@ pub(crate) unsafe fn cust_chave(l: &CustLista, tipo: CustTipo, elem: usize) -> C
     }
 }
 
-/// Nome registrado de uma escolha: o `name` da definição, ou o FNV-1a64 do subnome com o nome da opção como semente (`RegisterCustomEntryName(name, sub)`).
+/// Nome registrado de uma escolha: o `name` no app; o texto nos outros, com o hash continuado do nome da opção (o mesmo texto em opções
+/// diferentes não colide).
 pub(crate) fn cust_nome_da_escolha(dono: u64, chave: &CustChave) -> u64 {
     match chave {
         CustChave::Nome(n) => *n,
@@ -1113,21 +942,26 @@ pub(crate) fn cust_casa(alvo: u64, alvo_texto: impl FnOnce() -> String, fonte: u
     }
 }
 
-/// Posição de `v` num array ordenado de `u64`: `Ok` se já está, `Err(onde entra)` senão.
+/// Posição de `nome` no array ordenado do estado: `Ok` se já está, `Err` com onde entra para manter a ordem.
 pub(crate) fn cust_posicao_ordenada(v: &[u64], nome: u64) -> Result<usize, usize> {
     v.binary_search(&nome)
 }
 
-/// Nomes de opção e de escolha de mod (`m_customEntryNames`).
+/// Nomes de opção e de escolha que a mescla pôs nas listas do jogo.
 pub(crate) static CUST_NOMES: std::sync::RwLock<Option<std::collections::HashSet<u64>>> = std::sync::RwLock::new(None);
 
+/// Tamanho de [`CUST_NOMES`]: os ganchos do `Initialize*Option` leem só este atômico quando não há mescla.
 pub(crate) static CUST_NOMES_N: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) fn cust_registrar_nome(n: u64) {
+    // CName vazio não é nome: registrá-lo marcaria toda opção sem nome como de mod.
+    if n == 0 {
+        return;
+    }
     if let Ok(mut g) = CUST_NOMES.write() {
-        let s = g.get_or_insert_with(Default::default);
-        s.insert(n);
-        CUST_NOMES_N.store(s.len() as u64, Ordering::Relaxed);
+        let nomes = g.get_or_insert_with(Default::default);
+        nomes.insert(n);
+        CUST_NOMES_N.store(nomes.len() as u64, Ordering::Relaxed);
     }
 }
 
@@ -1199,132 +1033,143 @@ pub(crate) fn cust_fix_caminhos_carregar(caminhos: std::collections::HashMap<u64
     n
 }
 
-/// `FixCustomizationOptions`: caminho mapeado pelo `resource.fix` do recurso base, com override do caminho antigo e dos aliases do caminho novo
-/// (`reslink_aliases_of`: links e cópias, nos dois sentidos) pra cada definição.
+/// Objeto da opção `i` de um `DynArray<Handle<gameuiCharacterCustomizationInfo>>`.
+unsafe fn cust_opcao(opcoes: usize, i: usize) -> usize {
+    cust_handle(opcoes, i)[0] as usize
+}
+
+/// `resource.fix` com `paths` do recurso base `caminho_alvo`: a opção de app cujo `resource` é um caminho antigo passa ao novo, e as
+/// aparências das definições dela, pedidas pelo caminho antigo ou por um alias do novo, trocam para o novo.
 pub(crate) unsafe fn cust_consertar_caminhos(c: &CustCampos, m: &mut CustMescla, caminho_alvo: u64, opcoes: usize) {
     let pares = match CUST_FIX_CAMINHOS.read() {
         Ok(g) => match g.as_ref().and_then(|t| t.get(&caminho_alvo)) {
-            Some(p) => p.clone(),
-            None => return,
+            Some(p) if !p.is_empty() => p.clone(),
+            _ => return,
         },
         Err(_) => return,
     };
-    let l = c.listas[0];
-    for k in 0..cust_arr(opcoes).1 {
-        let t = cust_handle(opcoes, k)[0] as usize;
+    let l = c.listas[CustTipo::App as usize];
+    for i in 0..cust_arr(opcoes).1 {
+        let t = cust_opcao(opcoes, i);
         if cust_tipo_da_opcao(c, t) != Some(CustTipo::App) {
             continue;
         }
         let antigo = cu64(t + c.recurso);
-        let Some(novo) = pares.iter().find(|p| p.0 == antigo).map(|p| p.1) else { continue };
-        if novo == antigo {
-            continue;
-        }
-        ((t + c.recurso) as *mut u64).write_unaligned(novo);
+        let Some(&(_, novo)) = pares.iter().find(|(a, n)| antigo != 0 && *a == antigo && *n != *a) else { continue };
         m.caminhos.push((t, antigo));
+        ((t + c.recurso) as *mut u64).write_unaligned(novo);
         m.contagem.caminhos += 1;
         let aliases = crate::arquivos_do_jogo::reslink_aliases_of(novo);
         let (e, n, _) = cust_arr(t + l.campo);
-        for d in 0..n {
-            let nome = cu64(e + d * l.passo + l.chave);
-            m.override_(antigo, novo, nome);
-            for a in &aliases {
-                m.override_(*a, novo, nome);
+        for k in 0..n {
+            let aparencia = cu64(e + k * l.passo + l.chave);
+            m.override_(antigo, novo, aparencia);
+            for alias in &aliases {
+                m.override_(*alias, novo, aparencia);
             }
         }
     }
 }
 
-/// `MergeCustomGroups`: cada entrada de um grupo da fonte vai pro fim do grupo de mesmo nome no alvo.
+/// Entradas de cada grupo da fonte vão ao fim do grupo homônimo do alvo. Grupo da fonte sem homônimo não vira grupo novo: a tela só
+/// mostra os grupos que o recurso do jogo declara.
 pub(crate) unsafe fn cust_mesclar_grupos(m: &mut CustMescla, alvo: usize, fonte: usize) {
-    let (fe, fnn, _) = cust_arr(fonte);
-    let (ae, an, _) = cust_arr(alvo);
-    for i in 0..fnn {
-        let g = fe + i * CUST_GRUPO_PASSO;
-        let (oe, on, _) = cust_arr(g + 8);
-        for j in 0..an {
-            let t = ae + j * CUST_GRUPO_PASSO;
-            if cu64(t) != cu64(g) {
+    for i in 0..cust_arr(fonte).1 {
+        let grupo_f = cust_arr(fonte).0 + i * CUST_GRUPO_PASSO;
+        let (nome, entradas_f) = (cu64(grupo_f), grupo_f + 8);
+        for j in 0..cust_arr(alvo).1 {
+            let grupo_t = cust_arr(alvo).0 + j * CUST_GRUPO_PASSO;
+            if cu64(grupo_t) != nome {
                 continue;
             }
-            m.anotar(t + 8, CustElemento::CName);
-            for k in 0..on {
-                let nome = cu64(oe + k * 8);
-                if cust_anexar_u64(t + 8, nome) {
+            let entradas_t = grupo_t + 8;
+            for k in 0..cust_arr(entradas_f).1 {
+                let entrada = cu64(cust_arr(entradas_f).0 + k * 8);
+                m.anotar(entradas_t, CustElemento::CName);
+                if cust_anexar_u64(entradas_t, entrada) {
                     m.contagem.grupos += 1;
+                    cust_registrar_nome(entrada);
                 }
-                cust_registrar_nome(nome);
             }
         }
     }
 }
 
-/// `ExpandCustomizationOptions`: opção de app sem nome e sem definições herda as da última sem nome com definições (e o recurso, se não tiver).
+/// Opção de app sem nome e sem definições herda as definições (e o recurso, se não tem) da última opção sem nome cheia antes dela: o
+/// modder declara as definições uma vez e repete só o slot. Devolve quantas opções receberam.
 pub(crate) unsafe fn cust_expandir(c: &CustCampos, fonte: usize) -> u32 {
-    let l = c.listas[0];
-    let (mut cheia, mut n) = (0usize, 0u32);
-    for k in 0..cust_arr(fonte).1 {
-        let o = cust_handle(fonte, k)[0] as usize;
+    let l = c.listas[CustTipo::App as usize];
+    let mut cheia: Option<usize> = None;
+    let mut expandidas = 0;
+    for i in 0..cust_arr(fonte).1 {
+        let o = cust_opcao(fonte, i);
         if cust_tipo_da_opcao(c, o) != Some(CustTipo::App) || cu64(o + c.nome) != 0 {
             continue;
         }
-        if cust_arr(o + l.campo).1 != 0 {
-            cheia = o;
+        let definicoes = o + l.campo;
+        if cust_arr(definicoes).1 != 0 {
+            cheia = Some(o);
             continue;
         }
-        if cheia == 0 {
-            continue;
+        let Some(f) = cheia else { continue };
+        let (e, n, _) = cust_arr(f + l.campo);
+        let mut recebeu = false;
+        for k in 0..n {
+            recebeu |= cust_anexar_valor(definicoes, l.tipo, l.passo, e + k * l.passo).is_some();
         }
-        rtti::type_assign(l.tipo_array as *mut c_void, (o + l.campo) as *mut c_void, (cheia + l.campo) as *const c_void);
-        if cu64(o + c.recurso) == 0 && cu64(cheia + c.recurso) != 0 {
-            ((o + c.recurso) as *mut u64).write_unaligned(cu64(cheia + c.recurso));
+        if cu64(o + c.recurso) == 0 {
+            ((o + c.recurso) as *mut u64).write_unaligned(cu64(f + c.recurso));
         }
-        n += 1;
+        expandidas += u32::from(recebeu);
     }
-    n
+    expandidas
 }
 
-/// As escolhas de `src` entram em `t` (mesmo tipo): mesma chave substitui, chave nova vai pro fim e é registrada.
+/// Escolhas da opção `src` na opção `t` do mesmo tipo: chave igual substitui, chave nova vai ao fim.
 pub(crate) unsafe fn cust_mesclar_escolhas(c: &CustCampos, m: &mut CustMescla, t: usize, src: usize, tipo: CustTipo) {
     let l = c.listas[tipo as usize];
-    let (lista_alvo, lista_fonte) = (t + l.campo, src + l.campo);
+    let (lista_t, lista_s) = (t + l.campo, src + l.campo);
     let dono = cu64(t + c.nome);
-    let cabelo = tipo == CustTipo::App && cu64(t + c.slot) == cname("hair_color");
-    for k in 0..cust_arr(lista_fonte).1 {
-        let se = cust_arr(lista_fonte).0 + k * l.passo;
-        let chave = cust_chave(&l, tipo, se);
-        let (te, tn, _) = cust_arr(lista_alvo);
-        match (0..tn).find(|p| cust_chave(&l, tipo, te + p * l.passo) == chave) {
-            Some(p) => {
-                let vaga = te + p * l.passo;
-                if !cust_nome_de_mod(cust_nome_da_escolha(dono, &chave)) && !m.trocas.iter().any(|x| x.dono == t && x.tipo == tipo && x.pos == p) {
+    let app = tipo == CustTipo::App;
+    // `resource` e `uiSlot` de cor de cabelo só existem no app: no morph e no switcher o offset é de outro campo.
+    let (recurso_t, recurso_s) = if app { (cu64(t + c.recurso), cu64(src + c.recurso)) } else { (0, 0) };
+    let cabelo = app && cu64(t + c.slot) == cname("hair_color");
+    for j in 0..cust_arr(lista_s).1 {
+        let es = cust_arr(lista_s).0 + j * l.passo;
+        let chave = cust_chave(&l, tipo, es);
+        let (et, nt, _) = cust_arr(lista_t);
+        match (0..nt).find(|k| cust_chave(&l, tipo, et + k * l.passo) == chave) {
+            Some(pos) => {
+                let el = et + pos * l.passo;
+                // A escolha que outra fonte já pôs sai pelo truncamento ou pela cópia guardada da 1ª troca: guardar de novo voltaria a de mod.
+                let guardada = m.trocas.iter().any(|tr| tr.dono == t && tr.tipo == tipo && tr.pos == pos);
+                if !guardada && !cust_nome_de_mod(cust_nome_da_escolha(dono, &chave)) {
                     let mut copia = vec![0u64; l.passo.div_ceil(8)];
-                    let a = copia.as_mut_ptr() as usize;
-                    cust_tipo_fn(l.tipo, 0x40, a);
-                    rtti::type_assign(l.tipo as *mut c_void, a as *mut c_void, vaga as *const c_void);
-                    m.trocas.push(CustTroca { dono: t, tipo, pos: p, copia });
+                    let p = copia.as_mut_ptr() as usize;
+                    cust_tipo_fn(l.tipo, 0x40, p);
+                    rtti::type_assign(l.tipo as *mut c_void, p as *mut c_void, el as *const c_void);
+                    m.trocas.push(CustTroca { dono: t, tipo, pos, copia });
                 }
-                rtti::type_assign(l.tipo as *mut c_void, vaga as *mut c_void, se as *const c_void);
+                rtti::type_assign(l.tipo as *mut c_void, el as *mut c_void, es as *const c_void);
                 m.contagem.trocas += 1;
             }
             None => {
-                m.anotar(lista_alvo, CustElemento::Valor { tipo: l.tipo, passo: l.passo });
-                if cust_anexar_valor(lista_alvo, l.tipo, l.passo, se).is_some() {
-                    m.contagem.escolhas[tipo as usize] += 1;
-                    if let CustChave::Nome(nome_def) = chave {
-                        let (r_alvo, r_fonte) = (cu64(t + c.recurso), cu64(src + c.recurso));
-                        if r_fonte != 0 && r_fonte != r_alvo {
-                            m.override_(r_alvo, r_fonte, nome_def);
-                        }
-                    }
-                    cust_registrar_nome(cust_nome_da_escolha(dono, &chave));
+                m.anotar(lista_t, CustElemento::Valor { tipo: l.tipo, passo: l.passo });
+                if cust_anexar_valor(lista_t, l.tipo, l.passo, es).is_none() {
+                    continue;
+                }
+                m.contagem.escolhas[tipo as usize] += 1;
+                // A definição nova é pedida ao recurso do alvo: a troca de aparência leva o pedido ao recurso de mod.
+                if app && recurso_s != 0 && recurso_s != recurso_t {
+                    m.override_(recurso_t, recurso_s, cu64(es + l.chave));
                 }
             }
         }
+        cust_registrar_nome(cust_nome_da_escolha(dono, &chave));
         if cabelo {
-            let (te, tn, _) = cust_arr(se + c.tags);
-            for q in 0..tn {
-                let tag = cu64(te + q * 8);
+            let (tags, n, _) = cust_arr(es + c.tags);
+            for k in 0..n {
+                let tag = cu64(tags + k * 8);
                 if tag != 0 && !m.cores.contains(&tag) {
                     m.cores.push(tag);
                     m.contagem.cores += 1;
@@ -1334,113 +1179,117 @@ pub(crate) unsafe fn cust_mesclar_escolhas(c: &CustCampos, m: &mut CustMescla, t
     }
 }
 
-/// `MergeCustomOptions(alvo, fonte, slots)`.
+/// Um par (opção do alvo, opção da fonte) casado: classe diferente ou alvo de tipo desconhecido não recebe (o layout das escolhas é o da
+/// classe), e o app casado por curinga só recebe se já tem recurso e definições (curinga não cria opção visível do nada).
+unsafe fn cust_mesclar_par(c: &CustCampos, m: &mut CustMescla, t: usize, s: usize, curinga: bool) {
+    let Some(tipo) = cust_tipo_da_opcao(c, s) else { return };
+    if cust_tipo_da_opcao(c, t).is_none() || rtti::class_of(t as *mut c_void) != rtti::class_of(s as *mut c_void) {
+        m.contagem.incompativeis += 1;
+        return;
+    }
+    if curinga && tipo == CustTipo::App && (cu64(t + c.recurso) == 0 || cust_arr(t + c.listas[0].campo).1 == 0) {
+        return;
+    }
+    cust_mesclar_escolhas(c, m, t, s, tipo);
+}
+
+/// Opções da fonte nas do alvo. Por nome (`slots = false`): a opção com nome casa a homônima do alvo, e sem homônima vai ao fim; com
+/// `link`, as escolhas vêm da opção da fonte com o nome do link. Por slot (`slots = true`): a opção sem nome casa toda opção do alvo de
+/// `uiSlot` (e `link`) igual, ou por prefixo quando o texto termina em `*`; nunca anexa.
 pub(crate) unsafe fn cust_mesclar_opcoes(c: &CustCampos, m: &mut CustMescla, alvo: usize, fonte: usize, slots: bool) {
-    let n_fonte = cust_arr(fonte).1;
-    for i in 0..n_fonte {
-        let h_fonte = cust_handle(fonte, i);
-        let mut src = h_fonte[0] as usize;
-        if src == 0 {
+    let n_f = cust_arr(fonte).1;
+    for j in 0..n_f {
+        let h = cust_handle(fonte, j);
+        let f = h[0] as usize;
+        if f == 0 {
             continue;
         }
-        let (nome, slot, link) = (cu64(src + c.nome), cu64(src + c.slot), cu64(src + c.link));
-        if (slots && (nome != 0 || (slot == 0 && link == 0))) || (!slots && nome == 0) {
+        let (nome, slot, link) = (cu64(f + c.nome), cu64(f + c.slot), cu64(f + c.link));
+        if !slots {
+            if nome == 0 {
+                continue;
+            }
+            let src = if link == 0 { Some(f) } else { (0..n_f).map(|k| cust_opcao(fonte, k)).find(|o| *o != 0 && cu64(*o + c.nome) == link) };
+            let mut casou = false;
+            for i in 0..cust_arr(alvo).1 {
+                let t = cust_opcao(alvo, i);
+                if t == 0 || cu64(t + c.nome) != nome {
+                    continue;
+                }
+                casou = true;
+                // Link sem a opção de destino na fonte: a homônima existe no alvo, então nada a mesclar nem a anexar.
+                match src {
+                    Some(s) if s != t => cust_mesclar_par(c, m, t, s, false),
+                    _ => {}
+                }
+            }
+            if !casou {
+                m.anotar(alvo, CustElemento::Handle);
+                if cust_anexar_handle(alvo, h) {
+                    m.contagem.opcoes += 1;
+                    cust_registrar_nome(nome);
+                }
+            }
             continue;
         }
-        let texto = |n: u64| if slots && n != 0 { crate::cname::resolve_cname(n) } else { String::new() };
-        let (slot_txt, link_txt) = (texto(slot), texto(link));
-        let (curinga_slot, curinga_link) = (cust_curinga(&slot_txt), cust_curinga(&link_txt));
-        let mut existe = false;
-        for j in 0..cust_arr(alvo).1 {
-            let t = cust_handle(alvo, j)[0] as usize;
-            if t == 0 {
-                continue;
-            }
-            if slots {
-                if slot != 0 && !cust_casa(cu64(t + c.slot), || crate::cname::resolve_cname(cu64(t + c.slot)), slot, curinga_slot) {
-                    continue;
-                }
-                if link != 0 && !cust_casa(cu64(t + c.link), || crate::cname::resolve_cname(cu64(t + c.link)), link, curinga_link) {
-                    continue;
-                }
-            } else {
-                if cu64(t + c.nome) != nome {
-                    continue;
-                }
-                if link != 0 {
-                    match (0..n_fonte).map(|k| cust_handle(fonte, k)[0] as usize).find(|o| *o != 0 && cu64(o + c.nome) == link) {
-                        Some(o) => src = o,
-                        None => continue,
-                    }
-                }
-            }
-            existe = true;
-            let tipo = cust_tipo_da_opcao(c, t);
-            if tipo.is_none() || rtti::class_of(t as *mut c_void) != rtti::class_of(src as *mut c_void) {
-                m.contagem.incompativeis += 1;
-                continue;
-            }
-            let tipo = tipo.unwrap_or(CustTipo::App);
-            if tipo == CustTipo::App
-                && (curinga_slot.is_some() || curinga_link.is_some())
-                && (cu64(t + c.recurso) == 0 || cust_arr(t + c.listas[0].campo).1 == 0)
-            {
-                continue;
-            }
-            cust_mesclar_escolhas(c, m, t, src, tipo);
+        if nome != 0 || (slot == 0 && link == 0) {
+            continue;
         }
-        if !existe && !slots {
-            m.anotar(alvo, CustElemento::Handle);
-            if cust_anexar_handle(alvo, h_fonte) {
-                cust_registrar_nome(nome);
-                m.contagem.opcoes += 1;
+        let (texto_slot, texto_link) = (crate::cname::resolve_cname(slot), crate::cname::resolve_cname(link));
+        let prefixo_slot = if slot != 0 { cust_curinga(&texto_slot) } else { None };
+        let prefixo_link = if link != 0 { cust_curinga(&texto_link) } else { None };
+        for i in 0..cust_arr(alvo).1 {
+            let t = cust_opcao(alvo, i);
+            if t == 0 || t == f {
+                continue;
+            }
+            let (slot_t, link_t) = (cu64(t + c.slot), cu64(t + c.link));
+            let casa_slot = slot == 0 || cust_casa(slot_t, || crate::cname::resolve_cname(slot_t), slot, prefixo_slot);
+            // O curinga do link compara com o link do alvo, não com o slot dele.
+            let casa_link = link == 0 || cust_casa(link_t, || crate::cname::resolve_cname(link_t), link, prefixo_link);
+            if casa_slot && casa_link {
+                cust_mesclar_par(c, m, t, f, prefixo_slot.is_some() || prefixo_link.is_some());
             }
         }
     }
 }
 
-/// `RegenerateIndexes`: `index` = posição em cada lista de escolhas; o de antes fica guardado.
+/// `index` de cada escolha = posição dela na lista: a tela e o save escolhem pelo índice, e a mescla deslocou as posições.
 pub(crate) unsafe fn cust_regenerar(c: &CustCampos, m: &mut CustMescla, opcoes: usize) {
-    for k in 0..cust_arr(opcoes).1 {
-        let t = cust_handle(opcoes, k)[0] as usize;
+    for i in 0..cust_arr(opcoes).1 {
+        let t = cust_opcao(opcoes, i);
         let Some(tipo) = cust_tipo_da_opcao(c, t) else { continue };
         let l = c.listas[tipo as usize];
         let (e, n, _) = cust_arr(t + l.campo);
-        for p in 0..n {
-            let campo = (e + p * l.passo + l.indice) as *mut i32;
-            let antigo = campo.read_unaligned();
-            if antigo != p as i32 {
-                m.indices.push((t, tipo, p, antigo));
-                campo.write_unaligned(p as i32);
+        for pos in 0..n {
+            let campo = (e + pos * l.passo + l.indice) as *mut i32;
+            let antes = campo.read_unaligned();
+            if antes != pos as i32 {
+                m.indices.push((t, tipo, pos, antes));
+                campo.write_unaligned(pos as i32);
                 m.contagem.indices += 1;
             }
         }
     }
 }
 
-/// `MergeCustomEntries(alvo, fontes)` num recurso base: `resource.fix`, grupos, expansão e opções de cada fonte, o passe de slots e links, índices.
+/// Mescla as `fontes` (recursos de mod da mesma variante) no recurso base `alvo` de caminho `caminho`, parte por parte (braços, corpo,
+/// cabeça). Os passes por slot rodam depois de todas as fontes entrarem por nome: o curinga casa também o que outra fonte anexou.
 pub(crate) unsafe fn cust_mesclar_recurso(c: &CustCampos, m: &mut CustMescla, alvo: usize, caminho: u64, fontes: &[usize]) {
-    for k in [2usize, 1, 0] {
-        cust_consertar_caminhos(c, m, caminho, alvo + CUST_OPCOES_OFF[k]);
-    }
-    for f in fontes {
-        for k in [2usize, 1, 0] {
-            cust_mesclar_grupos(m, alvo + CUST_GRUPOS_OFF[k], f + CUST_GRUPOS_OFF[k]);
-        }
-        for k in [2usize, 1, 0] {
+    m.contagem.alvos += 1;
+    m.contagem.fontes += fontes.len() as u32;
+    for k in [2, 1, 0] {
+        let (opcoes, grupos) = (alvo + CUST_OPCOES_OFF[k], alvo + CUST_GRUPOS_OFF[k]);
+        cust_consertar_caminhos(c, m, caminho, opcoes);
+        for f in fontes {
+            cust_mesclar_grupos(m, grupos, f + CUST_GRUPOS_OFF[k]);
             m.contagem.expandidas += cust_expandir(c, f + CUST_OPCOES_OFF[k]);
+            cust_mesclar_opcoes(c, m, opcoes, f + CUST_OPCOES_OFF[k], false);
         }
-        for k in [2usize, 1, 0] {
-            cust_mesclar_opcoes(c, m, alvo + CUST_OPCOES_OFF[k], f + CUST_OPCOES_OFF[k], false);
+        for f in fontes {
+            cust_mesclar_opcoes(c, m, opcoes, f + CUST_OPCOES_OFF[k], true);
         }
-    }
-    for f in fontes {
-        for k in [2usize, 1, 0] {
-            cust_mesclar_opcoes(c, m, alvo + CUST_OPCOES_OFF[k], f + CUST_OPCOES_OFF[k], true);
-        }
-    }
-    for k in [2usize, 1, 0] {
-        cust_regenerar(c, m, alvo + CUST_OPCOES_OFF[k]);
+        cust_regenerar(c, m, opcoes);
     }
 }
 
@@ -1460,58 +1309,61 @@ pub(crate) unsafe fn cust_recurso_do_token(c: &CustCampos, token: u64, espera_ms
     (h[0] != 0 && h[1] != 0 && class_is_kind_of(rtti::class_of(h[0] as *mut c_void), c.classe_recurso as *mut c_void)).then_some(h)
 }
 
-/// `OnPrepareResource` → `MergeCustomEntries(sys)`: uma vez, nos recursos base de `sys+0x48` (masculino) e `+0x58` (feminino), com as fontes de cada
-/// um; as cores de cabelo vão pro flat no fim. `None` se já mesclado ou desligado.
+/// Recurso base de cada variante no sistema de customização: `SharedPtr<ResourceToken>` masculino e feminino.
+const CUST_SISTEMA_TOKENS: [usize; 2] = [0x48, 0x58];
+/// Caminho do recurso no `ResourceToken`.
+const CUST_TOKEN_CAMINHO: usize = 0x48;
+/// Espera do token do recurso base no `Initialize`: a carga do save já pediu o recurso, e o hook não pode segurar a thread do jogo.
+const CUST_ESPERA_DO_BASE_MS: u64 = 250;
+
+/// No `Initialize` do sistema de customização, antes do original: mescla as fontes de mod nos 2 recursos base, uma vez por processo.
 pub(crate) unsafe fn cust_mesclar_no_sistema(sys: u64) -> Option<CustContagem> {
     if !CUST_LIGADO.load(Ordering::Relaxed) || sys == 0 {
         return None;
     }
     let c = cust_campos()?;
     let mut g = CUST.lock().ok()?;
-    let m = g.get_or_insert_with(Default::default);
-    if m.mesclado {
+    if g.as_ref().is_some_and(|m| m.mesclado) {
         return None;
     }
-    let fontes = CUST_FONTES.lock().ok()?.clone();
-    m.contagem = CustContagem::default();
-    for (k, off) in [(0usize, 0x48u64), (1, 0x58)] {
-        let token = cu64((sys + off) as usize);
-        let Some(alvo) = cust_recurso_do_token(&c, token, 250) else {
-            crate::log_dev!("[a47c] recurso base {k} não pronto (token {token:#x})");
-            continue;
-        };
-        let caminho = cu64(token as usize + 0x48);
-        let so_montadas = CUST_SO_MONTADAS.load(Ordering::Relaxed);
-        let lista: Vec<usize> = fontes[k]
+    let fontes_por_variante = CUST_FONTES.lock().ok()?.clone();
+    let so_montadas = CUST_SO_MONTADAS.load(Ordering::Relaxed);
+    let mut m = CustMescla::default();
+    for (k, off) in CUST_SISTEMA_TOKENS.into_iter().enumerate() {
+        let token = cu64(sys as usize + off);
+        let Some(base) = cust_recurso_do_token(&c, token, CUST_ESPERA_DO_BASE_MS) else { continue };
+        let fontes: Vec<usize> = fontes_por_variante[k]
             .iter()
             .filter_map(|f| match f {
-                CustFonte::Token(_) if so_montadas => None,
-                CustFonte::Token(t) => cust_recurso_do_token(&c, t[0], 0).map(|h| h[0] as usize),
+                // Token da tabela que ainda não terminou fica de fora: esperar cada fonte aqui atrasaria a carga do save.
+                CustFonte::Token(t) if !so_montadas => cust_recurso_do_token(&c, t[0], 0).map(|h| h[0] as usize),
+                CustFonte::Token(_) => None,
                 CustFonte::Recurso(r) => Some(*r),
             })
             .collect();
-        m.contagem.fontes += lista.len() as u32;
-        (*(alvo[1] as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
-        m.alvos.push(alvo);
-        m.contagem.alvos += 1;
-        cust_mesclar_recurso(&c, m, alvo[0] as usize, caminho, &lista);
+        // O recurso base fica retido enquanto a mescla existir: a volta escreve nele.
+        (*(base[1] as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
+        m.alvos.push(base);
+        cust_mesclar_recurso(&c, &mut m, base[0] as usize, cu64(token as usize + CUST_TOKEN_CAMINHO), &fontes);
     }
     if !m.cores.is_empty() {
         if let Some(t) = crate::tweakdb::singleton() {
             let id = bwms_primitives::tweak_db_id(CUST_CORES_FLAT);
-            if let Some(antes) = crate::tweakdb::get_flat_array_u64_by_id(t as *const u8, id) {
-                let mut nova = antes.clone();
-                nova.extend(m.cores.iter().filter(|x| !antes.contains(x)));
-                if nova.len() > antes.len() && crate::tweakdb::set_flat_array_u64_by_id(t, id, id, &nova).is_some() {
-                    m.cores_antes = Some(antes);
-                }
+            let antes = crate::tweakdb::get_flat_array_u64_by_id(t as *const u8, id).unwrap_or_default();
+            let novas: Vec<u64> = m.cores.iter().copied().filter(|cor| !antes.contains(cor)).collect();
+            if !novas.is_empty() {
+                let mut depois = antes.clone();
+                depois.extend(novas);
+                crate::tweakdb::set_flat_array_u64_by_id(t, id, id, &depois);
+                m.cores_antes = Some(antes);
             }
         }
     }
     m.mesclado = true;
-    let n = m.contagem;
-    crate::veredito_dev!("[a47c] mescla de customização: {n:?}");
-    Some(n)
+    let contagem = m.contagem;
+    *g = Some(m);
+    crate::veredito_dev!("[a47c] mescla no Initialize: {contagem:?}");
+    Some(contagem)
 }
 
 /// `RemoveCustomEntries`: as listas voltam ao tamanho de antes, as escolhas substituídas, os índices e os caminhos voltam, e saem os overrides, as cores
@@ -1585,43 +1437,54 @@ pub(crate) unsafe fn cust_opcao_do_estado(opcao: u64) -> Option<(usize, u64, boo
     Some((obj, cu64(info + c.nome), cu8(info + c.oculto) == 0 && ligada))
 }
 
-/// `OnInitAppOption`/`OnInitMorphOption` (antes da original): opção de mod fora das opções do estado entra nelas, na ordem (`SortedUniqueArray::Emplace`).
+/// Objeto da opção de mod visível em `opcao`, ou `None` (sem mescla, ilegível, oculta, desligada ou do jogo).
+unsafe fn cust_opcao_de_mod_visivel(opcao: u64) -> Option<(usize, u64)> {
+    let (obj, nome, visivel) = cust_opcao_do_estado(opcao)?;
+    (visivel && cust_nome_de_mod(nome)).then_some((obj, nome))
+}
+
+/// No `InitializeAppOption`/`InitializeMorphOption`, antes do original: a opção de mod entra nas opções do estado do save (array
+/// ordenado), senão o motor não a monta e a escolha salva some.
 pub(crate) unsafe fn cust_marcar_estado(opcao: u64, estado: u64) -> bool {
-    let Some((_, nome, visivel)) = cust_opcao_do_estado(opcao) else { return false };
-    if !visivel || estado == 0 || !cust_nome_de_mod(nome) {
+    let Some((_, nome)) = cust_opcao_de_mod_visivel(opcao) else { return false };
+    if estado == 0 || !crate::memoria::is_readable(estado as *const c_void, 0x10) {
         return false;
     }
     let arr = estado as usize;
     let (e, n, _) = cust_arr(arr);
-    let atuais: Vec<u64> = if n == 0 { Vec::new() } else { std::slice::from_raw_parts(e as *const u64, n).to_vec() };
-    let Err(pos) = cust_posicao_ordenada(&atuais, nome) else { return false };
+    if n != 0 && (e == 0 || !crate::memoria::is_readable(e as *const c_void, n * 8)) {
+        return false;
+    }
+    let atual: &[u64] = if n == 0 { &[] } else { std::slice::from_raw_parts(e as *const u64, n) };
+    let Err(pos) = cust_posicao_ordenada(atual, nome) else { return false };
     if !cust_reservar_mais_um(arr, 8) {
         return false;
     }
-    let e = cust_arr(arr).0;
-    std::ptr::copy((e + pos * 8) as *const u64, (e + (pos + 1) * 8) as *mut u64, n - pos);
-    ((e + pos * 8) as *mut u64).write_unaligned(nome);
+    let e = cust_arr(arr).0 as *mut u64;
+    std::ptr::copy(e.add(pos), e.add(pos + 1), n - pos);
+    e.add(pos).write_unaligned(nome);
     ((arr + 0xc) as *mut u32).write_unaligned(n as u32 + 1);
     #[cfg(feature = "devtools")]
     CUST_MARCAS[0].fetch_add(1, Ordering::Relaxed);
     true
 }
 
-/// `OnInitSwitcherOption` (depois da original): opção de mod inativa passa a ativa.
+/// No `InitializeSwitcherOption`, depois do original: a opção de mod fica ativa (o motor só ativa as que conhece).
 pub(crate) unsafe fn cust_marcar_ativo(opcao: u64) -> bool {
-    let Some((obj, nome, visivel)) = cust_opcao_do_estado(opcao) else { return false };
+    let Some((obj, _)) = cust_opcao_de_mod_visivel(opcao) else { return false };
     let Some(c) = CUST_CAMPOS.try_lock().ok().and_then(|g| *g) else { return false };
-    if !visivel || cu8(obj + c.opcao_ativo) != 0 || !cust_nome_de_mod(nome) {
+    let ativo = (obj + c.opcao_ativo) as *mut u8;
+    if *ativo != 0 {
         return false;
     }
-    *((obj + c.opcao_ativo) as *mut u8) = 1;
+    *ativo = 1;
     #[cfg(feature = "devtools")]
     CUST_MARCAS[1].fetch_add(1, Ordering::Relaxed);
     true
 }
 
 /// `bwms-customizations.txt` (`<male|female> | <caminho>`, `bwms_primitives::tabelas::Customizacao`), na carga das tabelas (game thread): desfaz a mescla
-/// anterior (o `Reload` da referência), pede o token de cada recurso e liga os hooks. Devolve as fontes.
+/// anterior (a tabela nova substitui a velha inteira), pede o token de cada recurso e liga os hooks. Devolve as fontes.
 pub(crate) unsafe fn cust_tabela(texto: &str) -> usize {
     cust_remover();
     // Índice em `CUST_FONTES`: 0 = masculino, 1 = feminino.
@@ -1662,7 +1525,7 @@ pub(crate) fn cust_tem_fonte_de_tabela(fontes: &[Vec<CustFonte>; 2]) -> bool {
 }
 
 /// Carga das tabelas sem `bwms-customizations.txt` (o `bwms install` apaga a tabela que ficaria sem linha): com fonte da tabela anterior, a tabela entra
-/// vazia, desfaz a mescla, tira os tokens das fontes e desliga `CUST_LIGADO` (o `Reload` da referência). Sem fonte anterior não há o que desfazer, e o boot
+/// vazia, desfaz a mescla, tira os tokens das fontes e desliga `CUST_LIGADO`. Sem fonte anterior não há o que desfazer, e o boot
 /// sem customizations não resolve os campos do RTTI.
 pub(crate) unsafe fn cust_tabela_ausente() {
     if CUST_FONTES.lock().is_ok_and(|f| cust_tem_fonte_de_tabela(&f)) {
@@ -1671,7 +1534,7 @@ pub(crate) unsafe fn cust_tabela_ausente() {
 }
 
 
-/// `BwmsPuppetStateFireOnce() -> Bool` — axl-puppet-state-apply: dispara `MenuScenario_CharacterCustomizationMirror`
+/// `BwmsPuppetStateFireOnce() -> Bool` — teste do estado do boneco: dispara `MenuScenario_CharacterCustomizationMirror`
 /// (SwitchToScenario, native pública em `inkMenuScenario`) SEM exigir que o usuário caminhe até um
 /// espelho no mundo (world-nav) — tenta exercitar `GenitalsController::OnAttach`/`HairstyleController::OnDetach`
 /// (hooks já instalados em `selftest.rs::install_postload_hooks`, vmaddrs GENITAL_ONATTACH_VM/
@@ -1729,9 +1592,9 @@ pub(crate) unsafe extern "C" fn tramp_puppetstate_arm_recovery(_c: *mut c_void, 
     write_bool_ret(out, armed);
 }
 
-/// Codeware `#24` `Entity.ApplyMorphTarget` (2026-09-11): `MorphTargetManager::ApplyMorphTarget` = `0x10197f17c`
+/// `Entity.ApplyMorphTarget` (2026-09-11): `MorphTargetManager::ApplyMorphTarget` = `0x10197f17c`
 /// (`x0` manager, `x1` target, `x2` region, `s0` value, `w3` bool), achado offline
-/// (`proofs/20260911-codeware-24-applymorphtarget-identificado.log`). O manager é o 1º componente da entidade cuja
+/// (`proofs/20260911-*-24-applymorphtarget-identificado.log`). O manager é o 1º componente da entidade cuja
 /// classe descende de `entMorphTargetManagerComponent`; os pesos ficam num `DynArray<entMorphTargetWeightEntry>` em
 /// `+0x98` (entrada de 0x18: target, region, peso f32 em `+0x10`).
 pub(crate) const MORPH_APPLY_VM: u64 = 0x1_0197_f17c;
@@ -1742,31 +1605,25 @@ pub(crate) const MORPH_PESOS_OFF: usize = 0x98;
 #[cfg(feature = "devtools")]
 pub(crate) const MORPH_ENTRADA_TAM: usize = 0x18;
 
+/// Teto de componentes percorridos: acima disso a lista é lixo, não entidade.
+const MORPH_COMPONENTES_MAX: usize = 10_000;
+
+/// O 1º componente da entidade cuja classe deriva de `entMorphTargetManagerComponent`; nulo sem ele ou com entidade ilegível.
 pub(crate) unsafe fn morph_manager_de(entity: *mut c_void) -> *mut c_void {
-    if !rtti::sane(entity) {
+    if entity.is_null() || !crate::memoria::is_readable(entity as *const c_void, 0xB0) {
         return std::ptr::null_mut();
     }
-    let arr = (entity as *const u8).add(0xA0) as *const c_void;
-    if !crate::memoria::is_readable(arr, 0x10) {
-        return std::ptr::null_mut();
-    }
-    let entries = rd_u64(arr, 0x00) as *const u8;
-    let size = core::ptr::read_unaligned((arr as *const u8).add(0x0C) as *const u32);
-    if entries.is_null() || size >= 10_000 {
+    let componentes = (entity as *const u8).add(0xA0) as *const c_void;
+    let (entradas, n) = (rd_u64(componentes, 0), rd_u32(componentes, 0x0C) as usize);
+    if entradas == 0 {
         return std::ptr::null_mut();
     }
     let alvo = cname("entMorphTargetManagerComponent");
-    for i in 0..size as usize {
-        let slot = entries.add(i * 16);
-        if !crate::memoria::is_readable(slot as *const c_void, 8) {
-            continue;
-        }
-        let inst = core::ptr::read_unaligned(slot as *const u64) as *mut c_void;
-        if !rtti::sane(inst) {
-            continue;
-        }
-        if classe_deriva_de_nome(rtti::class_of(inst), alvo) {
-            return inst;
+    for i in 0..n.min(MORPH_COMPONENTES_MAX) {
+        let Some(comp) = crate::memoria::read_u64(entradas as usize + i * 16) else { break };
+        let comp = comp as *mut c_void;
+        if !comp.is_null() && classe_deriva_de_nome(rtti::class_of(comp), alvo) {
+            return comp;
         }
     }
     std::ptr::null_mut()
@@ -1799,8 +1656,8 @@ pub(crate) unsafe fn morph_peso(manager: *mut c_void, target: u64, region: u64) 
         .map(|p| (p.add(0x10) as *const f32).read_unaligned())
 }
 
-/// `BwmsEntityApplyMorphTarget(entity: ref<Entity>, target: CName, region: CName, value: Float) -> Bool` — true
-/// quando a entidade tem o manager (como o Codeware), mesmo que o motor não mude nada (limiar de 0.01).
+/// `BwmsEntityApplyMorphTarget(entity, target, region, value) -> Bool`: `true` quando a entidade tem o manager, e então o motor aplica
+/// o peso (diferença abaixo de 0,01 o motor ignora, e o retorno continua `true`).
 pub(crate) unsafe extern "C" fn tramp_entity_apply_morph_target(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let entity = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -1808,15 +1665,14 @@ pub(crate) unsafe extern "C" fn tramp_entity_apply_morph_target(_c: *mut c_void,
     let region = args.get(2).map(|(v, _)| *v).unwrap_or(0);
     let valor = f32::from_bits(args.get(3).map(|(v, _)| *v as u32).unwrap_or(0));
     let manager = morph_manager_de(entity);
-    let ok = !manager.is_null();
-    if ok {
-        let aplicar: extern "C" fn(*mut c_void, u64, u64, f32, bool) = std::mem::transmute(crate::rebase(MORPH_APPLY_VM));
-        aplicar(manager, target, region, valor, false);
+    if manager.is_null() {
+        write_bool_ret(out, false);
+        return;
     }
-    crate::log_dev!(
-        "[entity] BwmsEntityApplyMorphTarget(target={target:#x}, region={region:#x}, valor={valor}) manager={manager:p} -> {ok}"
-    );
-    write_bool_ret(out, ok);
+    // TODO(B4 §B.7): efeito do 5º argumento (`w3`) não medido; medir comparando `morph_peso` depois de chamar com 0 e com 1 no mesmo alvo.
+    let aplicar: unsafe extern "C" fn(*mut c_void, u64, u64, f32, u32) = std::mem::transmute(crate::rebase(MORPH_APPLY_VM));
+    aplicar(manager, target, region, valor, 0);
+    write_bool_ret(out, true);
 }
 
 /// `BwmsEntityGetMorphTargetWeight(entity: ref<Entity>, target: CName, region: CName) -> Float` — -1 sem o par.
@@ -1897,46 +1753,6 @@ pub(crate) fn es20_no_escopo(escopo: u64, alvo: u64) -> bool {
     es20_escopos().read().map(|g| g.get(&escopo).is_some_and(|s| s.contains(&alvo))).unwrap_or(false)
 }
 
-/// Tipos e campos do `FixCustomizationAppearance`, pelo RTTI na thread do jogo: `appearanceAppearancePartOverrides` (0x18 B) e
-/// `appearancePartComponentOverrides` (0x50 B), com o construtor de cada um no `EmplaceBack`, e `componentName`/`meshAppearance` do override de componente.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Es20Customizacao {
-    pub(crate) tipos: [usize; 2],
-    pub(crate) campos: [usize; 2],
-}
-
-impl Es20Customizacao {
-    /// `componentName` e `meshAppearance` do override de componente.
-    pub(crate) fn campos(&self) -> [usize; 2] {
-        self.campos
-    }
-}
-
-/// Leitor do `compiledData` da definição (`DeferredDataBuffer` `+0xF0`, leitor `+0x30`).
-pub(crate) const ES20_DEF_LEITOR: usize = 0x120;
-
-/// `BufferReader::Clone(destino, origem)`: o maker do tipo do leitor de origem (`GetType` `vt+0x28`) grava um leitor novo em `*destino`; `false` sem origem ou
-/// com leitor fora dos 2 tipos medidos.
-pub(crate) unsafe fn es20_clonar_leitor(destino: *mut u64, origem: *const u8) -> bool {
-    if origem.is_null() || destino.is_null() {
-        return false;
-    }
-    let vtable = (origem as *const u64).read_unaligned();
-    let estatica = vtable.wrapping_sub(crate::rebase(0x1_0000_0000) as u64).wrapping_add(0x1_0000_0000);
-    let Some((_, tipo, maker)) = ES20_LEITORES.iter().find(|(v, _, _)| *v == estatica) else { return false };
-    let obter_tipo: extern "C" fn(*const u8) -> u8 = std::mem::transmute(((vtable + 0x28) as *const u64).read_unaligned());
-    if obter_tipo(origem) != *tipo {
-        return false;
-    }
-    core::arch::asm!(
-        "blr {f}",
-        f = in(reg) crate::rebase(*maker) as u64,
-        in("x0") origem as u64 + 8,
-        in("x8") destino as u64,
-        clobber_abi("C"),
-    );
-    true
-}
 
 /// Tipo de uma opção: `gameuiAppearanceInfo` (lista `definitions`), `gameuiMorphInfo` (`morphNames`), `gameuiSwitcherInfo` (`options`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -2049,14 +1865,6 @@ pub(crate) const MORPHTGT_POSTLOAD_VM: u64 = 0x1_051c_a1a4;
 
 pub(crate) const A23_CORES_DO_CABELO: &str = "ItemFactory.HairColors.hairColors";
 
-// ===== ArchiveXL `#47` 47a: o `ApplyAppOverride` nos 6 `Get*Appearances` do estado de customização, e os 3 `Initialize*Option` observados =====
-// RE offline de 2026-09-18 (`proofs/20260918-archivexl-47-re-offline.log`): os `Get{Head,Body,Arms}Appearances{1,2}` são virtuais do
-// `CharacterCustomizationState` (vtable `0x107cb57e8`, slots `+0x198`..`+0x1c0`), `(estado, CName grupo, bool fpp, DynArray<AppearanceDescriptor>& saída)`,
-// e empurram os descritores na saída pelo realloc do motor; os controllers de customização do V chamam as versões 2 com TPP na montagem. A referência
-// (`Customization/Extension.cpp:145`) roda o `ApplyAppOverride` em cada descritor depois da original — a mesma tabela do `#11`. Os
-// `InitializeAppOption`/`InitializeMorphOption`/`InitializeSwitcherOption` (`0x104bd3f5c`/`0x104bd448c`/`0x104bd4a70`) montam as opções na carga do save
-// (`0x104bc4c48`, vt+0x150); na referência só agem com nomes de entrada de mod, que vêm da mescla dos recursos (47c). Aqui ficam só observados, com
-// `~/.bwms-hook-a47a-teste`, sem RTTI dentro do hook (pode rodar em thread de job).
 pub(crate) const A47_GET_VM: [u64; 6] = [0x1_04bb_f004, 0x1_04bb_f438, 0x1_04bb_f6f8, 0x1_04bb_f9b8, 0x1_04bb_fc78, 0x1_04bb_ff38];
 
 pub(crate) const A47_GET_PROLOGO: u32 = 0xd101_c3ff;
@@ -2068,38 +1876,47 @@ pub(crate) const A47_INIT: [(u64, u32); 3] = [(0x1_04bd_3f5c, 0xd102_03ff), (0x1
 
 pub(crate) static ORIG_A47_INIT: [AtomicU64; 3] = [const { AtomicU64::new(0) }; 3];
 
+/// Teto de descritores na saída de um `Get*Appearances`: acima disso o array é lixo.
+const A47_DESCRITORES_MAX: usize = 4096;
+
+/// Corpo dos 6 ganchos `Get{Head,Body,Arms}Appearances{1,2}`: o original preenche a saída (`DynArray` de descritores `[recurso, aparência]`)
+/// e a troca de aparência de recurso vale nela. Tabela vazia (o caso sem mod) repassa sem ir ao kernel.
 pub(crate) unsafe fn a47_get(k: usize, estado: u64, grupo: u64, fpp: u64, saida: *mut u64) -> u64 {
-    let f: unsafe extern "C" fn(u64, u64, u64, *mut u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_A47_GET[k]));
-    let r = f(estado, grupo, fpp, saida);
+    let original: unsafe extern "C" fn(u64, u64, u64, *mut u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_A47_GET[k]));
+    let r = original(estado, grupo, fpp, saida);
     #[cfg(any(test, feature = "devtools"))]
     A47_GET_CHAMADAS[k].fetch_add(1, Ordering::Relaxed);
-    // Tabela do `#11` vazia (o público sem mod do `#11`/`#47`): nada a trocar, então nem o `is_readable` da saída (1 ida ao kernel por chamada).
     if crate::aparencia::APP_OVERRIDES_N.load(Ordering::Relaxed) == 0 {
         return r;
     }
     if saida.is_null() || !crate::memoria::is_readable(saida as *const c_void, 0x10) {
         return r;
     }
-    let entradas = saida.read_unaligned();
-    let n = ((saida as *const u8).add(0xc) as *const u32).read_unaligned() as usize;
-    if entradas == 0 || n == 0 || n > 4096 {
+    let (entradas, n) = (saida.read_unaligned() as *mut u64, ((saida as *const u8).add(0x0C) as *const u32).read_unaligned() as usize);
+    if entradas.is_null() || n == 0 || n > A47_DESCRITORES_MAX {
         return r;
     }
+    let descritor = |i: usize| (entradas.add(i * 2) as *const [u64; 2]).read_unaligned();
+    #[cfg(feature = "devtools")]
+    let antes: Vec<[u64; 2]> = (0..n.min(64)).map(descritor).collect();
+    let trocados = crate::aparencia::aplicar_app_overrides(entradas, n);
     #[cfg(any(test, feature = "devtools"))]
-    A47_GET_DESCRITORES[k].fetch_add(n as u64, Ordering::Relaxed);
-    let trocados = crate::aparencia::aplicar_app_overrides(entradas as *mut u64, n);
-    if trocados > 0 {
-        #[cfg(any(test, feature = "devtools"))]
+    {
+        A47_GET_DESCRITORES[k].fetch_add(n as u64, Ordering::Relaxed);
         A47_GET_TROCADOS[k].fetch_add(trocados as u64, Ordering::Relaxed);
-        #[cfg(feature = "devtools")]
-        if A47_TESTE.load(Ordering::Relaxed) {
-            if let Ok(mut a) = A47_GET_AMOSTRA.try_lock() {
-                if a.len() < 8 {
-                    a.push((k, grupo, fpp & 0xff, (entradas as *const [u64; 2]).read_unaligned()));
-                }
+    }
+    #[cfg(feature = "devtools")]
+    if let Some(i) = (0..antes.len()).find(|i| descritor(*i) != antes[*i]) {
+        if let Ok(mut amostra) = A47_GET_AMOSTRA.lock() {
+            if amostra.len() < 8 {
+                amostra.push((k, grupo, fpp, descritor(i)));
             }
         }
     }
+    #[cfg(not(feature = "devtools"))]
+    let _ = descritor;
+    #[cfg(not(any(test, feature = "devtools")))]
+    let _ = trocados;
     r
 }
 
@@ -2123,71 +1940,90 @@ a47_get_hook!(a47_get4, 4);
 
 a47_get_hook!(a47_get5, 5);
 
-/// Com a mescla do `#47` (47c), o `OnInitAppOption`/`OnInitMorphOption` antes da original e o `OnInitSwitcherOption` depois.
+/// Contagem do teste 47a por `Initialize*Option` (0 app, 1 morph, 2 switcher): chamadas, partes vistas e maior estado.
+#[cfg(feature = "devtools")]
+unsafe fn a47_anotar_init(k: usize, parte: Option<u64>, estado: Option<u64>) {
+    A47_INIT_CHAMADAS[k].fetch_add(1, Ordering::Relaxed);
+    if let Some(p) = parte.filter(|p| *p < 3) {
+        A47_INIT_PARTES[k].fetch_or(1 << p, Ordering::Relaxed);
+    }
+    if let Some(e) = estado {
+        A47_INIT_ESTADO_MAX[k].fetch_max(a47_tamanho(e), Ordering::Relaxed);
+    }
+}
+
+/// `InitializeAppOption(sys, parte, &opção, &estado, &slots)`: a opção de mod entra no estado antes do original montá-la.
 pub(crate) unsafe extern "C" fn a47_init_app(sys: u64, parte: u64, opcao: u64, estado: u64, slots: u64) -> u64 {
+    cust_marcar_estado(opcao, estado);
     #[cfg(feature = "devtools")]
-    A47_INIT_CHAMADAS[0].fetch_add(1, Ordering::Relaxed);
-    #[cfg(feature = "devtools")]
-    A47_INIT_PARTES[0].fetch_or(1 << (parte & 0x3), Ordering::Relaxed);
-    #[cfg(feature = "devtools")]
-    A47_INIT_ESTADO_MAX[0].fetch_max(a47_tamanho(estado), Ordering::Relaxed);
-    crate::corpo_e_rosto::cust_marcar_estado(opcao, estado);
-    let f: unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_A47_INIT[0]));
-    f(sys, parte, opcao, estado, slots)
+    a47_anotar_init(0, Some(parte), Some(estado));
+    let original: unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_A47_INIT[0]));
+    original(sys, parte, opcao, estado, slots)
 }
 
+/// `InitializeMorphOption(sys, &opção, &estado, &slots)`: como o app, sem parte.
 pub(crate) unsafe extern "C" fn a47_init_morph(sys: u64, opcao: u64, estado: u64, slots: u64) -> u64 {
+    cust_marcar_estado(opcao, estado);
     #[cfg(feature = "devtools")]
-    A47_INIT_CHAMADAS[1].fetch_add(1, Ordering::Relaxed);
-    #[cfg(feature = "devtools")]
-    A47_INIT_ESTADO_MAX[1].fetch_max(a47_tamanho(estado), Ordering::Relaxed);
-    crate::corpo_e_rosto::cust_marcar_estado(opcao, estado);
-    let f: unsafe extern "C" fn(u64, u64, u64, u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_A47_INIT[1]));
-    f(sys, opcao, estado, slots)
+    a47_anotar_init(1, None, Some(estado));
+    let original: unsafe extern "C" fn(u64, u64, u64, u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_A47_INIT[1]));
+    original(sys, opcao, estado, slots)
 }
 
+/// `InitializeSwitcherOption(sys, parte, &opção, índice, &slots)`: o original monta, e a opção de mod fica ativa depois.
 pub(crate) unsafe extern "C" fn a47_init_switcher(sys: u64, parte: u64, opcao: u64, indice: u64, slots: u64) -> u64 {
+    let original: unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_A47_INIT[2]));
+    let r = original(sys, parte, opcao, indice, slots);
+    cust_marcar_ativo(opcao);
     #[cfg(feature = "devtools")]
-    A47_INIT_CHAMADAS[2].fetch_add(1, Ordering::Relaxed);
-    #[cfg(feature = "devtools")]
-    A47_INIT_PARTES[2].fetch_or(1 << (parte & 0x3), Ordering::Relaxed);
-    let f: unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u64 = std::mem::transmute(original_publicado(&ORIG_A47_INIT[2]));
-    let r = f(sys, parte, opcao, indice, slots);
-    crate::corpo_e_rosto::cust_marcar_ativo(opcao);
+    a47_anotar_init(2, Some(parte), None);
     r
 }
 
-/// No `on_load`: os 6 hooks dos `Get*Appearances` sempre (com a tabela do `#11` vazia só repassam, como na referência); com `~/.bwms-hook-a47a-teste`,
-/// os 3 `Initialize*Option` observados e os pares de teste do `#11` com override antes da carga.
-pub(crate) unsafe fn install_a47a() {
-    #[cfg(feature = "devtools")]
-    let teste = crate::marcador_individual("a47a-teste");
-    #[cfg(feature = "devtools")]
-    A47_TESTE.store(teste, Ordering::Relaxed);
-    let hooks: [unsafe extern "C" fn(u64, u64, u64, *mut u64) -> u64; 6] = [a47_get0, a47_get1, a47_get2, a47_get3, a47_get4, a47_get5];
-    let gets: Vec<Option<bool>> =
-        (0..6).map(|k| instalar_conferindo_prologo(A47_GET_VM[k], A47_GET_PROLOGO, hooks[k] as *mut c_void, &ORIG_A47_GET[k])).collect();
-    #[cfg(feature = "devtools")]
-    {
-        let mut inits: Vec<Option<bool>> = Vec::new();
-        let mut pre = 0;
-        if teste {
-            let destinos: [*mut c_void; 3] = [a47_init_app as *mut c_void, a47_init_morph as *mut c_void, a47_init_switcher as *mut c_void];
-            inits = (0..3).map(|k| instalar_conferindo_prologo(A47_INIT[k].0, A47_INIT[k].1, destinos[k], &ORIG_A47_INIT[k])).collect();
-            install_reslink();
-            for (r, a) in a11_pares_gravados() {
-                let alias = a11_alias(r);
-                reslink_add(alias, r);
-                crate::aparencia::registrar_app_override(r, alias, a);
-                pre += 1;
-            }
-        }
-        crate::veredito_dev!(
-            "[a47a] hooks no on_load: Get*Appearances {gets:?}, Initialize*Option {inits:?} (teste {teste}, {pre} par(es) do #11 com override antes da carga)"
-        );
+/// Os 3 ganchos dos `Initialize*Option`, na ordem de [`A47_INIT`] e [`ORIG_A47_INIT`].
+fn a47_ganchos_de_init() -> [*mut c_void; 3] {
+    [
+        a47_init_app as unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u64 as *mut c_void,
+        a47_init_morph as unsafe extern "C" fn(u64, u64, u64, u64) -> u64 as *mut c_void,
+        a47_init_switcher as unsafe extern "C" fn(u64, u64, u64, u64, u64) -> u64 as *mut c_void,
+    ]
+}
+
+/// Gancho no `vm` conferindo o prólogo; já posto (o `orig` publicado) conta como posto.
+unsafe fn a47_instalar_um((vm, prologo): (u64, u32), destino: *mut c_void, orig: &AtomicU64) -> Option<bool> {
+    if orig.load(Ordering::Relaxed) != 0 {
+        return Some(true);
     }
+    instalar_conferindo_prologo(vm, prologo, destino, orig)
+}
+
+/// No `on_load`, sempre: a troca de aparência de recurso nos 6 `Get*Appearances` (cabeça, corpo e braços do V). Com a tabela vazia os
+/// ganchos só repassam.
+pub(crate) unsafe fn install_a47a() {
+    type Get = unsafe extern "C" fn(u64, u64, u64, *mut u64) -> u64;
+    let ganchos: [Get; 6] = [a47_get0, a47_get1, a47_get2, a47_get3, a47_get4, a47_get5];
+    let gets: Vec<Option<bool>> =
+        (0..6).map(|k| a47_instalar_um((A47_GET_VM[k], A47_GET_PROLOGO), ganchos[k] as *mut c_void, &ORIG_A47_GET[k])).collect();
+    #[cfg(feature = "devtools")]
+    let (teste, inits, pares) = if crate::marcador_individual("a47a-teste") {
+        A47_TESTE.store(true, Ordering::Relaxed);
+        let ganchos_init = a47_ganchos_de_init();
+        let inits: Vec<Option<bool>> = (0..3).map(|k| a47_instalar_um(A47_INIT[k], ganchos_init[k], &ORIG_A47_INIT[k])).collect();
+        // Pares gravados pelo teste anterior: os `Get*Appearances` rodam na carga, antes de qualquer comando do canal.
+        let pares = a11_pares_gravados();
+        for (recurso, aparencia) in &pares {
+            let alias = a11_alias(*recurso);
+            crate::arquivos_do_jogo::reslink_add(alias, *recurso);
+            crate::aparencia::registrar_app_override(*recurso, alias, *aparencia);
+        }
+        (true, inits, pares.len())
+    } else {
+        (false, Vec::new(), 0)
+    };
     #[cfg(not(feature = "devtools"))]
-    let _ = gets;
+    let (teste, inits, pares): (bool, Vec<Option<bool>>, usize) = (false, Vec::new(), 0);
+    crate::veredito_dev!("[a47a] hooks no on_load: Get*Appearances {gets:?}, Initialize*Option {inits:?} (teste {teste}, {pares} par(es) com troca antes da carga)");
+    let _ = (teste, inits, pares);
 }
 
 pub(crate) const A47_INITIALIZE: (u64, u32) = (0x1_04bc_779c, 0xd101_c3ff);
@@ -2198,38 +2034,37 @@ pub(crate) static ORIG_A47_INITIALIZE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static ORIG_A47_UNINITIALIZE: AtomicU64 = AtomicU64::new(0);
 
-/// Antes da original: a mescla do `#47` (o `OnPrepareResource` da referência — o `GetResource` é inlinado no `Initialize` do Mac).
+/// `Initialize(sys, puppet, isMale, functor)`: a mescla entra antes do original, que monta as opções a partir dos recursos base.
 pub(crate) unsafe extern "C" fn a47_initialize(sys: u64, puppet: u64, masc: u64, functor: u64) {
     #[cfg(feature = "devtools")]
     A47_CICLO_CHAMADAS[0].fetch_add(1, Ordering::Relaxed);
-    crate::corpo_e_rosto::cust_mesclar_no_sistema(sys);
-    let f: unsafe extern "C" fn(u64, u64, u64, u64) = std::mem::transmute(original_publicado(&ORIG_A47_INITIALIZE));
-    f(sys, puppet, masc, functor);
+    cust_mesclar_no_sistema(sys);
+    let original: unsafe extern "C" fn(u64, u64, u64, u64) = std::mem::transmute(original_publicado(&ORIG_A47_INITIALIZE));
+    original(sys, puppet, masc, functor)
 }
 
+/// `Uninitialize(sys)`: só repassa. A mescla fica nos recursos base, que seguem em memória para o próximo `Initialize`.
 pub(crate) unsafe extern "C" fn a47_uninitialize(sys: u64) {
     #[cfg(feature = "devtools")]
     A47_CICLO_CHAMADAS[1].fetch_add(1, Ordering::Relaxed);
-    let f: unsafe extern "C" fn(u64) = std::mem::transmute(original_publicado(&ORIG_A47_UNINITIALIZE));
-    f(sys);
+    let original: unsafe extern "C" fn(u64) = std::mem::transmute(original_publicado(&ORIG_A47_UNINITIALIZE));
+    original(sys)
 }
 
-/// Os 5 hooks do fluxo de edição, cada um uma vez: `Initialize`, `Uninitialize` e os 3 `Initialize*Option`.
+/// Ganchos do ciclo do sistema de customização: `Initialize`, `Uninitialize` e os 3 `Initialize*Option`, cada um uma vez.
 pub(crate) unsafe fn a47_instalar_ciclo() -> (Option<bool>, Option<bool>, Vec<Option<bool>>) {
-    let um = |vm: u64, prologo: u32, destino: *mut c_void, orig: &AtomicU64| {
-        if orig.load(Ordering::Relaxed) != 0 { Some(true) } else { instalar_conferindo_prologo(vm, prologo, destino, orig) }
-    };
-    let i = um(A47_INITIALIZE.0, A47_INITIALIZE.1, a47_initialize as *mut c_void, &ORIG_A47_INITIALIZE);
-    let u = um(A47_UNINITIALIZE.0, A47_UNINITIALIZE.1, a47_uninitialize as *mut c_void, &ORIG_A47_UNINITIALIZE);
-    let destinos: [*mut c_void; 3] = [a47_init_app as *mut c_void, a47_init_morph as *mut c_void, a47_init_switcher as *mut c_void];
-    let inits = (0..3).map(|k| um(A47_INIT[k].0, A47_INIT[k].1, destinos[k], &ORIG_A47_INIT[k])).collect();
+    let i = a47_instalar_um(A47_INITIALIZE, a47_initialize as unsafe extern "C" fn(u64, u64, u64, u64) as *mut c_void, &ORIG_A47_INITIALIZE);
+    let u = a47_instalar_um(A47_UNINITIALIZE, a47_uninitialize as unsafe extern "C" fn(u64) as *mut c_void, &ORIG_A47_UNINITIALIZE);
+    let ganchos = a47_ganchos_de_init();
+    let inits = (0..3).map(|k| a47_instalar_um(A47_INIT[k], ganchos[k], &ORIG_A47_INIT[k])).collect();
     (i, u, inits)
 }
 
-/// Produção do `#47` com `customizations` nos `.xl` (`register::cust_tabela`): os hooks da mescla e da marcação.
+/// Liga os ganchos da mescla quando a tabela `bwms-customizations.txt` tem fonte.
 pub(crate) unsafe fn install_a47_produto() {
     let (i, u, inits) = a47_instalar_ciclo();
     crate::veredito_dev!("[a47c] hooks da mescla: Initialize {i:?}, Uninitialize {u:?}, Initialize*Option {inits:?}");
+    let _ = (i, u, inits);
 }
 
 
@@ -2275,7 +2110,7 @@ mod caminho_por_padrao {
         let recusado = caminho_registrar(r"regex:^base\\bwms_teste_c137\\\d$");
         let um = caminho_registrar(r"base\bwms_teste_c137\1");
         assert!(!caminho_casa(recusado, um), "padrão recusado não casa nada");
-        // Mesmo hash (o hash ignora caixa), texto que não é padrão: o `starts_with("regex:")` do original é sensível a caixa.
+        // Mesmo hash (o hash ignora caixa), texto que não é padrão: o prefixo `regex:` é sensível a caixa.
         let exato = caminho_registrar(r"regex:^base\\bwms_teste_c137\\b\.mesh$");
         let b = caminho_registrar(r"base\bwms_teste_c137\b.mesh");
         assert!(caminho_casa(exato, b));
@@ -2289,7 +2124,7 @@ mod fronteira_dos_alvos {
     use super::*;
 
     /// O critério do `InputTarget` sai da tabela por valor, `IK_None`/`IACT_None` saem como não-setado, e o 4º campo do `.Axis`
-    /// (threshold em bits) nunca chega como ação: o alvo de eixo entra com ação não-setada, o default que o `Axis()` do original deixa.
+    /// (threshold em bits) nunca chega como ação: o alvo de eixo entra com ação não-setada.
     #[test]
     fn criterio_de_input_eixo_entra_com_acao_curinga() {
         let (tecla, sem_filtro, eixo) = (0x7000_0000_2310usize, 0x7000_0000_2320usize, 0x7000_0000_2330usize);
@@ -2333,7 +2168,7 @@ mod fronteira_dos_alvos {
         assert_eq!(obtido, [false, true, false, true, true]);
     }
 
-    /// Alvo com todos os campos não-setados casa sem dado do evento, como `InputTarget.hpp:16-22` e `ComponentTarget.hpp:16-22`;
+    /// Alvo de tecla ou de componente com todos os campos não-setados casa sem dado do evento;
     /// com um campo setado, o evento sem dado continua filtrado.
     #[test]
     fn alvo_todo_curinga_casa_sem_dado_do_evento() {
@@ -2378,7 +2213,7 @@ mod fronteira_dos_alvos {
         assert_eq!(obtido, [true, false, true, false, true]);
     }
 
-    /// `ResourceTarget` com `Path` ou `Type` de valor 0 (`Path(r"")`, `Type(n"None")`) não filtra, como na referência; com valor setado,
+    /// `ResourceTarget` com `Path` ou `Type` de valor 0 (`Path(r"")`, `Type(n"None")`) não filtra; com valor setado,
     /// o evento que não bate continua filtrado, inclusive o `Type` de nome que a fábrica não resolveu (`CLASSE_NAO_RESOLVIDA`).
     #[test]
     fn alvo_de_recurso_com_valor_zero_nao_filtra() {
@@ -2423,7 +2258,7 @@ mod fronteira_dos_alvos {
         assert!(!unsafe { alvo_de_entidade_casa_entidade(&alvo, entidade.as_mut_ptr() as *mut c_void) });
     }
 
-    /// Os adaptadores leem o valor 0 da tabela como não-setado, como a referência (`EntityTarget.hpp:25-109`, `InkWidgetTarget.hpp:16-24`):
+    /// Os adaptadores leem o valor 0 da tabela como não-setado:
     /// `EntityTarget.ID(0)`, `.Definition(0, 0)`, `inkWidgetTarget.Library(0, item)` e `.Controller(n"None")` não viram filtro de valor 0.
     #[test]
     fn adaptadores_leem_valor_zero_como_nao_setado() {
@@ -2480,8 +2315,8 @@ mod fronteira_dos_alvos {
         assert_eq!(campos.map(|c| unsafe { alvo_de_entidade_casa_entidade(&c, p) }), [true, false]);
     }
 
-    /// `DynamicEntityTarget.Tags([])`/`StaticEntityTarget.Tags([])` casam todo evento de ciclo, com ou sem entidade (`DynamicEntityTarget.hpp:18-19`),
-    /// e o handler dispara se ALGUM alvo suportado casa (`CallbackSystemHandler.hpp:56-65`): `Tags([])` + `Tag(x)` que não casa dispara; só `Tag(x)`
+    /// `DynamicEntityTarget.Tags([])`/`StaticEntityTarget.Tags([])` casam todo evento de ciclo, com ou sem entidade,
+    /// e o handler dispara se ALGUM alvo suportado casa: `Tags([])` + `Tag(x)` que não casa dispara; só `Tag(x)`
     /// filtra. As linhas saem da gravação da fábrica (`gravar_alvo_por_tags`) e o veredito sai do filtro do despacho (`alvos_barram_o_disparo`).
     #[test]
     fn alvo_por_tags_vazio_continua_no_despacho() {
@@ -2780,5 +2615,348 @@ mod a47_tabela_vazia {
         // [chamadas, descritores, trocados]: a chamada conta sempre (o "hook vivo" do veredito 47A); descritores e trocados só com par.
         assert_eq!([depois_vazia[0] - base[0], depois_vazia[1] - base[1], depois_vazia[2] - base[2]], [1, 0, 0]);
         assert_eq!([fim[0] - base[0], fim[1] - base[1], fim[2] - base[2]], [2, 1, 1]);
+    }
+}
+
+#[cfg(test)]
+mod mescla_de_customizacao {
+    use super::*;
+
+    /// `CUST_NOMES` e `CUST_CAMPOS` são do processo: os testes deste módulo que os tocam rodam um de cada vez.
+    static SERIE: Mutex<()> = Mutex::new(());
+
+    fn zerar_nomes() {
+        *CUST_NOMES.write().unwrap() = None;
+        CUST_NOMES_N.store(0, Ordering::Relaxed);
+    }
+
+    /// Vetores `[B1]`: o app registra o `name`; morph e switcher, o texto com o hash continuado do nome da opção.
+    #[test]
+    fn nome_da_escolha_continua_o_hash_do_nome_da_opcao() {
+        let cabelo = cname("hair_style");
+        assert_eq!(cabelo, 0x8d48_5e57_210a_cd37);
+        assert_eq!(cust_nome_da_escolha(cabelo, &CustChave::Nome(7)), 7);
+        assert_eq!(cust_nome_da_escolha(cabelo, &CustChave::Nome(0)), 0);
+        assert_eq!(cust_nome_da_escolha(cabelo, &CustChave::Nome(15555357983233036507)), 0xd7df_bbab_80a4_50db);
+        let texto = |dono: &str, t: &str| cust_nome_da_escolha(cname(dono), &CustChave::Texto(t.into()));
+        assert_eq!(texto("hair_style", "Mod A"), 0xe5ae_3998_fdb9_556a);
+        assert_eq!(texto("outra", "Mod A"), 0x1947_fc01_f92b_77b9);
+        assert_eq!(texto("hair_style", ""), cabelo);
+        assert_eq!(texto("eyes", "Olhos Azuis"), 0x1624_847d_d00d_b6d0);
+        assert_eq!(texto("makeup_lips", "Batom 01"), 0x1498_852d_fb7a_5377);
+        // Equivale ao hash do texto do nome da opção seguido do texto da escolha.
+        assert_eq!(texto("eyes", "Olhos Azuis"), bwms_primitives::fnv1a64(b"eyesOlhos Azuis"));
+    }
+
+    /// Vetores `[B2]`: `*` no fim do texto da fonte casa por prefixo e lê o texto do alvo; sem curinga compara hash sem ler texto.
+    #[test]
+    fn curinga_casa_por_prefixo_e_sem_curinga_por_hash() {
+        assert_eq!(cust_curinga("hair_*"), Some("hair_"));
+        assert_eq!(cust_curinga("hair_color"), None);
+        assert_eq!(cust_curinga("*"), Some(""));
+        assert_eq!(cust_curinga(""), None);
+        assert_eq!(cust_curinga("a*b"), None);
+        assert_eq!(cust_curinga("a**"), Some("a*"));
+        let casa = |alvo: u64, texto: &str, fonte: u64, prefixo: Option<&str>| {
+            let mut leu = false;
+            let r = cust_casa(alvo, || {
+                leu = true;
+                texto.to_string()
+            }, fonte, prefixo);
+            (r, leu)
+        };
+        assert_eq!(casa(1, "hair_color", 2, Some("hair_")), (true, true));
+        assert_eq!(casa(1, "eyes", 2, Some("hair_")), (false, true));
+        assert_eq!(casa(5, "x", 5, None), (true, false));
+        assert_eq!(casa(5, "x", 6, None), (false, false));
+        assert_eq!(casa(1, "hair_", 2, Some("hair_")), (true, true));
+        assert_eq!(casa(1, "anything", 2, Some("")), (true, true));
+    }
+
+    /// Vetores `[B3]`: busca no array ordenado do estado do save.
+    #[test]
+    fn posicao_ordenada_do_estado() {
+        let v = [3u64, 9, 20];
+        assert_eq!(cust_posicao_ordenada(&v, 9), Ok(1));
+        assert_eq!(cust_posicao_ordenada(&v, 1), Err(0));
+        assert_eq!(cust_posicao_ordenada(&v, 10), Err(2));
+        assert_eq!(cust_posicao_ordenada(&v, 99), Err(3));
+        assert_eq!(cust_posicao_ordenada(&v, 3), Ok(0));
+        assert_eq!(cust_posicao_ordenada(&v, 20), Ok(2));
+        assert_eq!(cust_posicao_ordenada(&[], 99), Err(0));
+    }
+
+    /// Vetores `[B4]`: o conjunto de nomes de mod não conta repetido, não tem o vazio e some ao zerar.
+    #[test]
+    fn nomes_de_mod_contam_sem_repetir() {
+        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        zerar_nomes();
+        assert!(!cust_nome_de_mod(0x10));
+        for n in [0x10, 0x20, 0x10] {
+            cust_registrar_nome(n);
+        }
+        let obtido = (CUST_NOMES_N.load(Ordering::Relaxed), [0x10, 0x20, 0x30, 0].map(cust_nome_de_mod));
+        zerar_nomes();
+        assert_eq!(obtido, (2, [true, true, false, false]));
+        assert!(!cust_nome_de_mod(0x10));
+    }
+
+    /// Memória que o código da mescla escreve por ponteiro cru: no heap, vazada e mutável. Na pilha, o endereço da thread de teste é reaproveitado
+    /// pela próxima, e o array imutável escrito por ponteiro tirado de `&` é comportamento indefinido.
+    fn vazado<T>(v: T) -> &'static mut T {
+        Box::leak(Box::new(v))
+    }
+
+    /// `DynArray` de teste: `[entries, capacidade | tamanho << 32]`.
+    fn arr(buf: &mut [u64], tamanho: usize) -> [u64; 2] {
+        [buf.as_mut_ptr() as u64, buf.len() as u64 | (tamanho as u64) << 32]
+    }
+
+    fn lidos(a: &[u64; 2]) -> Vec<u64> {
+        let (e, n, _) = unsafe { cust_arr(a.as_ptr() as usize) };
+        (0..n).map(|k| unsafe { cu64(e + k * 8) }).collect()
+    }
+
+    /// Vetores `[B5]`: com vaga, nada vai ao motor e o array não muda.
+    #[test]
+    fn reservar_com_vaga_nao_vai_ao_motor() {
+        let mut buf = [0u64; 4];
+        let a = arr(&mut buf, 2);
+        assert!(unsafe { cust_reservar_mais_um(a.as_ptr() as usize, 8) });
+        assert_eq!(unsafe { cust_arr(a.as_ptr() as usize) }.1, 2);
+    }
+
+    /// `cust_truncar` de CName só devolve o tamanho: o elemento não tem destrutor.
+    #[test]
+    fn truncar_cname_volta_o_tamanho() {
+        let mut buf = [1u64, 2, 3, 4];
+        let mut a = arr(&mut buf, 4);
+        unsafe { cust_truncar(a.as_mut_ptr() as usize, 1, CustElemento::CName) };
+        assert_eq!(lidos(&a), vec![1]);
+        assert_eq!(buf[3], 4, "a memória além do tamanho fica como estava");
+    }
+
+    /// Vetores `[B6]`: as entradas de cada grupo da fonte vão ao grupo homônimo do alvo; grupo sem homônimo não cria grupo.
+    #[test]
+    fn grupos_da_fonte_vao_ao_homonimo_do_alvo() {
+        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        zerar_nomes();
+        let (hairs, eyes, beard) = (0x4A11, 0xE7E5, 0xBEA4);
+        let (alvo_hairs, alvo_eyes) = (vazado([0xA1u64, 0xA2, 0, 0]), vazado([0xB1u64, 0]));
+        let (fonte_hairs, fonte_beard) = (vazado([0xF1u64, 0xF2]), vazado([0xF9u64]));
+        // Grupo (0x18 B): `name` em +0, `options` (`DynArray<CName>`) em +8.
+        let grupo = |nome: u64, a: [u64; 2]| [nome, a[0], a[1]];
+        let ga = vazado([grupo(hairs, arr(alvo_hairs, 2)), grupo(eyes, arr(alvo_eyes, 1))]);
+        let gf = vazado([grupo(hairs, arr(fonte_hairs, 2)), grupo(beard, arr(fonte_beard, 1))]);
+        let alvo = vazado([ga.as_mut_ptr() as u64, 2 | 2 << 32]);
+        let fonte = vazado([gf.as_mut_ptr() as u64, 2 | 2 << 32]);
+        let mut m = CustMescla::default();
+        unsafe { cust_mesclar_grupos(&mut m, alvo.as_mut_ptr() as usize, fonte.as_mut_ptr() as usize) };
+        let opcoes = |g: &[u64; 3]| lidos(&[g[1], g[2]]);
+        let obtido = (opcoes(&ga[0]), opcoes(&ga[1]), unsafe { cust_arr(alvo.as_ptr() as usize) }.1);
+        let registrados = [0xF1, 0xF2, 0xF9].map(cust_nome_de_mod);
+        zerar_nomes();
+        assert_eq!(obtido, (vec![0xA1, 0xA2, 0xF1, 0xF2], vec![0xB1], 2));
+        assert_eq!(m.contagem.grupos, 2);
+        assert_eq!(m.tamanhos.iter().map(|t| t.1).collect::<Vec<_>>(), vec![2]);
+        assert_eq!(registrados, [true, true, false]);
+    }
+
+    /// Campos de teste para `cust_opcao_do_estado`: no `info`, `name` em +0, `hidden` em +8, `enabled` em +0x10; no estado da opção, `info` em +0
+    /// e `isActive` em +8.
+    fn campos_de_teste() -> CustCampos {
+        let lista = CustLista { tipo: 0, passo: 0, campo: 0, tipo_array: 0, indice: 0, chave: 0 };
+        CustCampos {
+            classes: [0; 3],
+            nome: 0,
+            slot: 0x18,
+            link: 0x20,
+            oculto: 0x08,
+            ligado: Some(0x10),
+            recurso: 0x28,
+            listas: [lista; 3],
+            tags: 0,
+            icone: 0,
+            opcao_info: 0,
+            opcao_ativo: 0x08,
+            tipo_string: 0,
+            tipo_cnames: 0,
+            tipo_arr_opcoes: 0,
+            tipo_arr_grupos: 0,
+            tipo_grupo: 0,
+            classe_recurso: 0,
+        }
+    }
+
+    /// Vetores `[B7]`: a opção visível (não oculta, ligada) de mod entra no estado na posição ordenada e fica ativa; o que já está no estado,
+    /// a oculta, a desligada e a do jogo não mudam nada.
+    #[test]
+    fn opcao_de_mod_visivel_entra_no_estado_e_fica_ativa() {
+        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        zerar_nomes();
+        *CUST_CAMPOS.lock().unwrap() = Some(campos_de_teste());
+        for n in [0x50, 0x05, 0xA0, 0x90] {
+            cust_registrar_nome(n);
+        }
+        let caso = |nome: u64, oculto: u64, ligado: u64, estado_antes: &[u64]| {
+            let info = vazado([nome, oculto, ligado, 0, 0, 0]);
+            let opcao = vazado([info.as_ptr() as u64, 0]);
+            let handle = vazado([opcao.as_mut_ptr() as u64, 0]);
+            let buf = vazado([0u64; 4]);
+            buf[..estado_antes.len()].copy_from_slice(estado_antes);
+            let estado = vazado(arr(buf, estado_antes.len()));
+            let marcou = unsafe { cust_marcar_estado(handle.as_ptr() as u64, estado.as_mut_ptr() as u64) };
+            let estado_depois = lidos(estado);
+            let ativou = unsafe { cust_marcar_ativo(handle.as_ptr() as u64) };
+            let ativo = unsafe { cu8(opcao.as_ptr() as usize + 8) };
+            (marcou, estado_depois, ativou, ativo)
+        };
+        let obtido = [
+            caso(0x50, 0, 1, &[0x10, 0x90]),
+            caso(0x05, 0, 1, &[0x10, 0x90]),
+            caso(0xA0, 0, 1, &[0x10, 0x90]),
+            caso(0x90, 0, 1, &[0x10, 0x90]),
+            caso(0x50, 1, 1, &[0x10, 0x90]),
+            caso(0x50, 0, 0, &[0x10, 0x90]),
+            caso(0x77, 0, 1, &[0x10, 0x90]),
+            caso(0x50, 0, 1, &[]),
+        ];
+        *CUST_CAMPOS.lock().unwrap() = None;
+        zerar_nomes();
+        assert_eq!(
+            obtido,
+            [
+                (true, vec![0x10, 0x50, 0x90], true, 1),
+                (true, vec![0x05, 0x10, 0x90], true, 1),
+                (true, vec![0x10, 0x90, 0xA0], true, 1),
+                (false, vec![0x10, 0x90], true, 1),
+                (false, vec![0x10, 0x90], false, 0),
+                (false, vec![0x10, 0x90], false, 0),
+                (false, vec![0x10, 0x90], false, 0),
+                (true, vec![0x50], true, 1),
+            ]
+        );
+    }
+
+    /// Sem nome de mod registrado (a mescla não rodou), o gancho do `Initialize*Option` não lê a opção.
+    #[test]
+    fn sem_mescla_a_opcao_nao_e_lida() {
+        let _serie = SERIE.lock().unwrap_or_else(|e| e.into_inner());
+        zerar_nomes();
+        let mut buf = [0u64; 2];
+        let estado = arr(&mut buf, 0);
+        // A opção aponta para memória fora do mapa: ler derrubaria o teste.
+        assert!(!unsafe { cust_marcar_estado(0x1000, estado.as_ptr() as u64) });
+        assert!(!unsafe { cust_marcar_ativo(0x1000) });
+    }
+
+    /// `resource.fix` com `paths`: tabela por recurso; o mesmo antigo repetido fica com o último novo na posição do 1º; novo vazio não entra
+    /// nem apaga.
+    #[test]
+    fn caminhos_do_resfixes_por_recurso() {
+        let h = bwms_primitives::resource_path_hash;
+        let texto = "base\\a.inkcharcustomization | paths | x\\velho.app | x\\novo.app\n\
+                     base\\a.inkcharcustomization | paths | y\\velho.app | y\\novo.app\n\
+                     base\\b.inkcharcustomization | paths | x\\velho.app | x\\outro.app\n\
+                     base\\a.inkcharcustomization | paths | x\\velho.app | x\\ultimo.app\n\
+                     base\\a.inkcharcustomization | paths | y\\velho.app | \n\
+                     base\\a.inkcharcustomization | names | n_velho | n_novo\n";
+        let (nomes, caminhos) = crate::mods_do_usuario::pipeline::resfixes_linhas(texto);
+        assert_eq!(caminhos.len(), 2);
+        assert_eq!(
+            caminhos[&h("base\\a.inkcharcustomization")],
+            vec![(h("x\\velho.app"), h("x\\ultimo.app")), (h("y\\velho.app"), h("y\\novo.app"))]
+        );
+        assert_eq!(caminhos[&h("base\\b.inkcharcustomization")], vec![(h("x\\velho.app"), h("x\\outro.app"))]);
+        assert_eq!(nomes.len(), 1, "names vai à outra tabela");
+    }
+}
+
+#[cfg(test)]
+mod alvos_de_entidade_vetores {
+    use super::*;
+
+    /// Vetores `[B11]`: entidade com `entityID` em +0x48, `appearanceName` em +0x50 e `templatePath` em +0x60.
+    #[test]
+    fn entidade_le_os_3_campos_e_recusa_filtro_de_aparencia() {
+        let mut entidade = [0u64; 0x68 / 8];
+        entidade[0x48 / 8] = 0x1234;
+        entidade[0x50 / 8] = 0xAAAA;
+        entidade[0x60 / 8] = 0xBBBB;
+        let p = entidade.as_mut_ptr() as *mut c_void;
+        let f = CamposDoAlvoDeEntidade::default();
+        let casos = [
+            (f, true),
+            (CamposDoAlvoDeEntidade { entity_id: Some(0x1234), ..f }, true),
+            (CamposDoAlvoDeEntidade { template_path: Some(0xBBBB), ..f }, true),
+            (CamposDoAlvoDeEntidade { appearance_name: Some(0xAAAA), ..f }, true),
+            (CamposDoAlvoDeEntidade { template_path: Some(0xAAAA), ..f }, false),
+            (CamposDoAlvoDeEntidade { definition_name: Some(1), ..f }, false),
+        ];
+        for (filtro, esperado) in casos {
+            assert_eq!(unsafe { alvo_de_entidade_casa_entidade(&filtro, p) }, esperado, "{filtro:?}");
+        }
+    }
+
+    /// Objeto de teste com `valor` em `off`.
+    fn objeto(off: usize, valor: u64) -> Box<[u64; 0x20]> {
+        let mut o = Box::new([0u64; 0x20]);
+        o[off / 8] = valor;
+        o
+    }
+
+    /// Vetores `[B12]`: builder com template 0x7E7, request (id 0x77, aparência 0xA9, record 0x5E), lista [(0x111, 0xD1), (0x222, 0xD2)] e
+    /// aparência única (0x222, 0xD2) opcional. Sem request, os critérios do request não filtram; com única, a lista não conta.
+    #[test]
+    fn builder_vetores_b12() {
+        let (d1, d2) = (objeto(0x30, 0xD1), objeto(0x30, 0xD2));
+        let (r1, r2) = (objeto(0x30, 0x111), objeto(0x30, 0x222));
+        let template = objeto(0x30, 0x7E7);
+        // Request: `entityID` em +0x20, aparência em +0x28, record em +0xC0.
+        let mut request = objeto(0x20, 0x77);
+        request[0x28 / 8] = 0xA9;
+        request[0xC0 / 8] = 0x5E;
+        let p = |o: &[u64; 0x20]| o.as_ptr() as u64;
+        // Lista de `EntityBuilderAppearance` (0x30 B): definição em +0, recurso em +0x10.
+        let lista = [p(&d1), 0, p(&r1), 0, 0, 0, p(&d2), 0, p(&r2), 0, 0, 0];
+        let builder = |com_request: bool, com_unica: bool, com_lista: bool| {
+            let mut b = Box::new([0u64; 0x20]);
+            if com_unica {
+                b[0x20 / 8] = p(&d2);
+                b[0x30 / 8] = p(&r2);
+            }
+            if com_lista {
+                b[0x80 / 8] = lista.as_ptr() as u64;
+                b[0x88 / 8] = 2 | 2 << 32;
+            }
+            b[0x90 / 8] = p(&template);
+            if com_request {
+                b[0xA0 / 8] = p(&request);
+            }
+            b
+        };
+        let f = CamposDoAlvoDeEntidade::default();
+        let filtros = [
+            f,
+            CamposDoAlvoDeEntidade { entity_id: Some(0x77), ..f },
+            CamposDoAlvoDeEntidade { entity_id: Some(0x78), ..f },
+            CamposDoAlvoDeEntidade { template_path: Some(0x7E7), ..f },
+            CamposDoAlvoDeEntidade { template_path: Some(0x7E8), ..f },
+            CamposDoAlvoDeEntidade { appearance_name: Some(0xA9), ..f },
+            CamposDoAlvoDeEntidade { appearance_name: Some(0xAA), ..f },
+            CamposDoAlvoDeEntidade { record_id: Some(0x5E), ..f },
+            CamposDoAlvoDeEntidade { record_id: Some(0x5F), ..f },
+            CamposDoAlvoDeEntidade { appearance_path: Some(0x111), ..f },
+            CamposDoAlvoDeEntidade { appearance_path: Some(0x222), ..f },
+            CamposDoAlvoDeEntidade { appearance_path: Some(0x222), definition_name: Some(0xD2), ..f },
+            CamposDoAlvoDeEntidade { appearance_path: Some(0x222), definition_name: Some(0xD1), ..f },
+            CamposDoAlvoDeEntidade { definition_name: Some(0xD9), ..f },
+        ];
+        let rodar = |b: &[u64; 0x20]| filtros.map(|c| unsafe { alvo_de_entidade_casa_builder(&c, b.as_ptr() as u64) });
+        const T: bool = true;
+        const F: bool = false;
+        assert_eq!(rodar(&builder(true, false, true)), [T, T, F, T, F, T, F, T, F, T, T, T, F, T], "com request, sem única, com lista");
+        assert_eq!(rodar(&builder(true, true, true)), [T, T, F, T, F, T, F, T, F, F, T, T, F, T], "com request, com única, com lista");
+        assert_eq!(rodar(&builder(false, false, false)), [T, T, T, T, F, T, T, T, T, F, F, F, F, T], "sem request, sem única, sem lista");
     }
 }

@@ -1,4 +1,4 @@
-// bwms-inksystem-clipboard-longo.reds — Codeware `#100`: o texto da área de transferência em pedaços.
+// bwms-inksystem-clipboard-longo.reds — o texto da área de transferência em pedaços.
 //
 // `BwmsInkSystemGetClipboardTextFull()` junta o texto em pedaços cortados em fronteira de caractere. `BwmsGetClipboardText` já devolve o
 // texto inteiro (o retorno de String de native não tem limite de tamanho); esta forma fica pra quem já a usa.

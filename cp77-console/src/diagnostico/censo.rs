@@ -12,7 +12,7 @@
 //! Alvos que dividem página de código com outro alvo ficaram de fora (`RegisterAffectedItem`,
 //! o 2º setter de visibilidade, `FindAppearance`): um hook por página, por cautela.
 //!
-//! Os 3 alvos do A#53 saíram em 2026-09-11 (confirmados nos boots 10 e 11) e viraram hooks de produção em
+//! Os 3 alvos do #53 saíram em 2026-09-11 (confirmados nos boots 10 e 11) e viraram hooks de produção em
 //! `tpp_attach.rs` — dois hooks no mesmo alvo entram em loop no relocador.
 
 use std::ffi::c_void;

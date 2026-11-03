@@ -1,10 +1,10 @@
 // bwms-communitysystem-noderef.reds — atalhos do BWMS sobre o `CommunitySystem` vanilla por `NodeRef`: ativar, desativar,
 // resetar e mudar a fase de comunidade, e ativar, desativar e resetar spawner (sufixo `ByNodeRef`), mais os 2 getters.
 //
-// O `NodeRef` é resolvido como no `Red::ResolveNodeRef` do Codeware: o `ResolveNodeRef` vanilla contra a raiz global, e o
+// O `NodeRef` é resolvido pelo `ResolveNodeRef` vanilla contra a raiz global, e o
 // `GlobalNodeRef` vira `EntityID` pelo `Cast` vanilla (`orphans.script:58498`/`31096`/`23679`/`31114`/`23725`). As mutações vão
-// pelos slots do `CommunitySystem` (`bwms-communitysystem.reds`) e, ao contrário do Codeware, NÃO chamam o `CommunitySystem::Update`
-// depois. A API do Codeware, com os mesmos métodos, os aliases e o `Update`, é o `WorldStateSystem`
+// pelos slots do `CommunitySystem` (`bwms-communitysystem.reds`) e NÃO chamam o `CommunitySystem::Update`
+// depois. A API com os mesmos métodos, os aliases e o `Update` é o `WorldStateSystem`
 // (`GameInstance.GetWorldStateSystem()`, `ponte-worldstatesystem.reds`).
 
 @addMethod(CommunitySystem)

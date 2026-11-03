@@ -13,9 +13,8 @@ use std::ffi::c_void;
 use crate::rtti::{self, Registry};
 use crate::register::*;
 
-// ===== cw-utils: Codeware `Utils/Hash.reds` (2026-07-13) — fecha a represa de leitura de
-// `String` nativa via `read_cstring` (layout confirmado pelo RED4ext.SDK vendorizado, ver
-// [[cp77-codeware-port]]). Assinatura real (`enablers/Codeware/src/App/Utils/Hashing.hpp`):
+// ===== Hash de texto (2026-07-13) — fecha a represa de leitura de
+// `String` nativa via `read_cstring`. Assinatura:
 // `FNV1a64(data: script_ref<String>, opt seed: Uint64=0xCBF29CE484222325) -> Uint64` (e
 // variantes 32-bit/Murmur3). Registrado com `String` puro (não `script_ref<String>` — o nome
 // EXATO do tipo wrapper no RTTI é incerto sem teste ao vivo; `String` reduz risco de bind
@@ -52,13 +51,13 @@ pub(crate) unsafe extern "C" fn tramp_murmur3(_c: *mut c_void, frame: *mut c_voi
     write_uint_ret(out, hash as u64, 4);
 }
 
-/// Registra as 3 funções de `Utils/Hash.reds` com nome próprio `Bwms*`. Ver nota acima sobre o tipo do
+/// Registra as 3 funções de hash com nome próprio `Bwms*`. Ver nota acima sobre o tipo do
 /// 1º param (`String` em vez de `script_ref<String>`).
 pub(crate) unsafe fn register_hash_utils(reg: &Registry, proto: *mut c_void) {
     let ok1 = register_argful_by_types(reg, proto, &["String", "Uint64"], "BwmsFNV1a64", "BwmsFNV1a64", tramp_fnv1a64);
     let ok2 = register_argful_by_types(reg, proto, &["String", "Uint32"], "BwmsFNV1a32", "BwmsFNV1a32", tramp_fnv1a32);
     let ok3 = register_argful_by_types(reg, proto, &["String", "Uint32"], "BwmsMurmur3", "BwmsMurmur3", tramp_murmur3);
-    crate::log_dev!("[reg] register_all: cw-utils Hash.reds BwmsFNV1a64={ok1} BwmsFNV1a32={ok2} BwmsMurmur3={ok3}");
+    crate::log_dev!("[reg] register_all: hash BwmsFNV1a64={ok1} BwmsFNV1a32={ok2} BwmsMurmur3={ok3}");
 }
 
 pub(crate) unsafe extern "C" fn tramp_utf8strlen(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -143,7 +142,7 @@ pub(crate) unsafe extern "C" fn tramp_utf8splitchar(_c: *mut c_void, frame: *mut
     write_cstring_inline_ret(out, s);
 }
 
-/// Registra as 6 funções de `Utils/String.reds` com nome próprio `Bwms*` e a quebra em caracteres do medidor de texto.
+/// Registra as 6 funções de texto com nome próprio `Bwms*` e a quebra em caracteres do medidor de texto.
 pub(crate) unsafe fn register_string_utils(reg: &Registry, proto: *mut c_void) {
     let ok1 = register_argful_by_types(reg, proto, &["String"], "BwmsUTF8StrLen", "BwmsUTF8StrLen", tramp_utf8strlen);
     let ok2 = register_argful_by_types(reg, proto, &["String", "Int32"], "BwmsUTF8StrLeft", "BwmsUTF8StrLeft", tramp_utf8strleft);
@@ -154,7 +153,7 @@ pub(crate) unsafe fn register_string_utils(reg: &Registry, proto: *mut c_void) {
     let ok7 = register_argful_by_types(reg, proto, &["String"], "BwmsUTF8Split", "BwmsUTF8Split", tramp_utf8split);
     let ok8 = register_argful_by_types(reg, proto, &["Int32"], "BwmsUTF8SplitChar", "BwmsUTF8SplitChar", tramp_utf8splitchar);
     crate::log_dev!(
-        "[reg] register_all: cw-utils String.reds Len={ok1} Left={ok2} Right={ok3} Mid={ok4} Lower={ok5} Upper={ok6} Split={ok7} SplitChar={ok8}"
+        "[reg] register_all: texto Len={ok1} Left={ok2} Right={ok3} Mid={ok4} Lower={ok5} Upper={ok6} Split={ok7} SplitChar={ok8}"
     );
 }
 
@@ -188,7 +187,7 @@ pub(crate) unsafe extern "C" fn tramp_long_str(_c: *mut c_void, frame: *mut c_vo
 }
 
 /// Identidade de 8 bytes das conversões Hash<->Tipo: CName, CRUID, NodeRef, EntityID, TweakDBID, ResRef e EngineTime são um
-/// `uint64_t` por baixo (`return aValue;` na fonte de referência), então a native copia os 8 bytes que o descritor da native
+/// `uint64_t` por baixo, então a native copia os 8 bytes que o descritor da native
 /// corrente leu do frame. Só serve para retorno de 8 bytes: uma native com retorno menor sobrescreveria memória além dele.
 /// `EngineTime.GetFrequency` não passa por aqui: lê um `double` num endereço do motor ainda sem RE.
 pub(crate) unsafe extern "C" fn tramp_identidade_8_bytes(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -197,8 +196,8 @@ pub(crate) unsafe extern "C" fn tramp_identidade_8_bytes(_c: *mut c_void, frame:
     write_uint_ret(out, v, 8);
 }
 
-// ===== cw-utils: Codeware `Utils/Bits.reds` (2026-07-13) — só argumentos numéricos. Nome próprio
-// `Bwms*` (`BwmsBitTest32` etc.), não o do Codeware: um `.reds` de Windows que chame `BitTest32`
+// ===== Bits (2026-07-13) — só argumentos numéricos. Nome próprio
+// `Bwms*` (`BwmsBitTest32` etc.): um `.reds` de Windows que chame `BitTest32`
 // não compila contra o bundle.
 #[inline]
 pub(crate) fn bit_test(value: u64, n: i32) -> bool {
@@ -281,8 +280,7 @@ bits_width_trampolines!(tramp_bittest32, tramp_bitset32, tramp_bitshl32, tramp_b
 
 bits_width_trampolines!(tramp_bittest64, tramp_bitset64, tramp_bitshl64, tramp_bitshr64, 8, 64);
 
-/// Registra as 16 funções de `Utils/Bits.reds` com nome próprio `Bwms*` (`BwmsBitTest32` etc.,
-/// não o `BitTest32` do Codeware). `proto` = doador de vtable
+/// Registra as 16 funções de bits com nome próprio `Bwms*` (`BwmsBitTest32` etc.). `proto` = doador de vtable
 /// já resolvido em `register_all`.
 pub(crate) unsafe fn register_bits_utils(reg: &Registry, proto: *mut c_void) {
     let uint_t = |bits: u32| if bits == 8 { "Uint8" } else if bits == 16 { "Uint16" } else if bits == 32 { "Uint32" } else { "Uint64" };
@@ -300,19 +298,19 @@ pub(crate) unsafe fn register_bits_utils(reg: &Registry, proto: *mut c_void) {
     reg1!(16, tramp_bittest16, tramp_bitset16, tramp_bitshl16, tramp_bitshr16);
     reg1!(32, tramp_bittest32, tramp_bitset32, tramp_bitshl32, tramp_bitshr32);
     reg1!(64, tramp_bittest64, tramp_bitset64, tramp_bitshl64, tramp_bitshr64);
-    crate::log_dev!("[reg] register_all: cw-utils Bits.reds {n_ok}/16 registradas (nome próprio BWMS, não Codeware — ver dist/MODDER-API.md)");
+    crate::log_dev!("[reg] register_all: bits {n_ok}/16 registradas (nome próprio BWMS — ver dist/MODDER-API.md)");
 }
 
-// ===== cw-utils: Codeware `Utils/Number.reds` (2026-07-13) — ParseInt8/16/32/64 + ParseUint8/16/
-// 32/64, mesma represa de String que Hash.reds acabou de fechar (`read_cstring`). Fonte real
-// (`enablers/Codeware/src/App/Utils/Number.hpp`): `T ParseInt<T>(str, opt base=10)` — chama
-// `strtoll`/`strtoull` (Temp=int64_t p/ signed, uint64_t p/ unsigned), e SE `end != str+len` (sobrou
-// lixo não consumido) retorna 0; senão trunca (`static_cast<T>`) pro tipo alvo. Portado fielmente:
+// ===== Números (2026-07-13) — ParseInt8/16/32/64 + ParseUint8/16/
+// 32/64, mesma represa de String que o hash acabou de fechar (`read_cstring`). Contrato:
+// `T ParseInt<T>(str, opt base=10)` — semântica de
+// `strtoll`/`strtoull` (int64 p/ signed, uint64 p/ unsigned), e SE `end != str+len` (sobrou
+// lixo não consumido) retorna 0; senão trunca pro tipo alvo. Semântica:
 // espaço em branco à esquerda ignorado, sinal opcional (`strtoull` aceita `-` também — nega mod
 // 2^64, igual ao glibc), base 0 = auto-detecta `0x`/`0X`->16 ou `0`->8 senão 10; overflow CLAMPA em
 // i64::MIN/MAX ou u64::MAX (mimetiza o comportamento real do strtoll/strtoull sem checar errno) em
 // vez de dar panic/wrap arbitrário. Exige consumir a string INTEIRA (equivalente ao `end` check) —
-// qualquer caractere sobrando (mesmo espaço à direita) já falha e retorna 0, igual ao C++.
+// qualquer caractere sobrando (mesmo espaço à direita) já falha e retorna 0.
 pub(crate) fn parse_number_core(s: &str, base_in: i32, accept_leading_minus_unsigned: bool) -> Option<(usize, bool, u128)> {
     let bytes = s.as_bytes();
     let mut i = 0usize;
@@ -438,7 +436,7 @@ parse_uint_trampoline!(tramp_parseuint32, 32);
 
 parse_uint_trampoline!(tramp_parseuint64, 64);
 
-/// Registra as 8 funções de `Utils/Number.reds` com nome próprio `Bwms*`. Mesma incerteza do Hash.reds sobre
+/// Registra as 8 funções de número com nome próprio `Bwms*`. Mesma incerteza do hash sobre
 /// `String` vs `script_ref<String>` — ver comentário lá.
 pub(crate) unsafe fn register_number_utils(reg: &Registry, proto: *mut c_void) {
     let mut n_ok = 0usize;
@@ -458,21 +456,20 @@ pub(crate) unsafe fn register_number_utils(reg: &Registry, proto: *mut c_void) {
     reg1!("Uint16", "BwmsParseUint16", tramp_parseuint16);
     reg1!("Uint32", "BwmsParseUint32", tramp_parseuint32);
     reg1!("Uint64", "BwmsParseUint64", tramp_parseuint64);
-    crate::log_dev!("[reg] register_all: cw-utils Number.reds {n_ok}/8 registradas (nome próprio BWMS, não Codeware)");
+    crate::log_dev!("[reg] register_all: números {n_ok}/8 registradas (nome próprio BWMS)");
 }
 
-// ===== cw-utils: Codeware `Utils/String.reds` (2026-07-13) — as 6 funções reais. `UTF8StrLen`
-// é retorno escalar (Int32), mesmo padrão de Hash/Number.reds. As outras 5 retornam `String` —
+// ===== Texto (2026-07-13) — as 6 funções reais. `UTF8StrLen`
+// é retorno escalar (Int32), mesmo padrão de hash/número. As outras 5 retornam `String` —
 // precisavam de um mecanismo de ESCREVER uma CString NOVA de volta pro `out` (represa distinta
 // da de LER, que já tinha caído com `read_cstring`). Fechada na MESMA sessão: `call_func::res`
 // era `[u8;16]` (dimensionado pro maior retorno já testado, Vector4) — alargar pra 0x20 (ver
 // nota lá) tornou seguro escrever uma CString inteira sem transbordar. `write_cstring_inline_ret`
 // só cobre o caminho SSO (<=19 bytes) — strings mais longas exigiriam heap-alloc no allocator do
 // PRÓPRIO jogo (fora de escopo, risco real de corrupção se malfeito).
-// Semântica fiel a `enablers/Codeware/src/App/Utils/String.hpp`: Left/Right/Mid operam em
+// Semântica: Left/Right/Mid operam em
 // CODEPOINTS UTF-8 (não bytes, mesmo padrão de UTF8StrLen); Lower/Upper via
-// `char::to_lowercase/to_uppercase` do Rust — mais completo que o `towlower/towupper` de
-// 1-char-pra-1-char do C++ original (cobre expansões tipo alemão ß→"ss").
+// `char::to_lowercase/to_uppercase` do Rust (cobre expansões tipo alemão ß→"ss").
 #[inline]
 pub(crate) fn utf8_str_len(s: &str) -> i32 {
     s.chars().count() as i32
@@ -574,8 +571,6 @@ pub(crate) static UTILS_DE_HASH_E_NOME: &[(&str, &[&str], NativeHandler)] = &[
     ("ModLog", &["CName", "String"], tramp_modlog),
     ("BwmsTicksToEngineTime", &["Uint64"], tramp_identidade_8_bytes),
     ("BwmsEngineTimeToTicks", &["EngineTime"], tramp_identidade_8_bytes),
-    ("BwmsDistrictGetDistrict", &["CName"], tramp_district_get_district),
-    ("BwmsDistrictGetArea", &["CName"], tramp_district_get_area),
     ("BwmsGetStackDepth", &[], tramp_stack_get_depth),
     ("BwmsGetStackFrameFunction", &["Int32"], tramp_stack_get_frame_function),
     ("BwmsGetStackFrameClass", &["Int32"], tramp_stack_get_frame_class),

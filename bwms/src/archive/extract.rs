@@ -1,15 +1,6 @@
 //! Extração de recursos do `.archive` para uma pasta de conteúdo.
 //!
-//! Algoritmo (port de `Archive.CopyFileToStream` + `Oodle.DecompressAndCopySegment`
-//! do WolvenKit): um recurso = concatenação dos seus segmentos
-//! `[segments_start .. segments_end)`. O **primeiro** (principal) é sempre
-//! descomprimido; os buffers seguintes são copiados crus por padrão (a menos de
-//! `--decompress-buffers`). Um segmento exige Kraken só quando `zsize != size`
-//! e começa com o magic `KARK`; caso contrário a saída é cópia byte-a-byte.
-//!
-//! Sem o backend Kraken (ooz arm64) ainda compilado, recursos cujo segmento
-//! principal é `KARK`-comprimido são **pulados** e listados no relatório — o que
-//! não precisa de Kraken extrai normalmente.
+//! Sem o descompressor compilado, recurso que precisaria dele é pulado e listado no relatório; o resto extrai normalmente.
 
 use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -123,9 +114,7 @@ impl From<io::Error> for ExtractError {
     }
 }
 
-/// Materializa os bytes de um recurso na memória (cooked file). Para o caso de
-/// uso atual — arquivos individuais de mod — isso é barato; um stream seria
-/// melhor para recursos gigantes, mas a simplicidade vence aqui.
+/// Os bytes de um recurso, na memória: os segmentos dele concatenados na ordem do índice.
 fn extract_entry(
     file: &mut File,
     ar: &Archive,
@@ -133,17 +122,19 @@ fn extract_entry(
     opts: &ExtractOptions,
     file_len: u64,
 ) -> Result<Vec<u8>, ExtractError> {
-    let segments = ar.segments_of(entry);
     let mut out = Vec::new();
-    for (i, seg) in segments.iter().enumerate() {
-        let is_main = i == 0;
-        let decompress = is_main || opts.decompress_buffers;
+    for (i, seg) in ar.segments_of(entry).iter().enumerate() {
+        // O segmento principal é o CR2W; os buffers só descomprimem quando pedido.
+        let decompress = i == 0 || opts.decompress_buffers;
         copy_segment(file, seg, decompress, file_len, &mut out)?;
     }
     Ok(out)
 }
 
-/// Port de `Oodle.DecompressAndCopySegment`.
+/// Cabeçalho de um segmento comprimido: `KARK` + u32 do tamanho descomprimido.
+const CABECALHO_KARK: usize = 8;
+
+/// Acrescenta a `out` os bytes de um segmento (descomprimidos, se `decompress` e o segmento tiver cabeçalho `KARK`).
 fn copy_segment(
     file: &mut File,
     seg: &FileSegment,
@@ -151,59 +142,36 @@ fn copy_segment(
     file_len: u64,
     out: &mut Vec<u8>,
 ) -> Result<(), ExtractError> {
-    // A faixa do segmento tem de caber no arquivo. Sem isto, um `zsize`
-    // malicioso (até ~4 GiB) guiaria a alocação antes de qualquer leitura
-    // falhar. O WolvenKit usa uma view mapeada, limitada pelo arquivo; aqui
-    // validamos explicitamente.
-    if seg
-        .offset
-        .checked_add(u64::from(seg.zsize))
-        .map_or(true, |e| e > file_len)
-    {
+    // Valida a faixa antes de alocar: o `zsize` vem do arquivo e pode ser lixo.
+    let dentro = seg.offset.checked_add(u64::from(seg.zsize)).is_some_and(|fim| fim <= file_len);
+    if !dentro {
         return Err(ExtractError::Corrupt(format!(
             "segmento @ {} +{} ultrapassa o arquivo ({file_len} B)",
             seg.offset, seg.zsize
         )));
     }
-
-    // Cópia crua em streaming (sem materializar um buffer de `zsize` zerado):
-    // a faixa já foi validada, então `take(zsize)` lê exatamente `zsize` bytes.
-    let raw_copy = |file: &mut File, out: &mut Vec<u8>| -> io::Result<()> {
-        file.seek(SeekFrom::Start(seg.offset))?;
-        let read = io::copy(&mut (&mut *file).take(u64::from(seg.zsize)), out)?;
-        debug_assert_eq!(read, u64::from(seg.zsize));
-        Ok(())
-    };
-
-    // Cópia crua quando não devemos descomprimir, quando disco==descomprimido,
-    // ou quando é curto demais para um header KARK.
-    if !decompress || seg.zsize == seg.size || (seg.zsize as usize) < 8 {
-        raw_copy(file, out)?;
+    let inicio = out.len();
+    out.resize(inicio + seg.zsize as usize, 0);
+    let lido = file
+        .seek(SeekFrom::Start(seg.offset))
+        .and_then(|_| file.read_exact(&mut out[inicio..]));
+    if let Err(e) = lido {
+        out.truncate(inicio);
+        return Err(ExtractError::Io(e));
+    }
+    if !decompress || (seg.zsize as usize) < CABECALHO_KARK {
         return Ok(());
     }
-
-    // Lê o header de 8 bytes e decide pela mesma regra do datamap/WolvenKit.
-    file.seek(SeekFrom::Start(seg.offset))?;
-    let mut header = [0u8; 8];
-    file.read_exact(&mut header)?;
-    let magic = u32::from_le_bytes(header[0..4].try_into().unwrap());
-    if !kraken::segment_needs_kraken(seg.zsize, seg.size, Some(magic)) {
-        // Não é Kraken (zsize≠size mas sem KARK): copia os zsize bytes crus.
-        raw_copy(file, out)?;
+    let primeiros4 = u32::from_le_bytes([out[inicio], out[inicio + 1], out[inicio + 2], out[inicio + 3]]);
+    if !kraken::segment_needs_kraken(seg.zsize, seg.size, Some(primeiros4)) {
         return Ok(());
     }
-
-    // KARK: o tamanho descomprimido vem SEMPRE do header (sobrepõe o da tabela,
-    // incondicionalmente, como `if (headerSize != size) size = headerSize;` no
-    // WolvenKit — quando são iguais, header == tabela de qualquer forma).
-    let out_size = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
-    let comp_len = seg.zsize as usize - 8;
-    let mut comp = vec![0u8; comp_len];
-    file.read_exact(&mut comp)?;
-
-    match kraken::decompress(&comp, out_size) {
-        Ok(decoded) => {
-            out.extend_from_slice(&decoded);
+    let comprimido = out.split_off(inicio);
+    // O tamanho de saída é o do cabeçalho do segmento, não o `size` da tabela.
+    let tamanho = u32::from_le_bytes([comprimido[4], comprimido[5], comprimido[6], comprimido[7]]) as usize;
+    match kraken::decompress(&comprimido[CABECALHO_KARK..], tamanho) {
+        Ok(cru) => {
+            out.extend_from_slice(&cru);
             Ok(())
         }
         Err(kraken::KrakenError::Unavailable) => Err(ExtractError::NeedsKraken),

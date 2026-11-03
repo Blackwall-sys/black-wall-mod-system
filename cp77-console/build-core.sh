@@ -17,7 +17,7 @@ cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"
 US=$'\x1f'
 export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=${HOME}=.${US}--remap-path-prefix=${ROOT}=."
-# Tabelas de endereços por assinatura (RED4ext #447): refeitas do binário Steam 2.5.0 e dos endereços citados em src/, pra que todo
+# Tabelas de endereços por assinatura: refeitas do binário Steam 2.5.0 e dos endereços citados em src/, pra que todo
 # endereço novo no código também resolva num build de outro layout. Sem o binário no disco, ficam as tabelas que já estão em dados/.
 # Saem as duas a cada build: a inteira (todo src/, o dylib de dev) e a pública (só os arquivos que o build sem feature compila, pelo
 # `#[cfg]` de cada `mod`; o `enderecos.rs` escolhe pela feature `devtools`).

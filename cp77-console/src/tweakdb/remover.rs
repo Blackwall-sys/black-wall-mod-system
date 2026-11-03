@@ -1,7 +1,7 @@
-//! Remover record de mod (RED4ext `#345`, `RemoveRecord`): o inverso do `AddRecord` do motor (`0x1037cd264`). O record sai dos dois mapas do
+//! Remover record de mod (`RemoveRecord`): o inverso do `AddRecord` do motor (`0x1037cd264`). O record sai dos dois mapas do
 //! TweakDB — por id (`+0x58`, `HashMap<TweakDBID, Handle>`) e por tipo (`+0x88`, tipo → `DynArray<Handle>`) — sob a trava exclusiva dos
 //! records (`+0x21`: `0 → 0x80`, soltar limpa o bit), e os handles que os mapas seguravam são soltos depois de destravar (a destruição do
-//! record não pode rodar com a trava). Os flats ficam, como no SDK; o registro do BWMS esquece a genealogia e o nome. Só record criado por mod:
+//! record não pode rodar com a trava). Os flats ficam; o registro do BWMS esquece a genealogia e o nome. Só record criado por mod:
 //! o do jogo pode estar guardado por sistemas que não esperam ele sumir.
 
 use super::{registro, singleton};

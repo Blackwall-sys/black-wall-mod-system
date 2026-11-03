@@ -1,13 +1,12 @@
 // bwms-worldwidget.reds — o componente 3D por trás de um widget desenhado no mundo.
-// Catálogo Codeware `#96`, 2026-08-22.
+// 2026-08-22.
 //
 // PARA QUE SERVE: um widget que aparece NO MUNDO (holograma, painel de loja, terminal, placa) está
 // preso a um componente de entidade. Saber qual é a ponte entre a camada de UI e a geometria — e
 // é o que permite seguir, posicionar ou reagir a esse widget em 3D. Para VR isso é a diferença
 // entre um HUD colado na tela e um elemento que existe no espaço.
 //
-// A FICHA DO CATÁLOGO DIZIA "REFUTADO COM CERTEZA". Verificado na fonte real
-// (`enablers/Codeware/src/App/UI/inkWorldWidgetInfosEx.hpp:7-16`): são **dois derefs**, sem
+// A FICHA DO CATÁLOGO DIZIA "REFUTADO COM CERTEZA". Verificado: são **dois derefs**, sem
 // `RawFunc` e sem endereço nativo nenhum —
 //   `infos+0x40` → `SharedPtr<worlduiWorldLayerWidget>` → `wrapper+0x08` → `WeakHandle<IComponent>`
 // com os dois offsets confirmados nos headers GERADOS da reflection real do jogo

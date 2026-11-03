@@ -29,7 +29,7 @@ devtools = ["autoproceed", "devlog", "cpvr"]
 # `capture`: módulo experimental de captura de frame/depth (uso interno). OFF por padrão
 # = não entra na dylib pública. Liga com `--features capture`.
 capture = []
-# `lua`: mods de CET (`init.lua`) pelo `bwms-lua`, o leitor e executor de `.lua` em Rust do projeto.
+# `lua`: mods em Lua (`init.lua`) pelo `bwms-lua`, o leitor e executor de `.lua` em Rust do projeto.
 lua = ["dep:bwms-lua"]
 
 [profile.release]
@@ -56,12 +56,12 @@ strip = "symbols"
 [dependencies]
 # FONTE ÚNICA do que o runtime e as ferramentas calculam igual. Os hashes do Cyberpunk 2077 que o runtime usa
 # (TweakDBID/CRC32, murmur3 type-key, FNV-1a 32/64, ResourcePath, NodeRef, CRC-16) são a MESMA impl do `bwms`
-# offline. Os núcleos puros dos itens Codeware/ArchiveXL (`editor_texto`, `garment_ctx`, `override_state`, `regex`,
+# offline. Os núcleos puros (`editor_texto`, `garment_ctx`, `override_state`, `regex`,
 # `restarget`, `targets`) e o crivo do `DynArray` (`dynarray`) também moram lá, testáveis fora do jogo; as tabelas do
 # install chegam ao runtime pelo formato do `tabelas`. Zero-dep → não traz crate de fora para o dylib. O módulo `enderecos` acha
-# os endereços do jogo em qualquer build pela tabela de assinaturas (RED4ext #447). O módulo `tweakxl` é o
-# parser do formato declarativo do TweakXL (.yaml/.tweak -> Vec<Op>), o mesmo do `bwms tweak`, sem o
-# Kraken/ooz nativo nem o build.rs do `bwms`. O módulo `instalacao` é o motor de instalação de mods da
+# os endereços do jogo em qualquer build pela tabela de assinaturas. O módulo `tweaks` é o
+# parser do formato declarativo de tweak (.yaml/.tweak -> Vec<Op>), o mesmo do `bwms tweak`, sem o
+# Kraken nativo nem o build.rs do `bwms`. O módulo `instalacao` é o motor de instalação de mods da
 # CLI: a aba Mods lista e liga/desliga por ele (`apply::mods_no_jogo`, `apply::definir_ativo`). O `fix-symtab-align` (src/bin) anda
 # pelos comandos de carga do dylib com o módulo `macho`, o mesmo andador do `enderecos`. O `archive_valido` lê o cabeçalho do
 # `.archive` da pasta Mods/ com o módulo `rdar`, o mesmo leitor do `bwms archive`.

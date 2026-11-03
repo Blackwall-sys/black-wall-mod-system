@@ -1,7 +1,7 @@
-// bwms-iplacedcomponent-worldtransform.reds — Codeware `Entity/IPlacedComponent.reds` (item #29): a transformação do componente no
+// bwms-iplacedcomponent-worldtransform.reds — a transformação do componente no
 // espaço do mundo, com nome do BWMS (`BwmsGetWorld*`).
 //
-// O Codeware declara `@addField(IPlacedComponent) public native let worldTransform: WorldTransform` — `native let` reivindicando storage
+// Declarar `@addField(IPlacedComponent) public native let worldTransform: WorldTransform` é `native let` reivindicando storage
 // nativo, a categoria do `CMesh`, que derruba o bind. A classe vanilla `IPlacedComponent` já tem `GetLocalToWorld() -> Matrix`
 // (`orphans.script:16676-16697`), que é por definição a matriz do componente no espaço do mundo, e `Matrix` (`native struct` vanilla,
 // `orphans.script:25902`) tem `GetTranslation(m)`/`GetRotation(m)`: a mesma posição e orientação, sem RE e sem forja.

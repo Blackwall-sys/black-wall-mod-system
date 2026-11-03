@@ -1,12 +1,11 @@
-//! Repositório vivo de textos do jogo (ArchiveXL `#45`): os textos de mod (`localization.onscreens` do `.archive.xl`) entram nos mapas que o
+//! Repositório vivo de textos do jogo: os textos de mod (`localization.onscreens` do `.archive.xl`) entram nos mapas que o
 //! `GetText` do motor lê. O recurso de textos do mod é carregado pelo próprio motor (que lê o `.archive` do mod, comprimido ou não), as
 //! entradas saem pelo RTTI e cada texto vira um `CString` do motor no nó do mapa.
 //!
 //! RE (2026-09-19): o LocMgr é `*(0x109d021c0)` e o repositório fica em `+0x28`. `GetText` (`0x101c32f4c`: repositório, chave, variante,
 //! `&achou`, sret `CString`) procura a chave no mapa `+0x38` (variante ≠ 0) ou `+0x68` (variante 0); o chamador (`0x101c331f4`) tenta de
 //! novo por um mapa de apelidos em `+0x08`. Os dois mapas de texto são `HashMap<u64, CString>` com nó de 0x30 ([`crate::jogo::mapas`]).
-//! Como na referência, entrada de mod troca o texto de uma chave que já existe (menos a do idioma de reserva); chave primária 0 entra pela
-//! chave secundária, em FNV-1a de 32 e de 64 bits; chave secundária começando com `-` ou `=` é comentário.
+//! Entrada de mod troca o texto de uma chave que já existe, menos a do idioma de reserva.
 
 use crate::jogo::mapas;
 use core::ffi::c_void;
@@ -162,8 +161,9 @@ pub(crate) unsafe fn entradas_do_token(token: [u64; 2]) -> Result<Option<Vec<Ent
     ))
 }
 
-/// Chaves de uma entrada: a primária, ou as duas da secundária (FNV-1a 32 e 64) quando a primária é 0; vazio pra comentário ou entrada sem chave.
+/// Chaves do mapa de textos para uma entrada do recurso de textos do mod.
 pub(crate) fn chaves(primaria: u64, secundaria: &str) -> Vec<u64> {
+    // Secundária com `-`/`=` na frente é linha de comentário/seção do arquivo de textos, não texto.
     if secundaria.starts_with('-') || secundaria.starts_with('=') {
         return Vec::new();
     }
@@ -173,13 +173,14 @@ pub(crate) fn chaves(primaria: u64, secundaria: &str) -> Vec<u64> {
     if secundaria.is_empty() {
         return Vec::new();
     }
+    // Sem chave primária, o texto vale pelas duas formas de hash da secundária: a de 32 bits e a de 64.
     vec![bwms_primitives::fnv1a32(secundaria.as_bytes()) as u64, bwms_primitives::fnv1a64(secundaria.as_bytes())]
 }
 
 /// Grava uma entrada de texto como o motor carrega o onscreens: o feminino (ou o único) no mapa `+0x38`; o masculino no `+0x68` só quando a
 /// entrada tem um, ou quando a chave já tem masculino no jogo (senão ficaria o texto antigo). O `GetText` da variante 0 procura no `+0x68` e
 /// cai no `+0x38` (no pt-br, 70.579 chaves no `+0x38` e 487 no `+0x68`, boot 269). Com `troca = false` (reserva), chave que já está no
-/// `+0x38` deixa a entrada inteira como está, as duas variantes, como o `MergeTextEntry` do ArchiveXL com fallback (`Extension.cpp:191-212`):
+/// `+0x38` deixa a entrada inteira como está, as duas variantes:
 /// gravar só o masculino daria ao V masculino o texto da reserva e ao feminino o do idioma em uso. Devolve o resultado de cada mapa gravado.
 pub(crate) unsafe fn gravar_entrada(repo: *mut u8, chave: u64, feminino: &Texto, masculino: Option<&Texto>, troca: bool) -> Vec<Result<bool, String>> {
     let mut r = vec![gravar(repo, MAPA_VARIANTE_1, chave, feminino, troca)];
@@ -229,28 +230,26 @@ pub(crate) fn ler_tabela(texto: &str) -> Vec<Linha> {
         .collect()
 }
 
-/// Recursos `onscreens` a aplicar no idioma `idioma`, mod a mod, como o ArchiveXL (`Localization/Extension.cpp:93-123`): os do idioma
-/// (`false`, trocam texto) e depois os da reserva do mod (`true`, só acrescentam chave nova); sem os do idioma, só os da reserva. A reserva é
-/// o primeiro idioma do mod na tabela (`Config.cpp:99-102`): a instalação grava a tabela na ordem do `.xl` e só com código conhecido. Linha de
-/// tipo fora de `bwms_primitives::TIPOS_DE_TEXTO_APLICADOS` (subtitles, lipmaps, vomaps) fica de fora antes da reserva; a instalação avisa dela.
+/// Recursos de texto a aplicar no idioma `idioma`: `(caminho, é_reserva)`.
 pub(crate) fn recursos_do_idioma(tabela: &[Linha], idioma: &str) -> Vec<(String, bool)> {
-    let textos: Vec<&Linha> = tabela.iter().filter(|l| bwms_primitives::TIPOS_DE_TEXTO_APLICADOS.contains(&l.tipo.as_str())).collect();
-    let mut out = Vec::new();
+    // O filtro de tipo vem antes da reserva: linha de tipo que o runtime não aplica não pode escolher o idioma de reserva do mod.
+    let aplicadas: Vec<&Linha> = tabela.iter().filter(|l| bwms_primitives::TIPOS_DE_TEXTO_APLICADOS.contains(&l.tipo.as_str())).collect();
     let mut mods: Vec<&str> = Vec::new();
-    for l in &textos {
+    for l in &aplicadas {
         if !mods.contains(&l.modulo.as_str()) {
-            mods.push(l.modulo.as_str());
+            mods.push(&l.modulo);
         }
     }
+    let mut saida = Vec::new();
     for m in mods {
-        let do_mod: Vec<&&Linha> = textos.iter().filter(|l| l.modulo == m).collect();
-        let Some(reserva) = do_mod.first().map(|l| l.idioma.as_str()) else { continue };
-        out.extend(do_mod.iter().filter(|l| l.idioma == idioma).map(|l| (l.caminho.clone(), false)));
+        let do_mod: Vec<&&Linha> = aplicadas.iter().filter(|l| l.modulo == m).collect();
+        let reserva = do_mod[0].idioma.as_str();
+        saida.extend(do_mod.iter().filter(|l| l.idioma == idioma).map(|l| (l.caminho.clone(), false)));
         if reserva != idioma {
-            out.extend(do_mod.iter().filter(|l| l.idioma == reserva).map(|l| (l.caminho.clone(), true)));
+            saida.extend(do_mod.iter().filter(|l| l.idioma == reserva).map(|l| (l.caminho.clone(), true)));
         }
     }
-    out
+    saida
 }
 
 /// Idioma dos textos em uso (`/language` `OnScreen` das configurações do jogo), pelo `BwmsIdiomaDosTextos` do script.

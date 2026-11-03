@@ -1,45 +1,15 @@
-//! sobrepor_funcao — "FunctionOverride" do BWMS: hook nativo (Rust, não-Lua) de QUALQUER
+//! sobrepor_funcao — sobreposição de função do BWMS: hook nativo (Rust, não-Lua) de QUALQUER
 //! função redscript (nativa OU scriptada) por classe+método, com composição Before/After/
-//! Replace multi-mod. Prep de 2026-08-11 (`PENDENCIAS-UNIFICADAS.md`, CET item `#39/FunctionOverride`).
+//! Replace multi-mod. Prep de 2026-08-11 (`PENDENCIAS-UNIFICADAS.md`).
 //!
-//! # Como o CET real faz isto (C++, `enablers/CET/src/scripting/FunctionOverride.cpp`)
-//!
-//! CET só hooka 2 pontos de entrada GLOBAIS e BAIXO NÍVEL via MinHook:
-//! `CScript_RunPureScript` (despacho de função NATIVA) e `CScript_AllocateFunction` (alocação
-//! do POD de função, só pra garantir espaço extra pro "trampolim"). Para interceptar uma função
-//! redscript ESPECÍFICA sem recompilar `.reds`, ele precisa de 3 truques encadeados, porque esses
-//! 2 pontos de hook não sabem NADA sobre qual `CBaseFunction*` está sendo chamado além do que já
-//! recebem — e uma função SCRIPTADA (não-nativa) nem passa pelo hook de `RunPureScript`:
-//!
-//! 1. **Clona os METADADOS da função real** (`CopyFunctionDescription`: fullName/params/bytecode)
-//!    num objeto NOVO ("trampolim"), com o ponteiro de código nativo apontando pra um STUB DE
-//!    MÁQUINA gerado via `Xbyak::CodeGenerator` em runtime (`OverrideCodegen`, 7 instruções x64:
-//!    `sub rsp,56; mov rax,funcReal; mov [rsp+32],rax; mov rax,HandleOverridenFunction; call rax;
-//!    add rsp,56; ret`). O stub existe só porque a convenção de chamada nativa
-//!    `(ctx,frame,out,a4)` NÃO carrega "qual CBaseFunction sou eu" — o stub materializa esse 5º
-//!    argumento (o ponteiro real) como CONSTANTE embutida no código, então é 1 stub por função
-//!    hookada (mini-JIT de "closure com constante presa").
-//! 2. **Swap de conteúdo por PONTEIRO ESTÁVEL**: `memcpy` trocando os BYTES INTEIROS entre o
-//!    objeto da função REAL (cujo ponteiro está espalhado pela RTTI inteira — `CClass::funcs` etc,
-//!    nunca muda) e o objeto trampolim novo. Depois do swap, qualquer código que já tinha o
-//!    ponteiro ORIGINAL passa a executar o STUB (sem saber que mudou), e a implementação original
-//!    passa a viver no objeto "trampolim" (ainda 100% chamável, é o "next" do fim da cadeia).
-//!    Isso é necessário porque CET força uma função SCRIPTADA a "virar nativa" pra cair no hook
-//!    de `RunPureScript`/`AllocateFunction` — sem trocar a IDENTIDADE do objeto function, outros
-//!    lugares da engine que já resolveram o ponteiro original nunca veriam a interceptação.
-//! 3. **`ExecuteChain`/`WrapNextOverride`**: cadeia de middleware com continuação `next()`
-//!    (Before → Overrides recursivos com `next` → After), usando `RTTIHelper::ExecuteFunction`
-//!    (bytecode montado à mão) pra invocar a função real no fim da cadeia.
-//!
-//! # Por que o BWMS NÃO precisa do passo 1 nem do passo 2 (nem de JIT nenhum)
+//! # Mecanismo (sem JIT nenhum)
 //!
 //! O executor universal do BWMS (`inicio::boot::exec_replacement`, hook JÁ INSTALADO e provado desde
 //! 2026-06/2026-07) intercepta o equivalente ARM64/macOS de `CBaseFunction::InternalExecute` — o
 //! MESMO ponto de despacho por onde passa TODA chamada de função redscript, nativa OU scriptada,
 //! ANTES do motor decidir internamente qual caminho seguir. `exec_replacement` já recebe
-//! `(func: CBaseFunction*, ctx, frame, aOut, a4)` — exatamente a identidade que CET precisa
-//! "injetar" via stub. Como o BWMS intercepta um nível ACIMA (o despachante universal, não os
-//! 2 pontos específicos de native-execute que CET usa), **"interceptar a função X" aqui é só
+//! `(func: CBaseFunction*, ctx, frame, aOut, a4)` — a identidade da função chamada. Como o BWMS
+//! intercepta o despachante universal, **"interceptar a função X" aqui é só
 //! registrar `X -> callback` numa tabela e consultar essa tabela dentro do hook já existente** —
 //! zero swap de struct, zero geração de código de máquina nova. A técnica de tabela-por-ponteiro
 //! já está em produção pro caso "nativa FORJADA por nós" (`register::NATIVE_ROUTES`/`route_native`,
@@ -49,23 +19,23 @@
 //! concreta, 1 método") e usa `register::NativeHandler` como callback, a mesma assinatura que plugins já implementam para
 //! `register_native`/`register_method`.
 //!
-//! # Composição multi-mod: divergência CONSCIENTE do `next()` do CET (V1)
+//! # Composição multi-mod (V1)
 //!
-//! CET dá a cada `Override` registrado um `next` que ou chama o PRÓXIMO override ou (no fim da
-//! cadeia) a função real — permite que um mod decida "delego pro próximo" vs "substituo por
+//! Um `next` por `Override` registrado, que ou chama o PRÓXIMO override ou (no fim da
+//! cadeia) a função real, deixaria um mod decidir "delego pro próximo" vs "substituo por
 //! completo" caso a caso. Implementar isso aqui exigiria closures Rust capturando o restante da
 //! cadeia (viável, mas mais estado + mais superfície de bug em código ainda não testado ao vivo).
 //! **V1 usa uma regra mais simples e determinística: `Before` e `After` disparam TODOS os
 //! registrados, em ordem de registro; `Replace` só o ÚLTIMO registrado roda** (mod que
 //! registrou por último "vence"). Isso cobre o
-//! caso prático dominante (1 mod substitui, N mods observam antes/depois) sem reintroduzir a
-//! complexidade de continuação que o CET só paga por causa do stub JIT. Evoluir pra um `next()`
+//! caso prático dominante (1 mod substitui, N mods observam antes/depois) sem a
+//! complexidade de continuação. Evoluir pra um `next()`
 //! genuíno depois é troca de ESTRUTURA DE DADOS/ORDEM DE CHAMADA, não de PRIMITIVA — pode ser
 //! feito sem tocar a parte arriscada (o hook em si já está resolvido).
 //!
 //! # Status
 //!
-//! Provado ao vivo em 2026-08-11 (`cp77-symbols/notes/proofs/2026-08-11-cet-fnoverride-PROVADO.log`): Before, After e
+//! Provado ao vivo em 2026-08-11 (prova de 2026-08-11 da sobreposição de função): Before, After e
 //! Replace num método 100% redscript, chamado sem parâmetros. Não provado: método vanilla, 2+ registrantes na mesma fase,
 //! e reentrância (um Replace que chama `rtti::call_func` para a original, aninhando o executor). Hoje só os comandos de
 //! dev `fnoverridetest`/`fnoverridereplace` registram alvo; a API C de plugin não expõe este módulo.
@@ -82,13 +52,13 @@ use crate::register::NativeHandler;
 #[cfg(feature = "devtools")]
 use crate::rtti::{self, Registry};
 
-/// Fase de disparo pedida pelo registrante — espelha `Observe`/`ObserveAfter`/`Override` do CET,
+/// Fase de disparo pedida pelo registrante — corresponde a `Observe`/`ObserveAfter`/`Override` da API Lua,
 /// sem o parâmetro `absolute`/`after` separado (fundidos num enum só).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg(feature = "devtools")]
 pub enum Phase {
     /// Roda ANTES da função original (ou do Replace, se houver) — fire-and-forget, não pode
-    /// suprimir nem alterar o retorno (mesmo espírito do `Before`/`ObserveBefore` do CET).
+    /// suprimir nem alterar o retorno (como o `ObserveBefore` da API Lua).
     Before = 0,
     /// Roda DEPOIS da função original (ou do Replace) ter retornado — fire-and-forget.
     After = 1,

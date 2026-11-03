@@ -1,4 +1,4 @@
-// bwms-ui-widgetfind.reds — busca na árvore de widgets (catálogo Codeware #89).
+// bwms-ui-widgetfind.reds — busca na árvore de widgets.
 //
 // As duas direções, porque servem a perguntas diferentes: descer responde "o que existe dentro disto" (montagem, busca por tipo) e
 // subir responde "onde isto está" (contexto, ancestralidade) sem precisar da raiz na mão. Subir usa o `GetParentWidget` que o BWMS

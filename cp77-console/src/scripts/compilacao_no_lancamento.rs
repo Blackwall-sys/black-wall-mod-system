@@ -43,7 +43,7 @@ const INICIO_DAS_LINHAS: &str = "relatorio";
 /// Separa, no registro, as linhas do relatório do estado dos mods (`cor\traiz\tmotivo`). Toda linha do relatório tem ` / `, e esta não tem.
 const INICIO_DOS_ESTADOS: &str = "estados";
 /// Passadas do `scc` numa abertura, contando a 1ª: cada uma que falha com erro de mod tira o mod e roda de novo. Medido com o `scc` real,
-/// o bundle do BWMS, Equipment-EX e Virtual Atelier (relatório `z030/relatorios/C.md`): 0,45–0,75 s por passada no disco interno e no disco
+/// o bundle do BWMS e dois mods de terceiro (relatório `z030/relatorios/C.md`): 0,45–0,75 s por passada no disco interno e no disco
 /// do jogo, 1,2 s na 1ª com o cache frio; com 6, o pior caso fica em ~4,5 s, ~7 s frio. Erro de tipo de vários mods sai numa passada só;
 /// sintaxe e cascata pedem uma por mod.
 const TETO_DE_RODADAS: usize = 6;
@@ -56,7 +56,7 @@ const AVISOS_DE_CONFLITO: [&str; 3] = [
 ];
 /// stdout e stderr do `scc`, lidos depois que ele sai e apagados (o `scc` grava o mesmo em `r6/logs/redscript_rCURRENT.log`).
 const SAIDA_DO_SCC: &str = "bwms-scc-saida.txt";
-/// Teto do `scc`. Medido fora do jogo, no disco do jogo: 0,6–1,1 s por passada com o bundle do BWMS (mais Virtual Atelier e Equipment-EX,
+/// Teto do `scc`. Medido fora do jogo, no disco do jogo: 0,6–1,1 s por passada com o bundle do BWMS (mais dois mods de terceiro,
 /// e na 1ª execução de uma cópia nova); o teto só pega compilador travado (disco que caiu), sem segurar a abertura do jogo para sempre.
 const TETO_DO_SCC: Duration = Duration::from_secs(30);
 /// O trio que o `scc` mantém em `r6/cache`: o blob, o vanilla de onde ele compila e o carimbo do blob que ele gravou.
@@ -228,9 +228,9 @@ fn pasta_do_relatorio_para_a_falha(jogo: &Path, resultado: &Resultado) {
     }
 }
 
-/// TweakXL, ArchiveXL e Codeware de terceiro no jogo: o port de Mac em `red4ext/plugins/<nome>/` (onde o RED4ext do Mac carrega plugins) ou os
-/// scripts em `r6/scripts/<nome>/` (a cópia do Windows também). Decisão do dono de 2026-10-27: o BWMS faz o que eles fazem, com os nomes que os
-/// mods usam, e os dois juntos brigam pelas mesmas classes e ganchos; o instalador recusa (`bwms-install.sh`) e a abertura não compila.
+/// Framework de terceiro no jogo, achado pelo nome da pasta: plugin em `red4ext/plugins/<nome>/` ou scripts em `r6/scripts/<nome>/`.
+/// Decisão do dono de 2026-10-27: o framework e o BWMS juntos brigam pelas mesmas classes e ganchos; o instalador recusa
+/// (`bwms-install.sh`) e a abertura não compila.
 fn frameworks_de_terceiro(jogo: &Path) -> Vec<String> {
     ["TweakXL", "ArchiveXL", "Codeware"]
         .iter()
@@ -245,10 +245,9 @@ fn executar(jogo: &Path, red4: &Path, scc: Option<&Path>, manifesto: &str) -> Re
     if !terceiros.is_empty() {
         let lista = terceiros.join(", ");
         return Resultado::ErroNasFontes(vec![format!(
-            "framework de terceiro no jogo ({lista}): o BWMS já faz o que o TweakXL, o ArchiveXL e o Codeware fazem, com os mesmos nomes, e os dois \
-             juntos brigam pelas mesmas classes. Os scripts não foram compilados e o jogo abre com a última compilação que deu certo; mova essas \
-             pastas para a Lixeira e abra o jogo de novo / third-party framework in the game ({lista}): BWMS already does what TweakXL, ArchiveXL \
-             and Codeware do, under the same names, and both together fight over the same classes. Scripts were not compiled and the game opens \
+            "framework de terceiro no jogo ({lista}): ele e o BWMS juntos brigam pelas mesmas classes. Os scripts não foram compilados e o jogo abre com a última compilação que deu certo; mova essas \
+             pastas para a Lixeira e abra o jogo de novo / third-party framework in the game ({lista}): it and BWMS together \
+             fight over the same classes. Scripts were not compiled and the game opens \
              with the last build that succeeded; move these folders to the Trash and open the game again"
         )]);
     }
@@ -1075,7 +1074,7 @@ mod tests {
         p
     }
 
-    /// Framework de terceiro (port de Mac em `red4ext/plugins/` ou scripts em `r6/scripts/`): a abertura não roda o `scc` e diz o que mover.
+    /// Framework de terceiro (plugin em `red4ext/plugins/` ou scripts em `r6/scripts/`): a abertura não roda o `scc` e diz o que mover.
     #[test]
     fn framework_de_terceiro_para_a_abertura_sem_compilar() {
         let jogo = pasta_de_teste("terceiro");
@@ -2056,7 +2055,7 @@ exit 0"#;
 
 
     /// Mod quebrado sai sozinho, com o `scc` real e `.reds` com erro de verdade, ao lado dos mods que estiverem na `Mods/` da base (a medida
-    /// do relatório usa Equipment-EX e Virtual Atelier). Mesma base de `medida_com_o_scc_real` (`BWMS_MEDIDA_SCRIPTS`); imprime o tempo de cada
+    /// do relatório usa dois mods de terceiro). Mesma base de `medida_com_o_scc_real` (`BWMS_MEDIDA_SCRIPTS`); imprime o tempo de cada
     /// abertura. `cargo test --lib mods_quebrados_saem_com_o_scc_real -- --ignored --nocapture --test-threads=1`.
     #[test]
     #[ignore]
@@ -2105,12 +2104,9 @@ exit 0"#;
         let (r, e) = passo("1 quebrado (tipo)");
         assert!(matches!(&r, Resultado::Compilou(l) if l.iter().any(|l| l.contains("q1.reds:4: [UNRESOLVED_FN]"))), "{r:?}");
         assert_eq!(e.cor(&mods.join("zz-q1")), Some(CorDoMod::Vermelho));
-        // O mod sai inteiro (o arquivo dele que compila também), e os outros mods da `Mods/` estão no blob.
+        // O mod sai inteiro (o arquivo dele que compila também).
         let blob = std::fs::read(cache.join(TRIO[0])).unwrap();
         assert!(!contem(&blob, b"BwmsMedidaBomDoQuebrado"));
-        if mods.join("Virtual Atelier").is_dir() {
-            assert!(contem(&blob, b"VirtualAtelierConfig"));
-        }
         assert!(matches!(passo("1 quebrado, sem mudança").0, Resultado::NadaMudou(_)));
         // 2 quebrados (tipo): os dois na mesma passada.
         escrever(&mods, "zz-q2/q2.reds", "module Q2\n\npublic func Q2() -> Bool {\n  return NaoExisteQ2(1);\n}\n");

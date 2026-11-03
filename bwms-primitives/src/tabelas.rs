@@ -1,6 +1,6 @@
 //! As tabelas `red4ext/bwms-*.txt` entre o install e o runtime: o nome do arquivo, o cabeçalho e a linha de cada uma, definidos uma vez para
-//! quem grava (`instalacao::tabelas_de_runtime`, `instalacao::apply`) e para quem lê (`cp77-console`, na carga das tabelas do boot e do
-//! `ArchiveXL.Reload`).
+//! quem grava (`instalacao::tabelas_de_runtime`, `instalacao::apply`) e para quem lê (`cp77-console`, na carga das tabelas do boot e da
+//! recarga pedida por script).
 //!
 //! Regra das 9: uma linha por registro, colunas separadas por ` | `, e o cabeçalho do gerador começa com `#`. Na leitura, linha vazia e linha
 //! que começa com `#` (depois dos espaços) ficam de fora, e cada coluna sai sem os espaços das pontas; linha com outro número de colunas, ou com
@@ -113,7 +113,7 @@ impl<'a> Reslink<'a> {
     }
 }
 
-/// Linha de `bwms-streaming.txt` (`streaming.sectors`, ArchiveXL `#49`): deleção ou mutação de um node de setor. O runtime agrupa por
+/// Linha de `bwms-streaming.txt` (`streaming.sectors`): deleção ou mutação de um node de setor. O runtime agrupa por
 /// (`mod_id`, setor) e um grupo com uma linha ruim é recusado inteiro.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Streaming<'a> {
@@ -147,7 +147,7 @@ impl<'a> Streaming<'a> {
     }
 }
 
-/// Linha de `bwms-questphase.txt` (`quest.phases`, ArchiveXL `#35`): uma fase de mod pendurada numa fase do jogo. Os caminhos de recurso vão
+/// Linha de `bwms-questphase.txt` (`quest.phases`): uma fase de mod pendurada numa fase do jogo. Os caminhos de recurso vão
 /// em texto: o id do nó novo sai do CRC-16 de `"<fase do mod>:<id do nó de entrada>"`, e o id do nó de entrada só se sabe no grafo quando o
 /// caminho é vazio.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,7 +155,7 @@ pub struct Questphase<'a> {
     pub mod_id: &'a str,
     pub pai: &'a str,
     pub fase: &'a str,
-    /// Ids do caminho do nó, separados por espaço na coluna; vazio (ou `-`) = o `questStartNodeDefinition` do grafo, como na referência.
+    /// Ids do caminho do nó, separados por espaço na coluna; vazio (ou `-`) = o `questStartNodeDefinition` do grafo.
     pub entrada: Vec<u16>,
     /// `None` grava `-`; `-` e a coluna vazia leem `None`.
     pub socket_entrada: Option<&'a str>,
@@ -203,7 +203,7 @@ impl<'a> Questphase<'a> {
     }
 }
 
-/// Linha de `bwms-journal.txt` (`journal`, ArchiveXL `#44`): um `.journal` de mod.
+/// Linha de `bwms-journal.txt` (`journal`): um `.journal` de mod.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Journal<'a> {
     pub mod_id: &'a str,
@@ -223,7 +223,7 @@ impl<'a> Journal<'a> {
     }
 }
 
-/// Linha de `bwms-localizacao.txt` (`localization`, ArchiveXL `#45`): um recurso de texto do mod num idioma, na ordem do `.xl` (o 1º idioma de
+/// Linha de `bwms-localizacao.txt` (`localization`): um recurso de texto do mod num idioma, na ordem do `.xl` (o 1º idioma de
 /// cada mod é a reserva no runtime).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Localizacao<'a> {
@@ -246,13 +246,13 @@ impl<'a> Localizacao<'a> {
     }
 }
 
-/// Linha de `bwms-resource-patch.txt` (`resource.patch`, ArchiveXL `#17`): um par patch → alvo, já resolvido entre os mods pelo install.
+/// Linha de `bwms-resource-patch.txt` (`resource.patch`): um par patch → alvo, já resolvido entre os mods pelo install.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResourcePatch<'a> {
     pub mod_id: &'a str,
     pub patch: &'a str,
     pub alvo: &'a str,
-    /// Bits `crate::A17_PROP_*`; `u32::MAX` (todas) grava `-`, o props vazio da referência. Na leitura, a coluna em hex (`0x…`) ou, numa
+    /// Bits `crate::A17_PROP_*`; `u32::MAX` (todas) grava `-`, o props vazio. Na leitura, a coluna em hex (`0x…`) ou, numa
     /// tabela posta à mão, os nomes (`crate::a17_props_mascara`).
     pub props: u32,
 }
@@ -283,31 +283,31 @@ pub enum TipoDeFix {
     Nomes,
     /// `paths`: recurso de aparência de uma opção de customização (`FixCustomizationOptions`).
     Caminhos,
-    /// `context`: parâmetro de contexto do mesh dinâmico (`PrepareMeshState(mesh, fix.GetContext())` da referência); antigo = nome, novo = valor.
+    /// `context`: parâmetro de contexto do mesh dinâmico; antigo = nome, novo = valor.
     Contexto,
 }
 
-/// Nome do atributo de contexto do mesh a partir da chave do `context` (`Str::SnakeCase` da referência, que o `PrefillContext` aplica e o da 2.5
-/// não): maiúscula vira `_` + minúscula, menos no começo e logo depois de `_`.
+/// Nome do atributo de contexto do mesh a partir da chave do `context` do `resource.fix` (o preenchimento de contexto da 2.5 não converte o
+/// nome): maiúscula ASCII vira minúscula, com `_` antes quando o caractere anterior não é maiúscula ASCII nem `_` (`HTTPServer` →
+/// `httpserver`). O resto passa igual.
 pub fn nome_de_atributo(chave: &str) -> String {
-    let mut nome = String::with_capacity(chave.len() + 4);
-    let mut separa = false;
+    let mut nome = String::with_capacity(chave.len() + chave.len() / 4);
+    let mut anterior: Option<char> = None;
     for c in chave.chars() {
         if c.is_ascii_uppercase() {
-            if separa {
+            if anterior.is_some_and(|a| !a.is_ascii_uppercase() && a != '_') {
                 nome.push('_');
-                separa = false;
             }
             nome.push(c.to_ascii_lowercase());
         } else {
             nome.push(c);
-            separa = c != '_';
         }
+        anterior = Some(c);
     }
     nome
 }
 
-/// Linha de `bwms-resfixes.txt` (`resource.fix`, ArchiveXL `#51` 51i): no recurso, o antigo vira o novo.
+/// Linha de `bwms-resfixes.txt` (`resource.fix`, 51i): no recurso, o antigo vira o novo.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Resfix<'a> {
     pub recurso: &'a str,
@@ -338,7 +338,7 @@ impl<'a> Resfix<'a> {
     }
 }
 
-/// Linha de `bwms-resscopes.txt` (`resource.scope`, ArchiveXL `#20` 20e-2): um alvo de um escopo já expandido, com o escopo pelo hash do
+/// Linha de `bwms-resscopes.txt` (`resource.scope`, 20e-2): um alvo de um escopo já expandido, com o escopo pelo hash do
 /// caminho (`crate::resource_path_hash`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Resscope<'a> {
@@ -360,7 +360,7 @@ impl<'a> Resscope<'a> {
     }
 }
 
-/// Linha de `bwms-customizations.txt` (`customizations`, ArchiveXL `#47`): um recurso de opções de customização do corpo masculino ou feminino.
+/// Linha de `bwms-customizations.txt` (`customizations`): um recurso de opções de customização do corpo masculino ou feminino.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Customizacao<'a> {
     pub feminino: bool,
@@ -387,7 +387,7 @@ impl<'a> Customizacao<'a> {
 mod tests {
     use super::*;
 
-    /// Snake_case da referência e o hash dos nomes que o mesh nativo da 2.5 usa (constantes dos inicializadores `0x101ce97b8` e `0x101ce9644`).
+    /// Snake_case e o hash dos nomes que o mesh nativo da 2.5 usa (constantes dos inicializadores `0x101ce97b8` e `0x101ce9644`).
     #[test]
     fn nome_de_atributo_e_hashes_do_mesh_nativo() {
         assert_eq!(nome_de_atributo("appearanceExpansionSource"), "appearance_expansion_source");

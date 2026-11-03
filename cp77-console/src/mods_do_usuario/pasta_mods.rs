@@ -2,7 +2,7 @@
 //! Windows, ou arquivos soltos) e o BWMS acha as peças ao abrir o jogo: o `.archive` vai como clone APFS para a pasta que o próprio jogo
 //! monta, `archive/Mac/mod/BWMS-Mods/` (`pasta_nativa`, scope 6, acima de `patch`/`ep1`/`content`), e o gancho do `InitializeArchives`
 //! confere o que o jogo montou (`conferir_montagem`); o `.xl` nas tabelas de runtime de `red4ext/` (`preparar_no_boot`, pelo
-//! escritor único do motor, `apply::gravar_tabelas_de_runtime`), o tweak no pipeline do TweakXL (`pipeline::apply_mod_tweaks`, pela lista de
+//! escritor único do motor, `apply::gravar_tabelas_de_runtime`), o tweak no pipeline de tweaks (`pipeline::apply_mod_tweaks`, pela lista de
 //! `tweaks`) e o `.reds` na compilação do lançamento (`reds`). O que entrou e o que ficou de fora vai para `Mods/BWMS-RELATORIO.txt`,
 //! regravado a cada boot.
 //!
@@ -28,7 +28,7 @@ use std::sync::{Mutex, PoisonError};
 /// O relatório para o usuário, na raiz da `Mods/`. A varredura não o conta como mod.
 const RELATORIO: &str = "BWMS-RELATORIO.txt";
 
-/// Pastas da árvore do jogo em que um `.yaml` solto não é tweak (configuração de plugin, de CET, do motor).
+/// Pastas da árvore do jogo em que um `.yaml` solto não é tweak (configuração de plugin, de mod Lua, do motor).
 const ARVORES_DO_JOGO: [&str; 5] = ["archive", "bin", "engine", "r6", "red4ext"];
 
 /// A pasta `Mods/` do jogo.
@@ -49,8 +49,8 @@ enum Tipo {
 
 /// O tipo de um arquivo da `Mods/` pelo caminho dentro dela. O `.reds` compara a extensão exata, como o `scc` ao andar uma pasta: `X.REDS` não
 /// compila no Windows e não entra aqui. O tweak (a regra única de extensão, `bwms_primitives::formato_tweak`) conta debaixo de `r6/tweaks/`
-/// ou solto fora das árvores do jogo (`ARVORES_DO_JOGO`): um `.yaml` de `bin/` ou `red4ext/` é configuração de outro programa, e o parser do
-/// TweakXL o leria como record.
+/// ou solto fora das árvores do jogo (`ARVORES_DO_JOGO`): um `.yaml` de `bin/` ou `red4ext/` é configuração de outro programa, e o parser de
+/// tweak o leria como record.
 fn tipo(rel: &Path) -> Option<Tipo> {
     let ext = rel.extension()?.to_str()?;
     let e = |x: &str| ext.eq_ignore_ascii_case(x);
@@ -601,7 +601,7 @@ fn texto_cru_do_relatorio(r: &Relatorio, sabido: &Sabido, secoes: &[(String, Vec
         }
         if m.luas > 0 {
             t.push_str(&format!(
-                "Lua: {} .lua — mod de CET: o BWMS roda pela pasta Mods; o que depende de .dll não / CET mod: BWMS runs it from the Mods folder; \
+                "Lua: {} .lua — mod Lua: o BWMS roda pela pasta Mods; o que depende de .dll não / Lua mod: BWMS runs it from the Mods folder; \
                  whatever needs a .dll does not\n",
                 m.luas
             ));
@@ -1140,19 +1140,24 @@ fn estados_de(r: Option<&Relatorio>, scripts: &EstadosDosMods, patches_fora: &[(
     e
 }
 
+// Os testes que leem mods reais de fora da árvore do produto: submódulo daqui (os itens privados da `pasta_mods`), arquivo fora do export.
+#[cfg(all(test, feature = "devtools"))]
+#[path = "testes_com_mods_reais.rs"]
+mod testes_com_mods_reais;
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     /// Pasta vazia em `temp_dir` para o teste; ele a apaga por caminho no fim.
-    fn pasta_de_teste(nome: &str) -> PathBuf {
+    pub(super) fn pasta_de_teste(nome: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("bwms-pasta-mods-{nome}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&p);
         std::fs::create_dir_all(&p).unwrap();
         p
     }
 
-    fn escrever_em(raiz: &Path, arquivos: &[(&str, &[u8])]) {
+    pub(super) fn escrever_em(raiz: &Path, arquivos: &[(&str, &[u8])]) {
         for (caminho, conteudo) in arquivos {
             let p = raiz.join(caminho);
             std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -1160,12 +1165,12 @@ mod tests {
         }
     }
 
-    fn relativos(raiz: &Path, v: &[PathBuf]) -> Vec<String> {
+    pub(super) fn relativos(raiz: &Path, v: &[PathBuf]) -> Vec<String> {
         v.iter().map(|p| p.strip_prefix(raiz).unwrap().to_string_lossy().into_owned()).collect()
     }
 
     /// `raiz` lida como a `Mods/` de um jogo.
-    fn ler(raiz: &Path) -> PastaMods {
+    pub(super) fn ler(raiz: &Path) -> PastaMods {
         PastaMods { raiz: raiz.to_path_buf(), arquivos: apply::arquivos_da_pasta_mods(raiz) }
     }
 
@@ -1256,8 +1261,8 @@ mod tests {
                 ("Mod A/r6/tweaks/a.yaml", b"x"),
                 ("Mod A b/b.archive", b"x"),
                 ("Mod A/r6/scripts/a.reds", b"x"),
-                ("CET/bin/x64/plugins/cyber_engine_tweaks/mods/c/init.lua", b"x"),
-                ("CET/bin/x64/plugins/cyber_engine_tweaks/mods/c/ui.lua", b"x"),
+                ("Codigo Lua/bin/x64/plugins/cyber_engine_tweaks/mods/c/init.lua", b"x"),
+                ("Codigo Lua/bin/x64/plugins/cyber_engine_tweaks/mods/c/ui.lua", b"x"),
                 ("Plug/red4ext/plugins/p/p.dll", b"x"),
                 ("Leia/leia.txt", b"x"),
                 ("solto.archive", b"x"),
@@ -1267,7 +1272,7 @@ mod tests {
         let mods = varrer(&ler(&raiz));
         let nomes: Vec<&str> = mods.iter().map(|m| m.nome.as_str()).collect();
         // "Mod A b/" vem antes de "Mod A/" em bytes (' ' < '/'): é também a ordem de carga dos archives.
-        assert_eq!(nomes, ["CET", "Leia", "Mod A b", "Mod A", "Plug", "solto.archive"]);
+        assert_eq!(nomes, ["Codigo Lua", "Leia", "Mod A b", "Mod A", "Plug", "solto.archive"]);
         let a = &mods[3];
         assert_eq!((a.archives.len(), a.xls.len(), a.tweaks.len(), a.reds.len(), a.luas, a.dlls), (1, 1, 1, 1, 0, 0));
         assert_eq!((mods[0].luas, mods[4].dlls, mods[5].archives.len()), (2, 1, 1));
@@ -1317,7 +1322,7 @@ mod tests {
         b
     }
 
-    /// Os 2 caminhos pelo índice dos archives: a `Mods/` vence o mod.io (a cópia do FairerCourierTimers do roteiro), e entre dois do mod.io
+    /// Os 2 caminhos pelo índice dos archives: a `Mods/` vence o mod.io (a cópia, no mod de teste do roteiro, do archive de um mod do mod.io), e entre dois do mod.io
     /// vence o de id menor. O relatório diz quem vence e o que fazer; o mod.io que perde fica amarelo com o nome de quem vence; o bloco de cada
     /// mod da `Mods/` traz a luz e o motivo que vem de fora dele (a compilação), sem caminho da máquina; a seção do mod.io lista cada um.
     #[test]
@@ -1328,14 +1333,14 @@ mod tests {
         escrever_em(
             &raiz,
             &[
-                ("BWMS Teste ModIO/archive/pc/mod/FairerCourierTimers.archive", &archive_com(&[fct])),
+                ("BWMS Teste ModIO/archive/pc/mod/ModDois.archive", &archive_com(&[fct])),
                 ("Quebrado/r6/scripts/q.reds", b"// q"),
             ],
         );
         let (lcdt, outro) = (jogo.join("modio/mods/6428265"), jogo.join("modio/mods/6500000"));
         escrever_em(
             &jogo,
-            &[("modio/mods/6428265/archive/FairerCourierTimers.archive", &archive_com(&[fct, 7])), ("modio/mods/6500000/archive/b.archive", &archive_com(&[7]))],
+            &[("modio/mods/6428265/archive/ModDois.archive", &archive_com(&[fct, 7])), ("modio/mods/6500000/archive/b.archive", &archive_com(&[7]))],
         );
         let enabled = jogo.join("EnabledMods.json");
         let item = |p: &Path, id: u32, nome: &str| {
@@ -1345,13 +1350,13 @@ mod tests {
                 bwms_primitives::json::texto(nome)
             )
         };
-        std::fs::write(&enabled, format!("{{\"enabled_mods\": [{}, {}]}}", item(&outro, 6500000, "Outro"), item(&lcdt, 6428265, "Longer Car Delivery Timers"))).unwrap();
+        std::fs::write(&enabled, format!("{{\"enabled_mods\": [{}, {}]}}", item(&outro, 6500000, "Outro"), item(&lcdt, 6428265, "Mod Dois"))).unwrap();
         let modio = super::super::mod_io::ler_em(&jogo.join("modio/mods"), &enabled);
         let mods = varrer(&ler(&raiz));
         let mut ordem: Vec<(Caminho, String, Vec<PathBuf>)> = mods.iter().map(|m| (Caminho::Mods, m.nome.clone(), m.archives.clone())).collect();
         ordem.extend(modio.na_ordem_de_carga());
         let cs = conflitos(&ordem);
-        let (lc, ou) = ("Longer Car Delivery Timers (mod.io 6428265)", "Outro (mod.io 6500000)");
+        let (lc, ou) = ("Mod Dois (mod.io 6428265)", "Outro (mod.io 6500000)");
         let pares: Vec<(&str, &str, usize, Caminho, Caminho)> = cs.iter().map(|c| (c.vence.as_str(), c.perde.as_str(), c.recursos, c.vence_no, c.perde_no)).collect();
         assert_eq!(pares, [("BWMS Teste ModIO", lc, 1, Caminho::Mods, Caminho::ModIo), (lc, ou, 1, Caminho::ModIo, Caminho::ModIo)]);
 
@@ -1499,29 +1504,29 @@ mod tests {
         let _ = std::fs::remove_dir_all(&raiz);
     }
 
-    /// O mod de teste que o integrador copia para a `Mods/` (`teste-mods/BWMS Teste TweakXL`): os dois arquivos são tweaks do mod, na ordem
+    /// O mod de teste que o integrador copia para a `Mods/` (`teste-mods/BWMS Teste Tweaks`): os dois arquivos são tweaks do mod, na ordem
     /// de caminho (o `.tweak` antes do `.yaml`, que clona depois do que o `.tweak` gravou), viram as operações que o roteiro confere pelo parser
     /// da aplicação, e o relatório diz que foram lidos, sem recusa. Lido do disco na execução: o arquivo copiado é o arquivo testado. O mod
     /// é de dev e fica fora do export público (`dist/export-github.sh`); sem a pasta, pula. Com a pasta, arquivo faltando é falha.
     #[test]
-    fn mod_de_teste_do_tweakxl_entra_pela_pasta_mods() {
-        let tweaks_do_mod = Path::new(env!("CARGO_MANIFEST_DIR")).join("../teste-mods/BWMS Teste TweakXL/r6/tweaks");
+    fn mod_de_teste_de_tweaks_entra_pela_pasta_mods() {
+        let tweaks_do_mod = Path::new(env!("CARGO_MANIFEST_DIR")).join("../teste-mods/BWMS Teste Tweaks/r6/tweaks");
         if !tweaks_do_mod.is_dir() {
             eprintln!("mod de teste ausente em {}: teste pulado", tweaks_do_mod.display());
             return;
         }
         let do_mod = |nome: &str| std::fs::read(tweaks_do_mod.join(nome)).expect("arquivo do mod de teste");
         let (fonte_yaml, fonte_tweak) = (do_mod("bwms-teste-pasta-mods.yaml"), do_mod("bwms-teste-pasta-mods.tweak"));
-        let jogo = pasta_de_teste("mod-de-teste-tweakxl");
+        let jogo = pasta_de_teste("mod-de-teste-tweaks");
         let raiz = pasta(&jogo);
         let (yaml, tweak) =
-            ("BWMS Teste TweakXL/r6/tweaks/bwms-teste-pasta-mods.yaml", "BWMS Teste TweakXL/r6/tweaks/bwms-teste-pasta-mods.tweak");
+            ("BWMS Teste Tweaks/r6/tweaks/bwms-teste-pasta-mods.yaml", "BWMS Teste Tweaks/r6/tweaks/bwms-teste-pasta-mods.tweak");
         escrever_em(&raiz, &[(yaml, fonte_yaml.as_slice()), (tweak, fonte_tweak.as_slice())]);
 
         assert_eq!(relativos(&raiz, &tweaks(&raiz)), [tweak, yaml]);
         let mods = varrer(&ler(&raiz));
         assert_eq!(mods.len(), 1);
-        assert_eq!((mods[0].nome.as_str(), mods[0].tweaks.len()), ("BWMS Teste TweakXL", 2));
+        assert_eq!((mods[0].nome.as_str(), mods[0].tweaks.len()), ("BWMS Teste Tweaks", 2));
         assert!(tweaks_recusados(&mods).is_empty());
 
         use bwms_primitives::operacoes::{EditOp, Op};
@@ -1568,7 +1573,7 @@ mod tests {
 
         let texto = texto_do_boot(&jogo, &[]).expect("relatório");
         assert!(
-            texto.contains("\n[BWMS Teste TweakXL]\ntweaks: 2 lido(s) — aplicado(s) ao carregar o save / 2 read — applied when a save loads\n"),
+            texto.contains("\n[BWMS Teste Tweaks]\ntweaks: 2 lido(s) — aplicado(s) ao carregar o save / 2 read — applied when a save loads\n"),
             "{texto}"
         );
         assert!(!texto.contains("recusado"), "{texto}");
@@ -1607,8 +1612,8 @@ mod tests {
         };
         let mods = vec![
             a,
-            ModDaPasta { luas: 13, ..m("JB") },
-            ModDaPasta { dlls: 1, ..m("input_loader") },
+            ModDaPasta { luas: 13, ..m("Lua") },
+            ModDaPasta { dlls: 1, ..m("Dll") },
             ModDaPasta { archives: vec![solto.clone()], ..m("solto.archive") },
             ModDaPasta { reds: vec![raiz.join("So Reds/r6/scripts/s.reds")], ..m("So Reds") },
             ModDaPasta { tweaks: vec![raiz.join("So Tweak/t.yaml")], ..m("So Tweak") },
@@ -1657,9 +1662,9 @@ mod tests {
             "recusado / refused: q.xl — o .xl não foi lido; corrija o arquivo e abra o jogo de novo / the .xl could not be read; fix the file and \
              start the game again\n  detalhe / detail: .xl não parseou (x), fora das tabelas do runtime; corrija o YAML do arquivo e abra o jogo \
              de novo\n",
-            "[JB]\nentrou / loaded: nada / nothing\nLua: 13 .lua — mod de CET: o BWMS roda pela pasta Mods; o que depende de .dll não / CET mod: \
+            "[Lua]\nentrou / loaded: nada / nothing\nLua: 13 .lua — mod Lua: o BWMS roda pela pasta Mods; o que depende de .dll não / Lua mod: \
              BWMS runs it from the Mods folder; whatever needs a .dll does not\n",
-            "[input_loader]\nentrou / loaded: nada / nothing\nfora / left out: 1 .dll — plugin de Windows, não carrega no Mac / Windows plugin, \
+            "[Dll]\nentrou / loaded: nada / nothing\nfora / left out: 1 .dll — plugin de Windows, não carrega no Mac / Windows plugin, \
              does not load on a Mac\n",
             "[So Reds]\nscripts: 1 .reds",
             "[So Tweak]\ntweaks: 1 lido(s)",
@@ -1694,14 +1699,14 @@ mod tests {
         // A ação do conflito segue o tipo do mod: pasta, arquivo solto, ou um de cada.
         let m = Caminho::Mods;
         let cs = vec![
-            Conflito { vence: "A".into(), perde: "JB".into(), recursos: 2, vence_no: m, perde_no: m },
+            Conflito { vence: "A".into(), perde: "Lua".into(), recursos: 2, vence_no: m, perde_no: m },
             Conflito { vence: "A".into(), perde: "solto.archive".into(), recursos: 1, vence_no: m, perde_no: m },
         ];
         r.tabelas = Tabelas::Falhou("disco cheio".into());
         let texto = texto_do_relatorio(&r, &Sabido { conflitos: Some(&cs), ..nada() }, &[("Scripts".into(), vec!["A: 2 .reds compilados / 2 .reds built".into()])]);
         assert!(
             texto.contains(
-                "[Conflitos / Conflicts]\nA x JB: 2 recurso(s) em comum, vence A; para inverter, renomeie a pasta / 2 shared resource(s), A wins; \
+                "[Conflitos / Conflicts]\nA x Lua: 2 recurso(s) em comum, vence A; para inverter, renomeie a pasta / 2 shared resource(s), A wins; \
                  to swap, rename the folder\nA x solto.archive: 1 recurso(s) em comum, vence A; para inverter, renomeie a pasta ou o arquivo / 1 \
                  shared resource(s), A wins; to swap, rename the folder or the file\n"
             ),
@@ -1816,7 +1821,7 @@ mod tests {
         let mods = vec![
             ModDaPasta { nome: "Archive".into(), archives: vec![arq("Archive/a.archive"), arq("Archive/b.archive")], ..ModDaPasta::default() },
             ModDaPasta { nome: "Bom".into(), archives: vec![arq("Bom/b.archive")], reds: vec![arq("Bom/b.reds")], ..ModDaPasta::default() },
-            ModDaPasta { nome: "Cet".into(), luas: 2, ..ModDaPasta::default() },
+            ModDaPasta { nome: "Lua".into(), luas: 2, ..ModDaPasta::default() },
             ModDaPasta { nome: "Misto".into(), archives: vec![arq("Misto/m.archive")], dlls: 1, ..ModDaPasta::default() },
             ModDaPasta { nome: "Quebrado".into(), reds: vec![arq("Quebrado/q.reds")], tweaks: vec![arq("Quebrado/t.yaml")], ..ModDaPasta::default() },
             ModDaPasta { nome: "Xl".into(), xls: vec![arq("Xl/x.xl")], ..ModDaPasta::default() },
@@ -1832,7 +1837,7 @@ mod tests {
         let cor = |p: &Path| e.cor(p);
         assert_eq!(cor(&arq("Archive")), Some(CorDoMod::Amarelo));
         assert_eq!(cor(&arq("Bom")), Some(CorDoMod::Verde));
-        assert_eq!(cor(&arq("Cet")), Some(CorDoMod::Verde), "só .lua: o BWMS roda");
+        assert_eq!(cor(&arq("Lua")), Some(CorDoMod::Verde), "só .lua: o BWMS roda");
         assert_eq!(cor(&arq("Misto")), Some(CorDoMod::Amarelo));
         assert_eq!(cor(&arq("Quebrado")), Some(CorDoMod::Vermelho), "o tweak recusado (amarelo) não melhora o vermelho dos scripts");
         assert_eq!(cor(&arq("Xl")), Some(CorDoMod::Amarelo), "patch que o depot não tem");
@@ -1882,268 +1887,6 @@ mod tests {
         // O índice declara 3 recursos e tem só o cabeçalho: válido para o motor, mas sem tabela de hashes.
         assert_eq!(crate::arquivos_do_jogo::hashes_do_archive(&dir.join("bom.archive")), None);
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// Os mods reais extraídos dos zips do Nexus, numa `Mods/` de um jogo falso. São código de terceiro: moram em
-    /// `_referencia-de-terceiro/mods-reais/`, só para leitura de formato, fora da árvore do produto. Sem a pasta, pula.
-    fn fixtures() -> Option<PathBuf> {
-        let f = Path::new(env!("CARGO_MANIFEST_DIR")).join("../_referencia-de-terceiro/mods-reais");
-        if f.is_dir() {
-            Some(f)
-        } else {
-            eprintln!("mods reais ausentes em {}: teste pulado", f.display());
-            None
-        }
-    }
-
-    fn copiar_arvore(de: &Path, para: &Path) {
-        for p in apply::arquivos_da_pasta_mods(de) {
-            let destino = para.join(p.strip_prefix(de).unwrap());
-            std::fs::create_dir_all(destino.parent().unwrap()).unwrap();
-            std::fs::copy(&p, destino).unwrap();
-        }
-    }
-
-    #[test]
-    fn mods_reais_viram_archives_tabelas_tweaks_reds_e_relatorio() {
-        let Some(fixtures) = fixtures() else { return };
-        let jogo = pasta_de_teste("mods-reais");
-        let raiz = pasta(&jogo);
-        copiar_arvore(&fixtures, &raiz);
-        // Nenhum dos 5 traz tweak: um mod de tweak solto, um em r6/tweaks e um quebrado entram ao lado deles.
-        escrever_em(
-            &raiz,
-            &[
-                ("Tweak Solto/preco.yaml", b"Items.Preset_Yukimura_Default:\n  quality: Quality.Legendary\n"),
-                ("Virtual Atelier/r6/tweaks/teste/va.yaml", b"Items.Preset_Yukimura_Default:\n  quality: Quality.Rare\n"),
-                ("Tweak Quebrado/r6/tweaks/q.yaml", b"Items.Preset_Yukimura_Default:\n\tquality: Quality.Rare\n"),
-            ],
-        );
-
-        let r = preparar(&jogo).unwrap();
-        let nomes: Vec<&str> = r.mods.iter().map(|m| m.nome.as_str()).collect();
-        assert_eq!(nomes, ["Equipment-EX", "JB Third Person Mod", "Quadra Turbo R", "Tweak Quebrado", "Tweak Solto", "Virtual Atelier", "input_loader"]);
-        assert_eq!(
-            relativos(&raiz, &archives(&raiz)),
-            [
-                "Equipment-EX/archive/pc/mod/EquipmentEx.archive",
-                "JB Third Person Mod/archive/pc/mod/jb_tpp_mod_1.archive",
-                "Quadra Turbo R/basegame_Quadra Turbo R V-Tec.archive",
-                "Virtual Atelier/archive/pc/mod/VirtualAtelier.archive",
-            ]
-        );
-        for a in archives(&raiz) {
-            assert!(crate::arquivos_do_jogo::hashes_do_archive(&a).is_some_and(|h| !h.is_empty()), "índice ilegível: {}", a.display());
-        }
-        assert_eq!(
-            relativos(&raiz, &tweaks(&raiz)),
-            ["Tweak Quebrado/r6/tweaks/q.yaml", "Tweak Solto/preco.yaml", "Virtual Atelier/r6/tweaks/teste/va.yaml"]
-        );
-        assert_eq!(relativos(&raiz, &r.tweaks_recusados.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>()), ["Tweak Quebrado/r6/tweaks/q.yaml"]);
-        let reds_dos_zips = apply::arquivos_da_pasta_mods(&fixtures).iter().filter(|p| p.extension().is_some_and(|e| e == "reds")).count();
-        assert_eq!(reds(&raiz).len(), reds_dos_zips);
-        assert!(reds(&raiz).iter().all(|p| p.starts_with(raiz.join("Equipment-EX")) || p.starts_with(raiz.join("Virtual Atelier"))));
-        let por_nome = |n: &str| r.mods.iter().find(|m| m.nome == n).unwrap();
-        assert_eq!((por_nome("JB Third Person Mod").luas, por_nome("input_loader").dlls), (12, 1));
-
-        // Os dois `.xl` (só `localization.onscreens`) viram linhas da tabela de localização, com o id do caminho no jogo.
-        let Tabelas::Gravadas { tabelas, avisos } = &r.tabelas else { panic!("tabelas: {:?}", r.tabelas) };
-        assert_eq!((tabelas.xl_lidos, tabelas.xl_fora.len()), (2, 0), "{avisos:?}");
-        let localizacao = jogo.join("red4ext").join(bwms_primitives::tabelas::LOCALIZACAO.arquivo);
-        let texto = std::fs::read_to_string(&localizacao).unwrap();
-        let mut por_mod: BTreeMap<String, usize> = BTreeMap::new();
-        for l in bwms_primitives::tabelas::ler(&texto, bwms_primitives::tabelas::Localizacao::ler) {
-            *por_mod.entry(l.unwrap().mod_id.to_string()).or_default() += 1;
-        }
-        let esperado: BTreeMap<String, usize> = [
-            ("Mods/Equipment-EX/archive/pc/mod/EquipmentEx.archive".to_string(), 13),
-            ("Mods/Virtual Atelier/archive/pc/mod/VirtualAtelier.archive".to_string(), 10),
-        ]
-        .into();
-        assert_eq!(por_mod, esperado);
-
-        // O relatório antes da carga dos archives (o `on_load`): eles aguardam.
-        let texto = texto_do_relatorio(&r, &nada(), &[]);
-        assert!(
-            texto.contains(
-                "[JB Third Person Mod]\naguardando / pending: 1 .archive (aguardando a carga do jogo / waiting for the game to load them)\nLua: 12 \
-                 .lua — mod de CET: o BWMS roda pela pasta Mods"
-            ),
-            "{texto}"
-        );
-
-        // Conflitos reais entre os 4 archives, pelo índice.
-        let achados = conflitos(&r.aceitos());
-        eprintln!("conflitos reais: {achados:?}");
-        let pares: Vec<(&str, &str, usize)> = achados.iter().map(|c| (c.vence.as_str(), c.perde.as_str(), c.recursos)).collect();
-        assert_eq!(pares, Vec::<(&str, &str, usize)>::new());
-
-        // Depois da carga, sem recusa (o que o gancho do `InitializeArchives` grava).
-        let mut r = r;
-        r.recusados = Some(Vec::new());
-        let texto = texto_do_relatorio(&r, &Sabido { conflitos: Some(&achados), ..nada() }, &[]);
-        eprintln!("{texto}");
-        for linha in [
-            "[JB Third Person Mod]\nentrou / loaded: 1 .archive\nLua: 12 .lua — mod de CET: o BWMS roda pela pasta Mods; o que depende de .dll \
-             não / CET mod: BWMS runs it from the Mods folder; whatever needs a .dll does not\n",
-            "[input_loader]\nentrou / loaded: nada / nothing\nfora / left out: 1 .dll — plugin de Windows, não carrega no Mac / Windows plugin, \
-             does not load on a Mac\n",
-            "[Equipment-EX]\nentrou / loaded: 1 .archive, 1 .xl\nscripts: 2 .reds",
-            "[Virtual Atelier]\nentrou / loaded: 1 .archive, 1 .xl\ntweaks: 1 lido(s) — aplicado(s) ao carregar o save / 1 read — applied when a \
-             save loads\nscripts:",
-            "[Tweak Solto]\ntweaks: 1 lido(s) — aplicado(s) ao carregar o save / 1 read — applied when a save loads\n",
-            "[Tweak Quebrado]\nentrou / loaded: nada / nothing\nrecusado / refused: r6/tweaks/q.yaml — o tweak não foi lido; corrija o arquivo e \
-             abra o jogo de novo / the tweak could not be read; fix the file and start the game again\n  detalhe / detail: o YAML não parseou: \
-             linha 2",
-            "[Conflitos / Conflicts]\nnenhum / none\n",
-        ] {
-            assert!(texto.contains(linha), "falta {linha:?} em:\n{texto}");
-        }
-
-        // O arquivo do relatório na raiz da `Mods/`, que a varredura seguinte não conta como mod.
-        let nomes_antes: Vec<String> = r.mods.iter().map(|m| m.nome.clone()).collect();
-        let e = Estado { relatorio: Some(r), secoes: vec![("Scripts".into(), vec!["linha da lane de scripts".into()])], modio: ModsDoModIo::vazio(), conflitos: None };
-        publicar(&e);
-        let gravado = std::fs::read_to_string(raiz.join(RELATORIO)).unwrap();
-        assert!(gravado.starts_with("BWMS — pasta Mods / Mods folder\n") && gravado.ends_with("\n[Scripts]\nlinha da lane de scripts\n"), "{gravado}");
-        assert_eq!(varrer(&ler(&raiz)).iter().map(|m| m.nome.clone()).collect::<Vec<_>>(), nomes_antes);
-        let r = e.relatorio.unwrap();
-
-        // Conflito real pelo índice: o archive do Quadra numa 2ª pasta, que vem antes em ordem de caminho, divide todos os recursos com ele.
-        let quadra = raiz.join("Quadra Turbo R/basegame_Quadra Turbo R V-Tec.archive");
-        let n = crate::arquivos_do_jogo::hashes_do_archive(&quadra).unwrap().len();
-        escrever_em(&raiz, &[("Quadra Copia/quadra-copia.archive", &std::fs::read(&quadra).unwrap())]);
-        let mods: Vec<(Caminho, String, Vec<PathBuf>)> = varrer(&ler(&raiz)).into_iter().map(|m| (Caminho::Mods, m.nome, m.archives)).collect();
-        assert_eq!(conflitos(&mods), [Conflito { vence: "Quadra Copia".into(), perde: "Quadra Turbo R".into(), recursos: n, vence_no: Caminho::Mods, perde_no: Caminho::Mods }]);
-        std::fs::remove_dir_all(raiz.join("Quadra Copia")).unwrap();
-
-        // Sem os `.xl`, o boot seguinte tira as linhas deles.
-        for m in &r.mods {
-            for x in &m.xls {
-                std::fs::remove_file(x).unwrap();
-            }
-        }
-        assert!(matches!(preparar(&jogo).map(|r| r.tabelas), Some(Tabelas::Gravadas { .. })));
-        assert!(!localizacao.exists());
-        let _ = std::fs::remove_dir_all(&jogo);
-    }
-
-    /// `n` mods sintéticos na `Mods/`, cada `.xl` com linhas em todas as 9 tabelas (os dois `.xl` do golden do motor, com o
-    /// caminho de cada mod): o pior caso do boot com `.xl` na `Mods/`, que lê o `.xl` de cada mod e regrava as tabelas.
-    fn mods_sinteticos(jogo: &Path, n: usize) {
-        for i in 0..n {
-            let alfa = format!(
-                "resource:\n  link:\n    base\\fake\\a{i}.mesh: base\\real\\a{i}.mesh\n  copy:\n    base\\orig{i}.mesh: mod{i}\\copia.mesh\n  scope:\n    mod{i}\\grupo.ent:\n      - base\\x{i}.ent\n  fix:\n    my{i}.mesh:\n      names:\n        old_mat: new_mat\nfactories:\n  - mod{i}\\f.csv\njournal:\n  - mod{i}\\q.journal\nlocalization:\n  onscreens:\n    en-us: mod{i}\\\\loc\\\\en-us.json\ncustomizations:\n  female: mod{i}\\f.inkcharcustomization\n"
-            );
-            let beta = format!(
-                "resource:\n  patch:\n    mod{i}\\p.ent:\n      props: [ components ]\n      targets: [ base\\z{i}.ent ]\nquest:\n  phases:\n    - path: mod{i}\\fase.questphase\n      parent: base\\quest\\pai{i}.questphase\nstreaming:\n  sectors:\n    - path: s{i}.streamingsector\n      expectedNodes: 5\n      nodeDeletions:\n        - index: 1\n          type: worldStaticMeshNode\n"
-            );
-            let dir = pasta(jogo).join(format!("Sintetico{i:03}"));
-            escrever_em(&dir, &[("m.archive", b"x"), ("alfa.xl", alfa.as_bytes()), ("beta.archive.xl", beta.as_bytes())]);
-        }
-    }
-
-    /// Medido nos 5 mods reais: varredura, tabelas, índices e tweaks; e de novo com 20 e com 100 mods sintéticos a mais na `Mods/`, cada um
-    /// com as 9 tabelas. Imprime o tempo de cada parte. `cargo test ... -- --ignored --nocapture`.
-    #[test]
-    #[ignore]
-    fn medir_varredura_tabelas_e_indices_com_os_mods_reais() {
-        let Some(fixtures) = fixtures() else { return };
-        const VOLTAS: u32 = 50;
-        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0 / f64::from(VOLTAS);
-        for n in [0usize, 20, 100] {
-            let jogo = pasta_de_teste(&format!("medida-{n}"));
-            let raiz = pasta(&jogo);
-            copiar_arvore(&fixtures, &raiz);
-            mods_sinteticos(&jogo, n);
-            let mut t = [std::time::Duration::ZERO; 5];
-            let mut linhas = 0usize;
-            for _ in 0..VOLTAS {
-                let inicio = std::time::Instant::now();
-                let lida = apply::ler_pasta_mods(&jogo);
-                let mods = varrer(&lida);
-                t[0] += inicio.elapsed();
-                let inicio = std::time::Instant::now();
-                let tabelas = gravar_tabelas(&jogo, &lida);
-                t[1] += inicio.elapsed();
-                let Tabelas::Gravadas { tabelas, .. } = tabelas else { panic!("{tabelas:?}") };
-                linhas = tabelas.reslink_pairs + tabelas.streaming_lines + tabelas.questphase_lines
-                    + tabelas.journal_lines + tabelas.resource_patch_lines + tabelas.resfix_lines + tabelas.resscope_lines
-                    + tabelas.customization_lines;
-                let inicio = std::time::Instant::now();
-                let aceitos: Vec<(Caminho, String, Vec<PathBuf>)> = mods.iter().map(|m| (Caminho::Mods, m.nome.clone(), m.archives.clone())).collect();
-                std::hint::black_box(conflitos(&aceitos));
-                t[2] += inicio.elapsed();
-                let inicio = std::time::Instant::now();
-                std::hint::black_box(tweaks_recusados(&mods));
-                t[3] += inicio.elapsed();
-                let inicio = std::time::Instant::now();
-                std::hint::black_box(tweaks(&raiz));
-                t[4] += inicio.elapsed();
-            }
-            let gravadas = std::fs::read_dir(jogo.join("red4ext")).map(|d| d.count()).unwrap_or(0);
-            eprintln!(
-                "[medida] {} ({VOLTAS} voltas, cache quente, {n} mods sintéticos, {gravadas} tabela(s), {linhas} linha(s) fora a localização): varredura {:.3} ms, tabelas {:.3} ms, índices+conflitos {:.3} ms, tweaks recusados {:.3} ms, varredura dos tweaks da aplicação {:.3} ms",
-                jogo.display(),
-                ms(t[0]),
-                ms(t[1]),
-                ms(t[2]),
-                ms(t[3]),
-                ms(t[4])
-            );
-            let _ = std::fs::remove_dir_all(&jogo);
-        }
-    }
-    /// O boot com os `.xl` do Equipment-EX e do Virtual Atelier na `Mods/`: os dois `.json` na corrente da `BWMS-Mods/xl` (o EEX, que vence
-    /// em ordem de caminho, no fundo; o `.xl` sem textos conta na numeração), a `bwms-localizacao.txt` sem linha deles, e o relatório dizendo quem aplica cada seção. Um mod ligado
-    /// `.json` de textos em outra pasta de `archive/Mac/mod` devolve tudo ao BWMS: os `.json` saem e a tabela os leva de novo.
-    #[test]
-    fn boot_entrega_os_textos_ao_jogo_e_tira_da_tabela() {
-        let jogo = pasta_de_teste("xl-no-jogo");
-        std::fs::create_dir_all(jogo.join("archive/Mac/content")).unwrap();
-        let eex = "Equipment-EX/archive/pc/mod/EquipmentEx.archive.xl";
-        let va = "Virtual Atelier/archive/pc/mod/VirtualAtelier.archive.xl";
-        let real = |rel: &str| std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("../_referencia-de-terceiro/mods-reais").join(rel));
-        // Sem a pasta (a árvore pública não a leva), pula, como o teste dos mods reais acima.
-        let (Ok(texto_eex), Ok(texto_va)) = (real(eex), real(va)) else {
-            eprintln!("os .xl reais de _referencia-de-terceiro/mods-reais não estão aqui: teste pulado");
-            let _ = std::fs::remove_dir_all(&jogo);
-            return;
-        };
-        escrever_em(&jogo.join("Mods"), &[(eex, &texto_eex), (va, &texto_va), ("Outro/o.xl", b"journal:\n  - o\\j.journal\n")]);
-        let (r, s) = preparar_com_a_pasta_nativa(&jogo, apply::ler_pasta_mods(&jogo), &ModsDoModIo::vazio());
-        let mut r = r.unwrap();
-        assert_eq!(s.json_falhou, None);
-        let rel: Vec<String> = s.jsons.iter().map(|p| p.strip_prefix(&jogo).unwrap().display().to_string()).collect();
-        assert_eq!(rel, ["archive/Mac/mod/BWMS-Mods/xl/0003-VirtualAtelier.archive.json", "archive/Mac/mod/BWMS-Mods/xl/xl/0001-EquipmentEx.archive.json"]);
-        let json_eex = std::fs::read_to_string(&s.jsons[1]).unwrap();
-        assert!(json_eex.contains("\"es-mx\": [\n                \"equipment_ex\\\\localization\\\\en-us.json\"\n            ]"), "{json_eex}");
-        assert!(bwms_primitives::json::ler(&json_eex).is_ok());
-        let loc = std::fs::read_to_string(jogo.join("red4ext/bwms-localizacao.txt")).unwrap_or_default();
-        assert!(loc.lines().all(|l| l.starts_with('#')), "{loc}");
-        assert!(std::fs::read_to_string(jogo.join("red4ext/bwms-journal.txt")).unwrap().contains("o\\j.journal"));
-        r.nativa = Some(s);
-        let texto = texto_do_relatorio(&r, &nada(), &[]);
-        for linha in [
-            "seções / sections: archive/pc/mod/EquipmentEx.archive.xl — localization.onscreens → jogo / game\n",
-            "seções / sections: o.xl — journal → BWMS\n",
-            "2 .json em archive/Mac/mod/BWMS-Mods/xl: o próprio jogo aplica os textos (localization.onscreens) desses .xl, e o BWMS não os aplica",
-        ] {
-            assert!(texto.contains(linha), "falta {linha:?} em:\n{texto}");
-        }
-        // Instruções de textos em outra pasta de `archive/Mac/mod`: o jogo as aplicaria fora da ordem da `Mods/`.
-        escrever_em(&jogo, &[("archive/Mac/mod/outro/o.json", b"{\"localization\": {}}")]);
-        let (r, s) = preparar_com_a_pasta_nativa(&jogo, apply::ler_pasta_mods(&jogo), &ModsDoModIo::vazio());
-        let mut r = r.unwrap();
-        assert!(s.jsons.is_empty());
-        assert!(!jogo.join("archive/Mac/mod/BWMS-Mods/xl").exists());
-        let loc = std::fs::read_to_string(jogo.join("red4ext/bwms-localizacao.txt")).unwrap();
-        assert!(loc.contains("Mods/Equipment-EX/archive/pc/mod/EquipmentEx.archive | onscreens | en-us"), "{loc}");
-        r.nativa = Some(s);
-        let texto = texto_do_relatorio(&r, &nada(), &[]);
-        assert!(texto.contains("seções / sections: archive/pc/mod/EquipmentEx.archive.xl — localization.onscreens → BWMS\n"), "{texto}");
-        assert!(texto.contains("textos (localization.onscreens) dos .xl da Mods: pelo BWMS — há instruções de textos fora da BWMS-Mods (archive/Mac/mod/outro/o.json); mova esse mod para a Mods"), "{texto}");
-        let _ = std::fs::remove_dir_all(&jogo);
     }
 
     /// O boot com `factories` na `Mods/`: cada `.xl` vai ao jogo num `.json` do 1º nível, sem tabela. O `.csv` que não está num archive da

@@ -1,4 +1,4 @@
-// Codeware #153: entidade criada por mod sobrevive a salvar e carregar.
+// Entidade criada por mod sobrevive a salvar e carregar.
 // O BWMS guarda o spec num arquivo PRÓPRIO por save (r6/storage/bwms/entidades) e recria na carga.
 // Nada de mod entra no save: desinstalar o BWMS deixa o jogo salvo vanilla e íntegro.
 // Este arquivo só informa ao runtime QUAL save está entrando — o menu de load é redscript, então

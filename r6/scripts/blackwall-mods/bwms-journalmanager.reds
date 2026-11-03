@@ -1,7 +1,7 @@
-// bwms-journalmanager.reds — Codeware item #47 (`Quest/JournalManager.reds`).
+// bwms-journalmanager.reds — entradas do `JournalManager`.
 //
-// O Codeware declara `@addMethod(JournalManager) public native func GetEntries(request: script_ref<JournalRequestContext>) ->
-// array<wref<JournalEntry>>`, que chama `Raw::JournalManager::GetEntries` (`App/Journal/JournalManagerEx.hpp`), um RawFunc genérico
+// A forma genérica `@addMethod(JournalManager) public native func GetEntries(request: script_ref<JournalRequestContext>) ->
+// array<wref<JournalEntry>>` chamaria `Raw::JournalManager::GetEntries`, um RawFunc genérico
 // que decide a categoria por dentro; o endereço dele não está resolvido no Mac.
 //
 // Aqui, `BwmsGetEntries` recebe o `kind` explícito e despacha pro getter vanilla da categoria — `GetQuests`/`GetMetaQuests`/

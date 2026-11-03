@@ -1,10 +1,10 @@
-// ponte-gameobject-tags.reds — Codeware `TagList.reds` (catálogo item #32, 8 métodos:
+// ponte-gameobject-tags.reds — lista de tags (8 métodos:
 // `IsEmpty`/`Clear`/`HasTag`/`AddTag`/`RemoveTag`/`HasTags`/`AddTags`/`RemoveTags`), 2026-08-11,
 // sessão de candidatos baratos.
 //
-// DIVERGÊNCIA DE ESCOPO CONSCIENTE (documentada): a fonte real expõe `TagList` como STRUCT
-// VALUE-TYPE próprio (`native struct TagList { native let tags: array<CName> }`) que um mod
-// obteria via `entity.GetTags()` e manipularia como objeto solto. Isso é risco ALTO já
+// ESCOPO (documentado): `TagList` como STRUCT
+// VALUE-TYPE próprio (`native struct TagList { native let tags: array<CName> }`), que um mod
+// obteria via `entity.GetTags()` e manipularia como objeto solto, é risco ALTO já
 // documentado no catálogo (mesma categoria do `#30`/CMesh — tipo sem backing script-facing
 // confirmado, `redscript-src` tem ZERO ocorrências de `TagList`). NÃO declarado.
 //
@@ -15,7 +15,7 @@
 // gameObject.script:182`) já lê. `RemoveTag`/`IsEmpty`/`Clear` (Rust, `tramp_gameobject_
 // remove_tag`/`tramp_gameobject_tag_count`/`tramp_gameobject_clear_tags`) reusam EXATAMENTE as
 // mesmas 2 primitivas RTTI do AddTag (`resolve_prop_in_class`+`field_ptr`) mais
-// `dynarray_remove_at` (RED4ext.SDK `#284`, já fechado — memmove puro, zero endereço nativo).
+// `dynarray_remove_at` (memmove puro, zero endereço nativo).
 // `HasTags`/`AddTags`/`RemoveTags` (múltiplos) são 100% redscript, compostos sobre os métodos
 // singulares — zero código Rust adicional.
 native func BwmsGameObjectRemoveTag(obj: ref<IScriptable>, tag: CName) -> Bool

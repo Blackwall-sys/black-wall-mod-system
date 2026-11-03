@@ -1,4 +1,4 @@
-// bwms-ui-buttonhints.reds — a barra de dicas de botão do próprio jogo dentro de qualquer widget de mod (catálogo Codeware #97 e #98).
+// bwms-ui-buttonhints.reds — a barra de dicas de botão do próprio jogo dentro de qualquer widget de mod.
 //
 // A barra é a do jogo: biblioteca `base\gameplay\gui\common\buttonhints.inkwidget`, item `Root`, controller vanilla `ButtonHints`. Ela já
 // sabe desenhar o ícone certo da ação pro dispositivo em uso (teclado ou controle), localizar o rótulo e se parecer com as telas do jogo.
@@ -338,18 +338,18 @@ public class BwmsButtonHints extends IScriptable {
         return null;
     }
 
-    // Estilo popup: rótulo em caixa alta, semi-negrito, corpo 38, como os rodapés de popup do jogo.
+    // Só o estilo `popup` mexe no rótulo (corpo 38, o do rodapé de popup do jogo); voltar a `n""` não desfaz o que já foi aplicado.
     private func EstilizarItem(item: ref<ButtonHintListItem>) -> Void {
-        if !IsDefined(item) || !Equals(this.m_estilo, n"popup") {
+        if !IsDefined(item) || NotEquals(this.m_estilo, n"popup") {
             return;
         };
-        let fraco: wref<inkText> = item.BwmsRotulo();
-        let rotulo: ref<inkText> = fraco;
-        if IsDefined(rotulo) {
-            rotulo.SetFontSize(38);
-            rotulo.SetFontStyle(n"Semi-Bold");
-            rotulo.SetLetterCase(textLetterCase.UpperCase);
+        let rotulo: ref<inkText> = item.BwmsRotulo();
+        if !IsDefined(rotulo) {
+            return;
         };
+        rotulo.SetFontSize(38);
+        rotulo.SetFontStyle(n"Semi-Bold");
+        rotulo.SetLetterCase(textLetterCase.UpperCase);
     }
 
     private static func IconeDe(disp: ref<inkInputDisplayController>) -> ref<inkImage> {

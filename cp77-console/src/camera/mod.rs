@@ -80,14 +80,14 @@ pub(crate) unsafe extern "C" fn tramp_capture_req(_c: *mut c_void, frame: *mut c
     crate::log_dev!("[capture] req={p:#x}");
 }
 
-/// `BwmsTakeScreenshot(caminho) -> Bool`: o motor grava um screenshot PNG em `caminho` (RED4ext `#473`, `motor::screenshot`).
+/// `BwmsTakeScreenshot(caminho) -> Bool`: o motor grava um screenshot PNG em `caminho` (`motor::screenshot`).
 pub(crate) unsafe extern "C" fn tramp_take_screenshot(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let (_args, strings) = rtti::read_params_consuming_with_strings(current_native_func(), frame);
     let caminho = strings.first().cloned().flatten().unwrap_or_default();
     write_bool_ret(out, !caminho.is_empty() && crate::jogo::motor::screenshot(&caminho, crate::jogo::motor::MODO_NORMAL));
 }
 
-// `VisionModeSystem::SetBraindanceMode` (Codeware `#254`, 2ª rodada de RE, 2026-09-11): grava o modo em `+0x2378`; o motor lê o subobjeto
+// `VisionModeSystem::SetBraindanceMode` (2ª rodada de RE, 2026-09-11): grava o modo em `+0x2378`; o motor lê o subobjeto
 // `+0x2400`, que só existe com o mundo anexado.
 #[cfg(feature = "devtools")]
 pub(crate) const VISIONMODE_SET_BRAINDANCE_VM: u64 = 0x1_017b_e58c;

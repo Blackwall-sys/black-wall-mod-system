@@ -1,5 +1,5 @@
-//! Ponte dos mods CET entre valor Lua e valor do RTTI: o tipo (do parâmetro, do campo ou do retorno) decide a conversão, nos dois sentidos.
-//! Struct vira [`Struct`] (os bytes e o tipo; campo pelo nome sem diferenciar maiúscula, que é o `vec.x`/`euler.pitch`/`quat.i` do CET sobre
+//! Ponte dos mods Lua entre valor Lua e valor do RTTI: o tipo (do parâmetro, do campo ou do retorno) decide a conversão, nos dois sentidos.
+//! Struct vira [`Struct`] (os bytes e o tipo; campo pelo nome sem diferenciar maiúscula, que é o `vec.x`/`euler.pitch`/`quat.i` dos mods sobre
 //! os `X`/`Pitch`/`i` do RTTI), handle vira [`Handle`], enum vira número. Tipo de RTTI por nome é um [`Tipo`]: `Vector4.new(…)`,
 //! `GetSingleton('Quaternion'):ToEulerAngles(q)` e os estáticos.
 
@@ -7,7 +7,7 @@ use super::{handle_alive, CName, Handle, ItemId, TweakDBID, Vec4};
 use crate::rtti::ertti;
 use std::ffi::c_void;
 
-/// `ERTTIType` que o `ertti` não nomeia fora do dev: `Class` (struct quando vem por valor) e `BitField` (o CET 1.37.1 entrega como inteiro).
+/// `ERTTIType` que o `ertti` não nomeia fora do dev: `Class` (struct quando vem por valor) e `BitField` (o mod recebe como inteiro).
 const CLASSE: u8 = 2;
 const BITFIELD: u8 = 13;
 
@@ -17,14 +17,14 @@ pub(crate) struct Struct {
     pub(crate) bytes: Vec<u8>,
 }
 
-/// Tipo de RTTI por nome, como o CET põe cada tipo do jogo no global: `.new` constrói, o resto é função estática da classe.
+/// Tipo de RTTI por nome, como os mods esperam cada tipo do jogo no global: `.new` constrói, o resto é função estática da classe.
 pub(crate) struct Tipo(pub(crate) *mut c_void);
 
 unsafe fn nome_do_tipo(ty: *mut c_void) -> String {
     crate::cname::resolve_cname(crate::rtti::type_name_getname(ty))
 }
 
-/// Props de `ty` em ordem de offset (a ordem posicional do `.new` do CET: `Vector4.new(x, y, z, w)`, `EulerAngles.new(roll, pitch, yaw)`).
+/// Props de `ty` em ordem de offset (a ordem posicional do `.new`: `Vector4.new(x, y, z, w)`, `EulerAngles.new(roll, pitch, yaw)`).
 unsafe fn campos_em_ordem(ty: *mut c_void) -> Vec<(u64, *mut c_void, u32)> {
     let mut v = crate::rtti::propriedades(ty);
     v.sort_by_key(|&(_, _, off)| off);
@@ -281,7 +281,7 @@ pub(crate) unsafe fn argumento(func: *mut c_void, i: usize, v: &bwms_lua::Value)
 }
 
 /// Chama `rf` com os valores Lua em `args` (convertidos pelos tipos dos parâmetros) e devolve o retorno pelo tipo de retorno. Parâmetro
-/// `ScriptGameInstance` que o mod não passou (os getters `Game.GetXxxSystem()` do CET) entra sozinho, da sessão.
+/// `ScriptGameInstance` que o mod não passou (os getters `Game.GetXxxSystem()`) entra sozinho, da sessão.
 pub(crate) unsafe fn chamar(lua: &bwms_lua::Lua, rf: &crate::rtti::ResolvedFn, ctx: *mut c_void, args: &[bwms_lua::Value]) -> bwms_lua::Result<bwms_lua::Value> {
     let total = crate::rtti::param_count(rf) as usize;
     let mut margs = Vec::with_capacity(total);
@@ -314,7 +314,7 @@ pub(crate) unsafe fn chamar(lua: &bwms_lua::Lua, rf: &crate::rtti::ResolvedFn, c
     ler_valor(lua, ret.as_ptr(), rf.ret_type)
 }
 
-/// `ScriptGameInstance` (16 B) como o CET monta: `{ framework->gameInstance, 0 }` do motor, no menu e em gameplay.
+/// `ScriptGameInstance` (16 B): `{ framework->gameInstance, 0 }` do motor, no menu e em gameplay.
 unsafe fn instancia_do_jogo() -> Option<[u8; 16]> {
     let gi = crate::jogo::motor::game_instance()?;
     let mut b = [0u8; 16];
@@ -398,7 +398,7 @@ impl bwms_lua::UserData for Tipo {
                             args.remove(0);
                         }
                         let rf = crate::rtti::ResolvedFn { func: rf.func, ret_type: rf.ret_type, is_static: rf.is_static };
-                        // Contexto do `GetSingleton` do CET: o sistema desse tipo no `GameInstance` (`SingletonReference::GetHandle`); tipo que não é
+                        // Contexto do `GetSingleton`: o sistema desse tipo no `GameInstance` (`SingletonReference::GetHandle`); tipo que não é
                         // sistema, nenhum.
                         let sistema = crate::jogo::motor::game_instance().map_or(std::ptr::null_mut(), |gi| crate::jogo::sessao::sistema_do_motor(gi, ty));
                         chamar(lua, &rf, sistema, &args)
@@ -419,7 +419,7 @@ pub(crate) unsafe fn tipo_por_nome(nome: &str) -> Option<Tipo> {
     if crate::rtti::sane(c) {
         return Some(Tipo(c));
     }
-    // Nome de script do mod (`ActivateTPPRepresentationEvent`) para a classe nativa (`gameActivateTPPRepresentationEvent`), como o CET.
+    // Nome de script do mod (`ActivateTPPRepresentationEvent`) para a classe nativa (`gameActivateTPPRepresentationEvent`).
     let c = reg.class_by_script_name(nome);
     if crate::rtti::sane(c) {
         return Some(Tipo(c));
@@ -428,10 +428,10 @@ pub(crate) unsafe fn tipo_por_nome(nome: &str) -> Option<Tipo> {
     crate::rtti::sane(t).then_some(Tipo(t))
 }
 
-/// Função global do jogo (`GetPlayer`, `GetAllBlackboardDefs`) ou estática do `ScriptGameInstance` (`GetSettingsSystem`), o `Game.*` do CET.
+/// Função global do jogo (`GetPlayer`, `GetAllBlackboardDefs`) ou estática do `ScriptGameInstance` (`GetSettingsSystem`), o `Game.*` dos mods.
 pub(crate) unsafe fn funcao_do_jogo(nome: &str) -> Option<crate::rtti::ResolvedFn> {
     let reg = crate::registry()?;
-    // Apelido do CET (`RTTIMapper`): `Game.GetSystemRequestsHandler()` é o do `inkMenuScenario`.
+    // Apelido que os mods usam: `Game.GetSystemRequestsHandler()` é o do `inkMenuScenario`.
     if nome == "GetSystemRequestsHandler" {
         return crate::rtti::resolve_func(reg, "inkMenuScenario", nome);
     }
@@ -442,7 +442,7 @@ pub(crate) unsafe fn funcao_do_jogo(nome: &str) -> Option<crate::rtti::ResolvedF
     crate::rtti::resolve_any(reg, &["ScriptGameInstance", "GameInstance", "gameScriptGameInstance"], nome)
 }
 
-/// `EnumValueToName(enum, valor)` do CET: `{ value = "Nome" }`, ou `nil` sem o membro.
+/// `EnumValueToName(enum, valor)`: `{ value = "Nome" }`, ou `nil` sem o membro.
 pub(crate) unsafe fn nome_do_valor_de_enum(lua: &bwms_lua::Lua, en: &str, valor: i64) -> bwms_lua::Result<bwms_lua::Value> {
     let Some(reg) = crate::registry() else { return Ok(bwms_lua::Value::Nil) };
     match crate::rtti::enum_nome(reg.enum_by_name(en) as *const u8, valor as u64) {

@@ -1,19 +1,29 @@
+# bwms 0.1.5b BETA — o que mudou
+
+Versão anterior: 0.1.5 BETA.
+
+- Menções que não deviam existir no pacote e no código-fonte foram removidas e renomeadas.
+- Tweaks de mod:
+  - o `!append` de um arquivo chega também aos records do jogo que herdam o valor do record que outro arquivo trocou;
+  - a mudança num record base chega ao clone de um clone, em qualquer ordem dos clones nos arquivos;
+  - ícone definido dentro de outro ícone recebe o prefixo `UIIcon.` uma vez só.
+- Aparência dinâmica com muitas condições: o peso da aparência não estoura mais.
+
 # bwms 0.1.5 BETA — o que mudou
 
 Versão anterior: 0.1.4 BETA.
 
-## Mods de CET
+## Mods de Lua
 
-- Mod de CET feito de `.lua` roda pela pasta `Mods/`: o BWMS lê e executa os `.lua` de Windows em Rust próprio, sem nenhum código de
-  terceiro. Testado em jogo com o JB Third Person (terceira pessoa pelo atalho, janela do mod no terminal). A API segue o CET 1.38.1.
+- Mod feito de `.lua` roda pela pasta `Mods/`: o BWMS lê e executa os `.lua` de Windows em Rust próprio, sem nenhum código de
+  terceiro. Testado em jogo com um mod real de Lua (terceira pessoa pelo atalho, janela do mod no terminal). O nível da API é 1.38.1.
 - Mod que precisa de `.dll` não roda. Função de janela sem equivalente no terminal do BWMS responde vazio e avisa uma vez. `GameOptions`
   responde vazio. Ícones do `IconGlyphs` saem em branco.
-- Atalho de mod de CET: `tecla_<id> = "<tecla>"` em `red4ext/bwms.toml`.
+- Atalho de mod de Lua: `tecla_<id> = "<tecla>"` em `red4ext/bwms.toml`.
 
 ## Atualização para o Cyberpunk 2.5
 
-- O 0.1.5 é para o Cyberpunk 2077 **2.5** (Edgerunners 2 Update, Steam, Mac; versão 2.5.0, build 5814786). A 2.3.1 deixa de ser
-  suportada. A GOG 2.5 é suportada. O instalador confere 22 pontos do binário e recusa outra build. Epic e Mac App Store: não suportadas.
+- O 0.1.5 é para o Cyberpunk 2077 **2.5** (Edgerunners 2 Update, Steam, Mac; versão 2.5.0, build 5814786). A GOG 2.5 é suportada. O instalador confere 22 pontos do binário e recusa outra build. Epic e Mac App Store: não suportadas.
 - Depois de cada atualização do jogo pela Steam, o binário volta sem o BWMS: rode o instalador de novo.
 - O que o BWMS passou a usar do jogo: a 2.5 trouxe nativos o `CallbackSystem` (só eventos `Session/*` e `Resource/*`), o
   `ScriptableService`, o `GameInstance.GetCallbackSystem()` e métodos de interface (`GetParentWidget`, foco, quebra de linha do texto,
@@ -21,14 +31,14 @@ Versão anterior: 0.1.4 BETA.
 - O que o BWMS completa: os eventos `Entity/*`, `Input/*` e `Component/*` e os filtros de alvo continuam do BWMS. No Mac o jogo 2.5 não
   dispara os eventos de sessão: ele não cria o próprio `CallbackSystem` (medido em jogo). O BWMS entrega `Session/Start`,
   `Session/Ready` e `Session/End`, também entre o menu e o save; `BeforeSave`, `AfterSave`, `Pause` e `Resume` não disparam no Mac.
-  Mod escrito para o Codeware continua compilando como antes.
+  Mod cujo `.reds` importa os nomes da ponte continua compilando como antes.
 - A 2.5 tirou do jogo a declaração de `Log`, `LogChannel`, `LogWarning`, `LogError` e `Trace`. O BWMS as declara de novo para mod do
   Windows compilar. No jogo de varejo elas não escrevem em lugar nenhum, como antes.
 - O compilador de scripts empacotado lê o formato de scripts da 2.5.
 - `.archive` da `Mods/`: vão para a pasta de mods do próprio jogo (`archive/Mac/mod/BWMS-Mods/`, por clone, sem gastar disco), e é o
   jogo quem os monta, com a prioridade mais alta (acima do jogo base e do Phantom Liberty), sem gancho. A pasta espelha a `Mods/` a cada
   abertura: o que sai da `Mods/` sai de lá. O desinstalador a remove.
-- `.xl` da `Mods/`: a 2.5 traz uma versão própria do ArchiveXL, que lê instruções em `.json` na pasta de mods do jogo. Duas seções vão
+- `.xl` da `Mods/`: a 2.5 traz um carregador de `.xl` próprio, que lê instruções em `.json` na pasta de mods do jogo. Duas seções vão
   por ela: `localization.onscreens` (textos de interface) e `factories`. O BWMS gera o `.json` em `archive/Mac/mod/BWMS-Mods/xl/`
   (espelha a `Mods/`, sai quando o `.xl` sai), o jogo aplica e o BWMS não aplica de novo. Para o `factories`, o BWMS não tem mais gancho
   nem tabela: se o jogo não puder aplicar (por exemplo, o `.csv` não está em nenhum archive), o mod fica amarelo no relatório com o
@@ -36,8 +46,8 @@ Versão anterior: 0.1.4 BETA.
   aplica com regra diferente (`journal` e as demais, sem semântica igual provada). Com textos de mod do mod.io ou de outra pasta de mods
   do jogo junto, os textos voltam todos ao BWMS, para a ordem entre mods não mudar. O `Mods/BWMS-RELATORIO.txt` diz, por `.xl`, quem
   aplica cada seção (jogo ou BWMS).
-- Equipment-EX passou a funcionar: o BWMS aceita as escritas que ele faz no TweakDB (`SetFlat` de lista e de texto: 1898 de 1898;
-  `CreateRecord` de slot pelo nome curto: 54 de 54; `parentSlot`/`dependencySlots` criados como no TweakXL: 21 de 21 e 115 de 115), e o
+- Mod real que adiciona slots de roupa passou a funcionar: o BWMS aceita as escritas que ele faz no TweakDB (`SetFlat` de lista e de
+  texto: 1898 de 1898; `CreateRecord` de slot pelo nome curto: 54 de 54; `parentSlot`/`dependencySlots` criados: 21 de 21 e 115 de 115), e o
   `OnApply` dele roda antes de o save carregar.
 
 ### Mods oficiais (mod.io) da 2.5 e o BWMS
@@ -56,7 +66,7 @@ Versão anterior: 0.1.4 BETA.
 
 - A 0.1.4 levava **85** arquivos de script; a 0.1.5 leva **134**. Entraram 59 e saíram 10, que eram de prova, sonda ou laboratório,
   sem função para quem instala; o instalador os apaga na atualização.
-- Todo arquivo de script tem nome do BWMS (`bwms-*`, `ponte-*` e o `blackwall-mods.reds`): nenhum leva mais o nome de outro framework.
+- Todo arquivo de script tem nome do BWMS (`bwms-*`, `ponte-*` e o `blackwall-mods.reds`).
   Na atualização, o instalador apaga também os nomes antigos da 0.1.4, só os do BWMS, pela lista.
 - Funções nativas globais declaradas para os scripts: **233 → 371**.
 - O que o BWMS soma a cada chamada de script do jogo caiu de **~33 ns** para **~8 ns** (4× menos), medido fora do jogo com o mesmo teste
@@ -66,7 +76,7 @@ Versão anterior: 0.1.4 BETA.
   desenvolvimento e os marcadores de teste saíram dele: no boot do build público instalado pelo zip final, com 5 mods na `Mods/`, o log
   de desenvolvimento em `/tmp` não cresceu (0 B; `proofs/20261018-zip-015-final-usuario-014-para-015-com-mods.log`). Os comandos de engenharia reversa que só escreviam no log de desenvolvimento saíram também; ficam os que mexem no
   jogo (TweakDB, reflexão, links de recurso, LUT), que o `ajuda re` conta sem listar.
-- O terminal passa a ser desenhado pelo próprio BWMS: a biblioteca de interface em C++ de terceiro (ImGui) saiu do dylib. A aparência
+- O terminal passa a ser desenhado pelo próprio BWMS: a biblioteca de interface em C++ de terceiro saiu do dylib. A aparência
   é a mesma.
 - Zero código de terceiro dentro do mod: o dylib e o `bwms-helper` não levam nenhuma biblioteca de terceiro. O dylib da 0.1.4 levava a
   ponte de terceiro com o Metal, a interface em C++ e o leitor de PNG, cada um com a sua cadeia. A ponte com o Metal (splash, selo,
@@ -85,11 +95,11 @@ Versão anterior: 0.1.4 BETA.
   você copiar nada: `.archive` (montado pelo próprio jogo, acima do jogo base e do Phantom Liberty), `.xl`, tweaks (`.yaml`/`.tweak`)
   e `.reds`. Os `.reds` são compilados na abertura do jogo quando algo mudou, inclusive mod posto direto em `r6/scripts`, sem rodar o instalador de novo (esse caso foi
   testado fora do jogo, não em jogo). O que entrou e o que ficou de fora sai em `Mods/BWMS-RELATORIO.txt`.
-- Mods do Windows que usam os nomes do Codeware cobertos pela ponte passam a compilar no Mac. Virtual Atelier e Equipment-EX compilam e
+- Mods do Windows que usam os nomes cobertos pela ponte passam a compilar no Mac. Dois mods reais com telas próprias compilam e
   carregam sem adaptação, e o jogo segue em gameplay com eles (build de desenvolvimento). O override de controller no spawn de widget,
-  que os dois usam, e o evento `InkWidget/Spawn` passam ao build do usuário. Na 2.5, as telas do Virtual Atelier (loja e lista) e do
-  Equipment-EX (guarda-roupa) abriram em jogo com os itens e o controller do mod (build de desenvolvimento).
-- Mod que estende `ScriptableTweak` (como o Equipment-EX) não derruba mais o jogo.
+  que os dois usam, e o evento `InkWidget/Spawn` passam ao build do usuário. Na 2.5, as telas deles (loja e lista de um, guarda-roupa
+  do outro) abriram em jogo com os itens e o controller do mod (build de desenvolvimento).
+- Mod que estende `ScriptableTweak` não derruba mais o jogo.
 - A configuração de boot fica num arquivo só: `red4ext/bwms.toml`.
 
 ## O que o jogador ganha
@@ -115,14 +125,14 @@ Versão anterior: 0.1.4 BETA.
     (`archive/Mac/mod/BWMS-Mods/`, por clone, sem gastar disco), e o jogo o monta com a prioridade mais alta: vence o jogo base e o
     Phantom Liberty. A pasta espelha a `Mods/` a cada abertura; o desinstalador a remove.
   - `.xl` (`*.archive.xl` e `*.xl`): as tabelas de runtime são geradas na abertura. `localization.onscreens` e `factories` vão para o
-    ArchiveXL próprio da 2.5, que o jogo aplica.
+    carregador de `.xl` próprio da 2.5, que o jogo aplica.
   - `.yaml` e `.tweak`: aplicados ao carregar o save, pelo mesmo caminho dos tweaks de mod. Um mod de teste do BWMS com `.yaml` e
-    `.tweak` foi aplicado em jogo pela `Mods/`: 13 de 13 valores no TweakDB, também na 2.5. Nenhum mod real de TweakXL do Nexus foi
+    `.tweak` foi aplicado em jogo pela `Mods/`: 13 de 13 valores no TweakDB, também na 2.5. Nenhum mod real de `.yaml`/`.tweak` do Nexus foi
     testado em jogo.
   - `.reds`: compilados na abertura do jogo, antes de o jogo ler os scripts, só quando algo mudou em `r6/scripts`, na `Mods/` ou nos
     scripts de plugin. Medido fora do jogo: com mudança, ~0,7 s sem mod quebrado, ~1,3 s com 1, ~2 s em cascata (mod quebrado por outro
     quebrado); sem mudança, 3–5 ms.
-    No boot, 877 ms com Virtual Atelier e Equipment-EX, 48 `.reds` da `Mods/`. Sem mudança, medido também no jogo: 7 ms (boot de
+    No boot, 877 ms com dois mods reais, 48 `.reds` da `Mods/`. Sem mudança, medido também no jogo: 7 ms (boot de
     2026-10-18).
 - Mod da `Mods/` com script quebrado sai sozinho: se um `.reds` dele não compila, só aquele mod fica de fora; os outros mods e o BWMS
   entram e o jogo abre. O mod fica vermelho no relatório com o arquivo:linha do erro e a ação ("corrija o arquivo, ou tire o mod da
@@ -141,26 +151,26 @@ Versão anterior: 0.1.4 BETA.
   caminhos são relativos, sem o caminho da máquina.
 - `.dll`: plugin de Windows, não carrega no Mac, e sai no relatório como fora.
 
-### Mods do Windows feitos para o Codeware
+### Mods do Windows que usam os nomes da ponte
 
-- O BWMS passa a responder pelos nomes que esses mods chamam (`Codeware.UI`, `inkComponent`, `GenericMessageNotification.ShowInput`,
-  `UTF8StrLower`, `GameFileExists` e outros; lista completa na seção do modder). A implementação é do BWMS. Nenhum código do Codeware
+- O BWMS passa a responder pelos nomes que esses mods chamam (`inkComponent`, `GenericMessageNotification.ShowInput`,
+  `UTF8StrLower`, `GameFileExists` e outros; lista completa no MODDER-API.md). A implementação é do BWMS. Nenhum código de terceiro
   entra no pacote.
-- Virtual Atelier (46 erros), Equipment-EX (2) e Mod Settings (17) passam a compilar sem erro.
-- No build de desenvolvimento, Virtual Atelier e Equipment-EX carregaram com os archives pela `Mods/`, e o jogo seguiu 60 s em gameplay
+- Três mods reais que não compilavam (46, 2 e 17 erros) passam a compilar sem erro.
+- No build de desenvolvimento, dois deles, com telas próprias, carregaram com os archives pela `Mods/`, e o jogo seguiu 60 s em gameplay
   com eles.
 - No boot de 2026-10-18 (build de desenvolvimento), os dois entraram pela `Mods/` com archive, `.xl` e `.reds` (48, compilados na
   abertura), e o jogo chegou à gameplay.
-- O override de controller no spawn de widget (`Item:Controller`), que o Virtual Atelier e o Equipment-EX usam, passa ao build do
+- O override de controller no spawn de widget (`Item:Controller`), que esses dois mods usam, passa ao build do
   usuário, com a injeção da dependência da biblioteca externa pelo RTTI, nos spawns síncronos e nos assíncronos (os itens da grade da
-  loja do Virtual Atelier nascem pelo assíncrono). Medido na entrega do item: 9 trocas, média 1.113 µs, maior 6.367 µs, uma vez por
+  loja de um deles nascem pelo assíncrono). Medido na entrega do item: 9 trocas, média 1.113 µs, maior 6.367 µs, uma vez por
   spawn, não por quadro.
-- Na 2.5 (build de desenvolvimento, 2026-10-23), as telas do Virtual Atelier (loja e lista) e do Equipment-EX (guarda-roupa pelo
-  inventário e pelo menu do jogo) abriram com os itens e o controller do mod: 4 de 4.
-- `ArchiveXL.Require`, `TweakXL.Require` e `Codeware.Require` respondem pelas versões que o BWMS cobre (1.28.1, 1.12.0 e 1.21.1).
-  `Require()` passa a responder `true` às versões que o Equipment-EX 1.2.9 pede (1.18.0, 1.26.0 e 1.11.3), então o aviso de requisito
+- Na 2.5 (build de desenvolvimento, 2026-10-23), as telas dos dois mods (loja e lista de um; guarda-roupa pelo
+  inventário e pelo menu do jogo do outro) abriram com os itens e o controller do mod: 4 de 4.
+- O `Require` das três classes-fachada (recursos, tweaks e versão) responde pelas versões que o BWMS cobre (1.28.1, 1.12.0 e 1.21.1).
+  `Require()` passa a responder `true` às versões que um mod real pede (1.18.0, 1.26.0 e 1.11.3), então o aviso de requisito
   não deve mais abrir. A tela não foi conferida em jogo.
-- Equipment-EX: o BWMS aceita as escritas que ele faz no TweakDB (`SetFlat` de lista e de texto: 1898 de 1898; `CreateRecord` de
+- Mod real que escreve no TweakDB: o BWMS aceita as escritas que ele faz (`SetFlat` de lista e de texto: 1898 de 1898; `CreateRecord` de
   slot pelo nome curto: 54 de 54). Ver "Honestidade sobre o estado".
 
 ### Boot
@@ -242,38 +252,37 @@ Versão anterior: 0.1.4 BETA.
 
 ## O que o modder ganha
 
-Os nomes abaixo são os que o seu script chama. Quando o BWMS usa o mesmo nome do Codeware, do ArchiveXL, do TweakXL ou do RED4ext,
-isso está dito. Quando o nome é próprio (`Bwms*`), o equivalente do Windows vem entre parênteses.
+Os nomes abaixo são os que o seu script chama.
 
 ### Antes de tudo: seções do `.archive.xl` pedem uma tabela em `red4ext/`
 
 O runtime das seções abaixo está no dylib do zip do Nexus e na fonte do GitHub. Mas o BWMS só as aplica com uma tabela em `red4ext/`
 gerada a partir dos `.xl`. Com o `.xl` na pasta `Mods/`, o próprio BWMS gera essas tabelas na abertura do jogo. Fora da `Mods/`, nada
 gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mão em `red4ext/` fica. O instalador do Nexus não lê `.xl`.
-`localization.onscreens` e `factories` dos `.xl` da `Mods/` vão para o ArchiveXL próprio da 2.5, que o jogo aplica.
+`localization.onscreens` e `factories` dos `.xl` da `Mods/` vão para o carregador de `.xl` próprio da 2.5, que o jogo aplica.
 
 - `resource.patch`, `resource.fix`, `resource.scope` e `streaming.blocks`: patches de `.ent`, `.app`, `.mesh`, `.morphtarget`,
   `.curveset`, `.devices`, partes de roupa e `persistentStateData`; inclusão por tag `AppearanceParts`; troca de nomes de material; escopo
-  valendo entre mods. Patch que não existe sai com erro no log; patch de classe errada é recusado. Diferença do ArchiveXL: o BWMS pede
+  valendo entre mods. Patch que não existe sai com erro no log; patch de classe errada é recusado. O BWMS pede
   todos os patches no boot, não quando o alvo é pedido.
 - `streaming.sectors`: `nodeDeletions`, `subNodeDeletions` e `nodeMutations` (posição, rotação e escala do nó e do sub-nó, `mesh`,
-  `meshAppearance`). Cada grupo de mod e setor é conferido inteiro; uma linha errada cancela o mod naquele setor, como no ArchiveXL.
-  Diferença: mutação só de posição, ou só de rotação, mantém a outra componente (o ArchiveXL zera).
+  `meshAppearance`). Cada grupo de mod e setor é conferido inteiro; uma linha errada cancela o mod naquele setor.
+  Mutação só de posição, ou só de rotação, mantém a outra componente.
 - `journal`: entrada nova com a subárvore inteira, `*` no fim do id para editar entrada existente, textos soltos viram `LocKey#`, pins e
-  POIs do mod no mapa. A mescla roda depois do fim do load, e não na inicialização do journal como no ArchiveXL.
+  POIs do mod no mapa. A mescla roda depois do fim do load, e não na inicialização do journal.
 - `quest.phases`: fases de mod entram no `.quest` na carga e no início de quest nova.
 - `customizations`: grupo e opção novos, definição substituída, cor de cabelo, morph, switcher e `resource.fix` aplicados na montagem das
   opções de customização (a do criador de personagem e a do espelho), com volta exata.
 - `localization`: só `onscreens` (chave nova e troca de texto existente, com feminino e masculino).
 - `resource.copy`: a cópia vira recurso próprio, com os bytes do original.
 
-### ArchiveXL
+### Recursos e aparência
 
-- `ArchiveXL.Version()`, `TweakXL.Version()` e `Codeware.Version()` devolvem a versão do BWMS (`0.1.5`). Para checar compatibilidade,
+- O `Version()` das três classes-fachada devolve a versão do BWMS (`0.1.5b`). Para checar compatibilidade,
   use `Require(v)`, que responde por 1.28.1, 1.12.0 e 1.21.1.
-- `ArchiveXL.RegisterArchive(path)` e `RegisterDir(path)` usam o mesmo carregador da pasta `Mods/`: o archive é conferido antes de
+- `RegisterArchive(path)` e `RegisterDir(path)` da fachada de recursos usam o mesmo carregador da pasta `Mods/`: o archive é conferido antes de
   entrar. Continuam no grupo `content`, que perde para o Phantom Liberty. Para vencer a expansão, use a pasta `Mods/`.
-- Record com o flat `appearanceName` nasce com essa aparência quando spawnado, inclusive clone de personagem feito por TweakXL.
+- Record com o flat `appearanceName` nasce com essa aparência quando spawnado, inclusive clone de personagem feito por arquivo de tweak.
   Antes a aparência saía aleatória.
 - World widgets: saiu o teto de 10. O 11º em diante deixa de ficar sem atualização.
 - `BwmsAparencia.ResolveName` e `BwmsAparencia.ResolvePath` resolvem nomes com `*` pelo estado da entidade: `{gender}`, `{camera}`,
@@ -281,12 +290,12 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
   `ApplyAppearanceOverride`.
 - `PuppetStateSystem` (`GetArmsStateSuffix`, `GetFeetStateSuffix`) devolve o estado real de braços (MantisBlades, Monowire,
   ProjectileLauncher) e de pés (Flat, Lifted, HighHeels, FlatShoes). O handler do V é criado ao entrar no jogo. `BodyType` segue sempre
-  `BaseBody`. Diferença: o estado é lido na hora, sem guardar o último item equipado.
+  `BaseBody`. O estado é lido na hora, sem guardar o último item equipado.
 - Override de visual tag por mod (`ApplyVisualTagOverrideForMod`, `RemoveVisualTagOverrideForMod` e as variantes `WithRefresh`):
   esconder vence mostrar, duas máscaras do mesmo mod acumulam, e tirar um mod desfaz só o efeito dele. `ApplyVisualTagOverride` (uma
   chamada, sem mod) grava sobre a máscara atual do componente pela mesma regra.
 
-### TweakXL
+### TweakDB
 
 - Toda gravação de mod no TweakDB (YAML, `.tweak`, `SetFlat` de script, plugin) passa por um escritor só. Mudar um record não altera
   mais outros records que dividiam o mesmo valor.
@@ -297,25 +306,25 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
 - Clone (`$base`, `TweakDBManager.CloneRecord`) herda as mudanças feitas depois no record base, enquanto não sobrescreve o flat.
 - Record criado por `$type` nasce com o valor padrão de cada flat do tipo.
 - Recarga sem empilhar: `!append` aplica uma vez, linha apagada do arquivo volta ao valor do jogo, record existente re-herda do base novo.
-  `TweakXL.Reload()` desfaz, reaplica e dispara o `OnApply` quando os arquivos terminam.
+  O `Reload()` da fachada de tweaks desfaz, reaplica e dispara o `OnApply` quando os arquivos terminam.
 - O buffer de valores do TweakDB cresce até 16 MB em vez de faltar espaço.
 - Stat novo: um YAML com `$type: gamedataStat_Record` e `enumName` novo cria um valor novo em `gamedataStatType`, e os getters do jogo
   leem esse stat.
 - Records de mod ganham nome e genealogia: `BwmsTweakGetName`, `BwmsTweakRegisterName`, `BwmsTweakIsOriginalRecord`,
   `BwmsTweakGetOriginalParent`, `BwmsTweakGetDescendantCount`, `BwmsTweakGetDescendant` e `BwmsTweakRemoveRecord` (recusa record do
   jogo).
-- `ScriptableTweak.OnApply` roda uma vez, no menu, depois de o TweakDB carregar e antes de o save começar a carregar, como no TweakXL;
-  cada `OnApply` sobe a versão do TweakDB uma vez só, no fim. Medido na 2.5: o Equipment-EX aplica antes da gameplay, e o guarda-roupa
-  abre com a grade cheia já na primeira vez.
+- `ScriptableTweak.OnApply` roda uma vez, no menu, depois de o TweakDB carregar e antes de o save começar a carregar;
+  cada `OnApply` sobe a versão do TweakDB uma vez só, no fim. Medido na 2.5: um mod real de guarda-roupa aplica antes da gameplay, e o
+  guarda-roupa abre com a grade cheia já na primeira vez.
 - `SetFlat` de lista e de texto e `CreateRecord` de slot pelo nome curto passam a ser aceitos, e o `SetFlat` cria o flat que o record não
-  tem (`TweakDBID`, `array:TweakDBID`, `array:CName`), como o TweakXL. Medido com o Equipment-EX na 2.5: 1898 de 1898, 54 de 54, e os
+  tem (`TweakDBID`, `array:TweakDBID`, `array:CName`). Medido com um mod real na 2.5: 1898 de 1898, 54 de 54, e os
   `parentSlot`/`dependencySlots` dos slots de roupa 21 de 21 e 115 de 115.
 
-### Codeware (camada equivalente do BWMS)
+### Ponte e API de script
 
-**Nomes do Codeware para mods do Windows**
+**Nomes que a ponte responde**
 
-- `import Codeware.UI.*`: `inkCustomController`, `SimpleButton`, `HubTextInput`, `InMenuPopup`, `InMenuPopupContent`,
+- Módulo de interface: `inkCustomController`, `SimpleButton`, `HubTextInput`, `InMenuPopup`, `InMenuPopupContent`,
   `InMenuPopupFooter`, `PopupButton`; e `inkComponent` global.
 - `GenericMessageNotification.Show` com `inkTextParams`, e `ShowInput`: o mesmo popup com campo de texto, que devolve o texto em
   `CloseData.input`.
@@ -324,7 +333,7 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
 - Campos do motor que o script vanilla não declara, por `native let`: scroll, nine-slice e tile do `inkImage`, wrapping do `inkText`,
   câmera da prévia do personagem, `enum textWrappingPolicy`.
 - `BwmsScreenSize` ganhou `X`/`Y` em Float.
-- `ModuleExists("Codeware")` continua `false` de propósito: mods com `@if` seguem no ramo que já funciona.
+- O `ModuleExists` do módulo raiz da fachada de versão continua `false` de propósito: mods com `@if` seguem no ramo que já funciona.
 
 **Entidades**
 
@@ -339,7 +348,7 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
 - `Entity.ApplyMorphTarget(alvo, região, valor)` e `Entity.SetWorldTransform(transform)`.
 - `GameTagSystem.AssignEntityTag`/`UnassignEntityTag`: as consultas vanilla `GetAnyMatchingEntity`/`GetAllMatchingEntities` passam a
   achar a entidade. Só memória, não vai ao save.
-- `BwmsPopulationSpawner` (`PopulationSpawnerWrapper`), só leitura: ativo, record, aparência, transform e os ids ativos, restaurados,
+- `BwmsPopulationSpawner`, só leitura: ativo, record, aparência, transform e os ids ativos, restaurados,
   spawnados e reservados.
 - Workspot do NPC: `BwmsWorkspotHasInstance`, `BwmsWorkspotAnimName`, `BwmsWorkspotIdleAnim`, `BwmsWorkspotEntryId`,
   `BwmsWorkspotResourcePath`.
@@ -364,27 +373,27 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
 
 - `IComponent.LoadResource()`, `LoadResourceToken()` e `ResetMaterialCache()`. A aparência `default` resolve para a 1ª aparência do
   mesh, como no motor.
-- `BwmsDepotLoadResourceToken(hash)`, `BwmsDepotRemoveResourceFromCache(hash)` e `BwmsLoadResourceReference(objeto, propriedade, hash)`
-  (`ResourceDepot`, `ResourceHelper`). A carga vai pela rota do próprio motor.
+- `BwmsDepotLoadResourceToken(hash)`, `BwmsDepotRemoveResourceFromCache(hash)` e `BwmsLoadResourceReference(objeto, propriedade, hash)`.
+  A carga vai pela rota do próprio motor.
 - `ResourceToken.FromId`, `GetJobHandle`, `WaitForJob` (espera de verdade, teto de 2 s) e `RegisterCallback(alvo, função)` (chama uma
   vez, quando o recurso termina de carregar).
-- `BwmsResourceRef` e `BwmsResourceAsyncRef` (`ResourceRef`/`ResourceAsyncRef`), com `*=`. Helpers: `ResRefGetPathHash`, `ResRefIsEmpty`,
+- `BwmsResourceRef` e `BwmsResourceAsyncRef`, com `*=`. Helpers: `ResRefGetPathHash`, `ResRefIsEmpty`,
   `ResRefIsLoaded`, `ResRefResourceClass`, `ResRefHashFromPath`.
 - `BwmsSerializable` embrulha objeto do motor que não é `IScriptable` (recurso, nó de quest). Um `as` direto nesses objetos derruba o
   jogo no Mac; use `GetObjectClassName`/`IsObjectA`.
 - `BwmsSoundBanks`: listar, trocar caminho e adicionar banco de som.
-- `BwmsObjectSave(obj, caminho)` e `BwmsObjectLoad(caminho)` (`ObjectSerializer`): objeto em arquivo próprio em
+- `BwmsObjectSave(obj, caminho)` e `BwmsObjectLoad(caminho)`: objeto em arquivo próprio em
   `r6/storage/bwms/objetos/`, fora do save.
 
 **Interface**
 
-- Campo de texto: `BwmsTextInput` e `BwmsHubTextInput` (`TextInput`/`HubTextInput`), com cursor, seleção, copiar/colar, Shift e
+- Campo de texto: `BwmsTextInput` e `BwmsHubTextInput`, com cursor, seleção, copiar/colar, Shift e
   Ctrl; `BwmsTextMeasurer`; `BwmsTextEdit`, que conta caractere e não byte ("ção" = 3). Quem monta o controller tem que guardar
   referência forte: o widget só guarda referência fraca.
 - `BwmsInkKeyEvent` (tecla, press/release, caractere), entregue ao widget com foco pelo callback `OnBwmsInputKey`. `GetCharacter()`
   segue US-QWERTY com shift, não o layout do sistema.
 - Widget criado por script e anexado a uma árvore na tela entra na camada: `inkWidget.BwmsAttachWidgetTree()` e
-  `inkWidget.BwmsBindController(controller, secundário)` (`WidgetBuildingService`).
+  `inkWidget.BwmsBindController(controller, secundário)`.
 - Spawn de widget de biblioteca com `Item:Controller` (`SpawnFromLocal`/`SpawnFromExternal`): o controller pedido no nome troca o do
   item. No `SpawnFromExternal`, com ou sem controller no nome, a biblioteca externa entra na lista de dependências de quem chama. Vale
   no build do usuário, nos spawns síncronos e nos assíncronos (`AsyncSpawnFromLocal`/`AsyncSpawnFromExternal` e a entrega do item); o
@@ -394,12 +403,12 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
   `BwmsPreviewPuppets` (bonecos de prévia do inventário, do criador de personagem e do modo foto).
 - `inkWidget.GetParentWidget()`, `CanSupportFocus()` e `SetSupportFocus(Bool)` voltaram. `inkWidget.parentWidget` existe como campo.
   `BwmsWidgetFind` ganhou `Parent`, `Root`, `Depth`, `IsMounted` e `FirstAncestorOfType`.
-- `BwmsWidgetIsAttached`, `BwmsWidgetReparent`, `BwmsWidgetReparentAt` (`inkComponent.IsAttached`/`Reparent`). Aqui `IsAttached`
+- `BwmsWidgetIsAttached`, `BwmsWidgetReparent`, `BwmsWidgetReparentAt`. `BwmsWidgetIsAttached`
   pergunta se o widget está pendurado numa árvore.
-- `BwmsPropOffset`, `BwmsPropU64` e `BwmsPropSetU64`: campo nativo pelo offset que o RTTI desta build informa (`@addField` do Codeware,
-  como `inkText.letterCase`). A largura é obrigatória; valor que não cabe é recusado, sem truncar.
+- `BwmsPropOffset`, `BwmsPropU64` e `BwmsPropSetU64`: campo nativo pelo offset que o RTTI desta build informa (como
+  `inkText.letterCase`). A largura é obrigatória; valor que não cabe é recusado, sem truncar.
 - `inkSystem`: `BwmsInkSystemGetLayerByName`, `BwmsInkSystemSetFocus`, `BwmsInkSystemResetFocus`, `BwmsInkSystemGetWorldWidgets`.
-- `worlduiIGameController.GetWorldWidgetComponent()` (mesmo nome do Codeware) e `inkUserData.GetWorldWidgetComponent()`: o componente 3D
+- `worlduiIGameController.GetWorldWidgetComponent()` e `inkUserData.GetWorldWidgetComponent()`: o componente 3D
   por trás de uma tela de device ou placa. Nulo no HUD.
 
 **Mundo, quests e consultas**
@@ -407,32 +416,30 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
 - `GameInstance.GetWorldStateSystem()`: ligar e desligar node e variante de prefab, ativar comunidade, fase de comunidade, reset de
   comunidade e de spawner. `CommunityWrapper` e `CommunityEntryWrapper` leem entradas, fases e ids.
 - `WeatherSystem.SetWeatherState`, `ResetWeatherState`, `GetWeatherStateObject`, `GetEnvironmentDefinitionObject`.
-- `BwmsWorldNodeSetup` (`WorldNodeSetupWrapper`, leitura e escrita), `BwmsWorldNodeInstance` e `BwmsInstancedMeshNode` (só leitura),
+- `BwmsWorldNodeSetup` (leitura e escrita), `BwmsWorldNodeInstance` e `BwmsInstancedMeshNode` (só leitura),
   `BwmsSectorCount`. Só vale para setor já carregado. Na 2.5 o índice do nó e as duas distâncias mudaram de lugar no setup: o BWMS lê e
   grava no lugar novo (antes, gravar `SecondaryRefPointDistance` estragava o índice do nó), e `SetNodeIndex` aceita índice até 524287.
-- `inkCompoundWidget.GetChildIndex(child)` (nome do Codeware 1.21.1): a posição do filho, -1 se não for filho. `inkWidget.AttachController`
+- `inkCompoundWidget.GetChildIndex(child)`: a posição do filho, -1 se não for filho. `inkWidget.AttachController`
   já vem do jogo 2.5. `GarageComponent.LoadSummonSetup()`: relê a configuração de chamada de veículo do TweakDB.
 - `streaming.sectors` do `.xl` em `worldInstancedMeshNode` na 2.5: `instanceDeletions`, mutação de instância, `mesh` e `meshAppearance` usam o
   formato cozido da 2.5 (antes eram recusados). `actorDeletions` em `worldCollisionNode` também lê o formato da 2.5.
-- `resource.patch` de `.inkanim` (ArchiveXL 1.27.2): as sequências do patch trocam as do alvo com o mesmo nome, e as outras entram no fim.
-- `actorDeletions: [[ator, shape]]` (ArchiveXL 1.27.0): só aquela shape do ator perde a colisão (preset `No Collision`); o resto do ator fica.
-- TweakXL, ArchiveXL ou Codeware de terceiro no jogo (`red4ext/plugins/<nome>/` ou `r6/scripts/<nome>/`): o instalador recusa e a abertura
-  do jogo não compila os scripts, com o que mover para a Lixeira no relatório da pasta `Mods/`. O BWMS já faz o que eles fazem.
-- `{nails_color}` em aparência dinâmica (ArchiveXL 1.27): a cor da unha do V entra no estado dinâmico do jogo junto da pele, do cabelo e dos olhos.
-- `{material.1}`..`{material.N}` em caminho dinâmico de material (ArchiveXL 1.27): partes do nome do material separadas por `+`.
-- Nós cozidos da 2.5 no `streaming` (ArchiveXL 1.28): recurso, aparência e `nbNodesUnderProxyDiff` em `worldCookedStaticMeshNode`,
+- `resource.patch` de `.inkanim`: as sequências do patch trocam as do alvo com o mesmo nome, e as outras entram no fim.
+- `actorDeletions: [[ator, shape]]`: só aquela shape do ator perde a colisão (preset `No Collision`); o resto do ator fica.
+- Framework de script de terceiro no jogo (`red4ext/plugins/<nome>/` ou `r6/scripts/<nome>/`): o instalador recusa e a abertura
+  do jogo não compila os scripts, com o que mover para a Lixeira no relatório da pasta `Mods/`.
+- `{nails_color}` em aparência dinâmica: a cor da unha do V entra no estado dinâmico do jogo junto da pele, do cabelo e dos olhos.
+- `{material.1}`..`{material.N}` em caminho dinâmico de material: partes do nome do material separadas por `+`.
+- Nós cozidos da 2.5 no `streaming`: recurso, aparência e `nbNodesUnderProxyDiff` em `worldCookedStaticMeshNode`,
   `worldCookedGenericProxyMeshNode`, `worldCookedStaticDecalNode` e `worldCookedAcousticSectorNode`; deleção do `worldCookedStaticMeshNode`;
   deleção e posição/orientação de ator no `worldCookedCollisionNode`.
-- Máscara de chunk com número no `hide`/`show` (`hide: 224`), além da lista (ArchiveXL 1.27.3).
+- Máscara de chunk com número no `hide`/`show` (`hide: 224`), além da lista.
 - `widget.AttachController(controller)` num widget já na tela (HUD, menus): o controller do mod passa a ser registrado na camada da
-  tela e a receber o `OnInitialize` (Codeware 1.21.1). `inkCompoundWidget.GetChildIndex(widget)` também entra.
-- `entSkinnedMeshComponent.meshResource` e `audioDialogLineEventData.gender` (nomes do Codeware 1.21.1).
+  tela e a receber o `OnInitialize`. `inkCompoundWidget.GetChildIndex(widget)` também entra.
+- `entSkinnedMeshComponent.meshResource` e `audioDialogLineEventData.gender`.
 - Na 2.5 o `renderProxy` dos componentes de mesh com esqueleto mudou de lugar; as funções de aparência do BWMS que o usam leem o lugar novo.
-- `BwmsQuestPhaseGraphAccessor` (`QuestPhaseGraphAccessor`): nós por classe, os 14 `Find*` e `GetAllGraphNodePaths`, só leitura.
+- `BwmsQuestPhaseGraphAccessor`: nós por classe, os 14 `Find*` e `GetAllGraphNodePaths`, só leitura.
 - `QuestsSystem.BwmsExecuteNode(node, inputSocket)`: com a trava do sistema ocupada devolve -5 sem executar; objeto que não é nó, -3.
-- `BwmsResetSecuritySystemNetwork` (`ResetSecuritySystemNetwork`).
-- `BwmsTraceResultGetHitObject`, `BwmsTraceResultGetHitEntity` e `BwmsTraceResultGetHitObjectClass` (`TraceResult.GetHitObject`/
-  `GetHitEntity`). O objeto vem como `ref<IScriptable>`. Chão e parede voltam nulo; a classe sai do 3º.
+- `BwmsTraceResultGetHitObject`, `BwmsTraceResultGetHitEntity` e `BwmsTraceResultGetHitObjectClass`. O objeto vem como `ref<IScriptable>`. Chão e parede voltam nulo; a classe sai do 3º.
 - Controller visual: `BwmsVisualControllerHasController`, `BwmsVisualControllerStatus`, `BwmsVisualControllerDependencyCount`,
   `BwmsVisualControllerLooseDependencyCount`.
 - `BwmsRenderProxyIsVisible(componente)`.
@@ -446,12 +453,12 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
   recusado.
 - Reflexão de `Int32`/enum e `CName` (`BwmsReflPropGetValueInt32`, `SetValueInt32`, `GetValueCName`, `SetValueCName`) e
   `BwmsReflPropIsSet`. Na leitura de `Int32`, falha devolve -1.
-- `IScriptable.BwmsClone()` (`Clone`): cópia funda; handle fraco para algo copiado passa a apontar para a cópia.
-- `BwmsCurve` (`CurveData`): 5 tipos, tamanho, pontos, interpolação.
-- `BwmsJobQueue` (`JobQueue`): `Handle` de um objeto de script como job no pool de threads do motor.
+- `IScriptable.BwmsClone()`: cópia funda; handle fraco para algo copiado passa a apontar para a cópia.
+- `BwmsCurve`: 5 tipos, tamanho, pontos, interpolação.
+- `BwmsJobQueue`: `Handle` de um objeto de script como job no pool de threads do motor.
 - `BwmsLocalization.GetOnScreenEntries(out entries)`, `BwmsLocProvider.GetKeys()` e a struct `localizationPersistenceOnScreenEntry`.
 
-### RED4ext e plugins nativos
+### Plugins nativos e funções do runtime
 
 - `BwmsGetLaunchArg(nome)` e `BwmsHasLaunchArg(nome)`: argumentos de lançamento do jogo.
 - `BwmsTakeScreenshot(caminho)`: PNG pelo próprio motor, no quadro seguinte.
@@ -478,21 +485,21 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
 
 ## Correções
 
-**ArchiveXL**
+**Recursos e aparência**
 
-- `ArchiveXL.RegisterArchive`/`RegisterDir` passavam ao motor o nome do grupo no lugar da lista de recursos e soltavam a trava zerando o
+- `RegisterArchive`/`RegisterDir` da fachada de recursos passavam ao motor o nome do grupo no lugar da lista de recursos e soltavam a trava zerando o
   byte.
 - `BwmsAparencia.ApplyAppearanceOverride` devolvia `false` no build do usuário mesmo aplicando.
 - `BwmsAparencia.ApplyVisualTagOverrideForMod` combinava as máscaras na ordem invertida, e a 2ª máscara do mesmo mod substituía a 1ª.
 - `BwmsAparencia.ApplyVisualTagOverride` gravava a máscara crua: um "show" de HighHeels escondia os outros chunks.
 - `JournalManager.GetTrackedQuest()` voltava vazio com quest rastreada. Agora sobe do objetivo até a quest.
 - O `PuppetStateHandler` do V nunca era criado no jogo do usuário.
-- `ArchiveXL.Reload()` depois que o último mod com `resource.patch` saiu (a tabela gerada sai junto): os patches do mod
+- `Reload()` da fachada de recursos depois que o último mod com `resource.patch` saiu (a tabela gerada sai junto): os patches do mod
   que saiu continuavam valendo até fechar o jogo. Agora a tabela ausente vale como vazia, e as esperas de patch saem junto.
 - Recarga sem a tabela de `customizations`: as opções do mod que saiu continuavam no criador e no espelho até fechar o jogo.
 - Patch de `.ent` (componentes) numa montagem da 1ª leva da sessão era recusado sem aviso.
 
-**TweakXL**
+**TweakDB**
 
 - Mod que estende `ScriptableTweak` derrubava o jogo logo depois do `OnApply`. Pela mesma causa passa a funcionar no build do usuário,
   onde estava desligado, o patch de fases de missão por mod (`quest.phases`).
@@ -506,7 +513,7 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
 - `TweakDBBatch.ReinheritFlat` passa pelo escritor.
 - `$type` sem classe conhecida para no 1º record em vez de varrer o TweakDB inteiro.
 
-**Codeware**
+**API de script**
 
 - A reflexão lia e gravava fora do campo em toda classe de script, inclusive pelos acessores por nome.
 - Em componente da família skinned (o corpo do V, por exemplo), os métodos de `IComponent` liam e gravavam 8 bytes adiante:
@@ -519,7 +526,7 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
   ouvinte desregistrado e destruído por outro ouvinte no meio do mesmo despacho.
 - Filtros de alvo do `CallbackSystem`: `ResourceTarget.Path`/`Type` casavam todo recurso; `StaticEntityTarget` por tag nunca casava;
   `EntityTarget.RecordID` nunca casava com record real; a mesma função registrada 2 vezes virava um registro só.
-- `ResourceTarget` com `regex:` casa o caminho inteiro, como o Codeware. `regex:(foo|bar)` não casa mais "xxbarxx". Padrão fora do
+- `ResourceTarget` com `regex:` casa o caminho inteiro. `regex:(foo|bar)` não casa mais "xxbarxx". Padrão fora do
   suportado (`\d`, `\w`, classe POSIX, faixa invertida…) é recusado em vez de virar texto literal. Padrão patológico deixou de ser caro:
   `(a*)*b` caiu de 927 µs para 0,5 µs (medido fora do jogo).
 - `BwmsPopulationSystemIsSpawning` chamava a função vizinha.
@@ -591,9 +598,9 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
   essa cópia que compila os `.reds` na abertura do jogo. O compilador empacotado lê o formato de scripts da 2.5. Se a cópia falha (disco sem espaço, por exemplo), o instalador avisa, e os
   `.reds` da `Mods/` não compilam.
 - **Arquivos de versões anteriores:** o instalador apaga os `.reds` que o 0.1.3 e o 0.1.4 instalavam e o 0.1.5 não leva mais (só esses,
-  pelo nome; arquivos de outros mods na pasta ficam). Com o `codeware-ui-customcontroller.reds` do 0.1.3 na pasta, nenhum script
-  compilava. A lista cobre também os nomes que mudaram: os `.reds` do BWMS que levavam o nome de outro framework (`codeware-*`,
-  `archivexl-*`, `tweakxl-*` e outros) agora se chamam `bwms-*` ou `ponte-*`, e o nome antigo sai na atualização.
+  pelo nome; arquivos de outros mods na pasta ficam). Com um desses arquivos do 0.1.3 na pasta, nenhum script
+  compilava. A lista cobre também os nomes que mudaram: os `.reds` do BWMS agora se chamam `bwms-*` ou `ponte-*`, e o nome antigo sai
+  na atualização.
 - **Volta automática:** se a assinatura do app falha, o binário original e o cache do redscript voltam e a pasta `blackwall-mods` sai.
   Na recusa do [6/6], o instalador para e manda rodar `--restore`.
 - **Backup e `DESINSTALAR.command`:** na instalação, um binário sem o load command do BWMS é o arquivo da loja para a build atual e
@@ -604,7 +611,7 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
   O desinstalador remove também a pasta `archive/Mac/mod/BWMS-Mods/`.
 - **GOG Galaxy:** aviso antes de instalar, se ele estiver aberto (ele repara o jogo e desfaz a instalação).
 - O instalador põe em `red4ext/bwms-heranca.yaml` de quem cada record do jogo herda (o TweakDB compilado não guarda): a mudança de um mod
-  num record do jogo chega aos records que herdam dele, como o `InheritanceMap` do TweakXL. Gerado das fontes `.tweak` da 2.5.
+  num record do jogo chega aos records que herdam dele. Gerado das fontes `.tweak` da 2.5.
 - O instalador grava `red4ext/bwms.toml` com `pular_intro = true`, `splash = true` e `continuar_automatico = true`, só se o arquivo não
   existir.
 - Dicas de erro de compilação para mods do Windows vão para `r6/config/redsUserHints/bwms-dicas.toml`; a cópia com o nome antigo
@@ -619,17 +626,17 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
   saíram com a biblioteca, e também o `bwms list` e o `bwms apply`. Fica o `bwms mods checar`. As tabelas que o runtime lê dos `.xl`
   são geradas pelo próprio BWMS na abertura do jogo, a partir da `Mods/`: tabela gerada que fica sem linha sai; tabela escrita à mão
   fica.
-- **`resource.link`/`resource.copy`:** mapas separados, como no ArchiveXL. Na mesma chave, `copy` vence `link`. Ciclo (A→B→A) não entra
+- **`resource.link`/`resource.copy`:** mapas separados. Na mesma chave, `copy` vence `link`. Ciclo (A→B→A) não entra
   mais em laço e é avisado em PT-BR. A cadeia sai colapsada (A→B→C vira A→C) e o plano junta os `.xl` de todos os mods da `Mods/`.
 - **Gravação atômica** nas tabelas geradas.
 - **Leitor de `.xl`:** entrada conhecida mal escrita gera aviso em PT-BR com o lugar e o que ficou de fora, em vez de sumir.
 - **`bwms mods checar`:** aponta cada `native func` dos `.reds` que nem o BWMS nem um plugin registra, com arquivo e linha. Compila num
   `r6` temporário, sem tocar no cache de scripts do jogo.
 - **`bwms tweak registro <mod>`:** sem aplicar nada, lista os records que o mod afeta, os records e recursos que ele passa a
-  referenciar e problemas visíveis no lote (`TweakChangelog` do TweakXL).
+  referenciar e problemas visíveis no lote.
 - **`bwms archive`:** `c2dadd` regrava a cópia da tabela que o `.csv` cozido guarda depois dos campos; antes, linha acrescentada nunca
   chegava ao jogo. `tira-campos` novo. `extract-one` aceita o hash do caminho (`0x…`).
-- **Fonte:** o código de Lua e a dependência LuaJIT saíram. Os `.lua` de mod de CET rodam no crate `bwms-lua`, em Rust, sem dependência.
+- **Fonte:** o código de Lua e a dependência de terceiro que o executava saíram. Os `.lua` de mod rodam no crate `bwms-lua`, em Rust, sem dependência.
 - **Crates como biblioteca:** `bwms-hashes` e `bwms-core` viraram um crate só, `bwms-primitives`, e mudaram de API. `Regex::compilar`
   devolve `Result`; `theme::load_states` devolve `StateLoad`.
 
@@ -639,11 +646,11 @@ gera: o `bwms mods install`/`apply` saiu com a biblioteca. Tabela escrita à mã
   `janela_texto` e `janela_fechar`. O binário já compilado continua funcionando; só quem recompila troca os nomes.
 - O build do usuário não lê mais `~/.bwms-skipintro` nem `~/.bwms-autocontinue`. Quem usava esses marcadores no 0.1.4 precisa ajustar o
   `bwms.toml` ou o seletor "Pular boot".
-- `Version()` do ArchiveXL, do TweakXL e do Codeware devolve `0.1.5`. Mod que compara `Version()` com 1.x lê errado: use `Require()`.
-- Sob `ArchiveXL` ficam só os 8 métodos da fachada do ArchiveXL (`Require`, `Version`, `RegisterArchive`, `RegisterDir`, `Reload`,
+- O `Version()` das três classes-fachada devolve `0.1.5b`. Mod que compara `Version()` com 1.x lê errado: use `Require()`.
+- Na fachada de recursos ficam só 8 métodos (`Require`, `Version`, `RegisterArchive`, `RegisterDir`, `Reload`,
   `EnableGarmentOffsets`, `DisableGarmentOffsets`, `GetBodyType`). As funções que o BWMS criou (`RegisterLink`, `GetAlias*`, aparência
-  dinâmica, tags visuais, override de aparência e deslocamento de roupa) estão na classe `BwmsAparencia`: script que as chamava por
-  `ArchiveXL.` troca o prefixo para `BwmsAparencia.`.
+  dinâmica, tags visuais, override de aparência e deslocamento de roupa) estão na classe `BwmsAparencia`: script que as chamava pela
+  fachada de recursos troca o prefixo para `BwmsAparencia.`.
 - Quem usava o 0.1.4 na GOG atualiza o jogo para a 2.5 antes: o [0/6] recusa a GOG 2.3.1.
 - O 0.1.5 é para a 2.5: na 2.3.1, o [0/6] recusa a instalação.
 - A biblioteca do BWMS (`BWMS/mods/`, `nexus/mods/`) e o `bwms mods` que instalava saíram. Mod novo vai na pasta `Mods/` ou pelo menu
@@ -657,7 +664,7 @@ build do usuário não tem (o censo de spawners). O dylib do usuário do pacote 
 save, sem queda, e aquele pacote, instalado pelo próprio `INSTALAR.command` num jogo sem mod (136 `.reds`), carregou o save em 126 s e
 seguiu rodando, sem crash. Depois dele, cada rodada de mudanças fechou com o build de desenvolvimento em gameplay e o roteiro de testes
 sem falha nova. Na de 2026-10-18, com 5 mods reais na `Mods/`, 26 testes passaram e 1 falhou, o `axl49scan`: a falha era o
-defeito do leitor do cache de recursos com archive na `Mods/`, consertado (ver "Correções", Codeware). Conferido em jogo (2026-10-18):
+defeito do leitor do cache de recursos com archive na `Mods/`, consertado (ver "Correções", API de script). Conferido em jogo (2026-10-18):
 com 4 archives na `Mods/`, o mapa foi achado pelo loader, a varredura visitou 60.888 recursos e a busca achou o setor do mundo
 (`cp77-symbols/notes/proofs/20261018-depot-cache-com-mods-conserto.log`). Os roteiros finais de 2026-10-18 deram 27 testes passando, 0
 falhas e 1 pulado com os 5 mods na `Mods/` (`cp77-symbols/notes/proofs/smoke-20261018-135441.log`) e os mesmos 27/0/1
@@ -675,11 +682,11 @@ build público na 2.5: a provar.
   - `.archive` da `Mods/` pela pasta de mods do próprio jogo (`archive/Mac/mod/BWMS-Mods/`): 4 de 4 montados pelo jogo, sem gancho.
   - Aba Mods: liga e desliga mod, com disco e aviso "Reiniciar para aplicar" certos. O liga/desliga saiu depois, com a biblioteca.
   - Aba Cheats: God Mode, Invisibilidade, Zerar procurado.
-  - Telas do Virtual Atelier (loja e lista) e do Equipment-EX (guarda-roupa pelo inventário e pelo menu do jogo): 4 de 4 com os itens
-    e o controller do mod. Escritas do Equipment-EX no TweakDB: `SetFlat` de lista e de texto 1898 de 1898; `CreateRecord` de slot
+  - Telas de dois mods reais (loja e lista de um; guarda-roupa pelo inventário e pelo menu do jogo do outro): 4 de 4 com os itens
+    e o controller do mod. Escritas do mod de guarda-roupa no TweakDB: `SetFlat` de lista e de texto 1898 de 1898; `CreateRecord` de slot
     pelo nome curto 54 de 54.
-- Textos de interface (`localization.onscreens`) dos `.xl` da `Mods/` pelo ArchiveXL do próprio jogo: com Equipment-EX e Virtual
-  Atelier, `.json` gerado pelo BWMS, aplicado pelo jogo e texto conferido no jogo
+- Textos de interface (`localization.onscreens`) dos `.xl` da `Mods/` pelo carregador de `.xl` do próprio jogo: com os dois
+  mods reais, `.json` gerado pelo BWMS, aplicado pelo jogo e texto conferido no jogo
   (`cp77-symbols/notes/proofs/20261023-provas-25-roteiro-com-xl-nativo.log`).
 - Instalação pelo kit na 2.5: portão 22 de 22, binário 2.5 guardado como original, teste de abertura, scripts compilados com o
   compilador da 2.5.
@@ -687,18 +694,18 @@ build público na 2.5: a provar.
 **Provado em jogo na 2.5** (build de desenvolvimento, boots de 2026-10-24)
 
 - Mod da `Mods/` com `.reds` quebrado: o jogo abriu até a gameplay, o mod saiu sozinho e ficou vermelho no relatório com o
-  arquivo:linha do erro; Equipment-EX, Virtual Atelier e o BWMS compilaram e entraram
+  arquivo:linha do erro; os dois mods reais e o BWMS compilaram e entraram
   (`cp77-symbols/notes/proofs/20261024-etapa2-mod-quebrado-sai-sozinho`).
 - Selo e aba Mods com os mods da `Mods/` e do mod.io, luzes, contagem e conflitos; relatório com `luz / light` e `[mod.io]`
   (`cp77-symbols/notes/proofs/20261024-etapa3-selo-e-aba-dois-caminhos-PASS`).
-- `factories` dos `.xl` da `Mods/` aplicado pelo ArchiveXL do próprio jogo
+- `factories` dos `.xl` da `Mods/` aplicado pelo carregador de `.xl` do próprio jogo
   (`cp77-symbols/notes/proofs/20261024-etapa4-lane-f-integrada-PASS`).
 - Roteiro completo depois do conserto do travamento antes de "pressione qualquer tecla"
   (`cp77-symbols/notes/proofs/20261024-integracao-final-roteiro-6de6`).
 
 **Provado em jogo na 2.3.1** (build de desenvolvimento, até 2026-10-19)
 
-- Aba Mods do terminal (2026-10-18): a aba e a caixa do Quadra Turbo R achadas e clicadas pelo estado do mouse do terminal. Ligar:
+- Aba Mods do terminal (2026-10-18): a aba e a caixa de um mod real achadas e clicadas pelo estado do mouse do terminal. Ligar:
   `active: true`, o archive no content igual à fonte, caixa marcada, "⚠ Reiniciar para aplicar" visível. Desligar: `active: false`, o
   archive fora do content, caixa desmarcada, o aviso some. Isso cobre o mesmo mod alternando mais de uma vez na sessão e o aviso
   comparando com o boot. O liga/desliga saiu depois, com a biblioteca.
@@ -706,22 +713,21 @@ build público na 2.5: a provar.
   `AcceptValue` do seletor vivo na tela, que é o que o clique no corpo do seletor chama (o mouse em si não entra). God Mode: desligar
   pinta 1→0 e o V perde a invulnerabilidade (`godmode=0` gravado); ligar volta. Invisibilidade: o clique pinta na hora, o efeito entra
   quando o menu fecha e sai no 2º clique. Zerar procurado: com 1 estrela, heat=0 e sem perseguição. Reabrir a aba pinta o estado real.
-  22 vereditos, 0 falhas; saves iguais
-  (`cp77-symbols/notes/proofs/20261018-provas-015-tweakxl-pathb-abamods-abacheats.log`).
-- TweakXL pela `Mods/` com um mod de teste do BWMS (`.tweak` e `.yaml`): 13 de 13 valores no TweakDB depois do save carregar (mesmo
+  22 vereditos, 0 falhas; saves iguais (prova de 2026-10-18).
+- Tweaks pela `Mods/` com um mod de teste do BWMS (`.tweak` e `.yaml`): 13 de 13 valores no TweakDB depois do save carregar (mesmo
   boot).
 - CString do caminho dos archives da `Mods/`: 4 soltas pelo destrutor do motor; nomes do depot certos 180 s depois (mesmo boot).
-- Telas do Virtual Atelier (2026-10-18): loja aberta pelo pedido de vendedor do jogo, grade com 5 itens, todos com o controller do mod;
+- Telas do mod real de loja (2026-10-18): loja aberta pelo pedido de vendedor do jogo, grade com 5 itens, todos com o controller do mod;
   lista de lojas aberta no inventário, com a página vazia explícita. Override de controller e injeção da dependência também no spawn
   assíncrono (`cp77-symbols/notes/proofs/20261018-telas-de-mod-async-va-2de2-eex-grade-vazia.log`).
 - Terminal desenhado pelo BWMS: no jogo, o autoteste trocou de aba, focou o campo, digitou `help` e deu Enter (+9 linhas, teclas de
   volta ao jogo), e o plugin de exemplo antigo desenhou sem recompilar.
 - Pasta `Mods/`: o archive vence o jogo base e a expansão; entre dois mods vence o primeiro. No boot de 2026-10-18 (build de
-  desenvolvimento), com Equipment-EX, Virtual Atelier, Quadra Turbo R, JB Third Person e input_loader na `Mods/`: 4 archives entraram,
-  os 2 `.xl` foram para as tabelas, 48 `.reds` compilados na abertura (877 ms), 0 conflitos, o `.lua` do JB e a `.dll` do input_loader
+  desenvolvimento), com 5 mods reais na `Mods/` (um deles de Lua e outro com `.dll`): 4 archives entraram,
+  os 2 `.xl` foram para as tabelas, 48 `.reds` compilados na abertura (877 ms), 0 conflitos, o `.lua` e a `.dll`
   listados como fora no relatório, e o jogo chegou à gameplay (prova: `cp77-symbols/notes/proofs/20261018-mods-reais-dev.log`).
-- `Require()` dos três frameworks (5 de 6 chamadas ao vivo; a 6ª não chegou pelo canal de teste).
-- Virtual Atelier e Equipment-EX compilam, carregam e seguem 60 s ou mais em gameplay (build de desenvolvimento, boot de 09-28, antes da
+- `Require()` das três classes-fachada (5 de 6 chamadas ao vivo; a 6ª não chegou pelo canal de teste).
+- Os dois mods reais com telas compilam, carregam e seguem 60 s ou mais em gameplay (build de desenvolvimento, boot de 09-28, antes da
   reescrita do `Show`/`ShowInput` e do conserto do popup reaberto). As classes da ponte funcionam como controllers do motor, e o popup
   abre e fecha.
 - `ScriptableTweak`: o crash antes e o jogo vivo depois.
@@ -742,7 +748,7 @@ build público na 2.5: a provar.
 - Mundo: `WorldStateSystem`, comunidades, clima, `BwmsWorldNodeSetup`, instâncias de nó, `BwmsQuestPhaseGraphAccessor`,
   `BwmsExecuteNode`, reset de rede de segurança, `TraceResult`, controller visual, `BwmsRenderProxyIsVisible`.
 - Reflexão no campo certo e valor de qualquer tipo.
-- RED4ext: argumentos de lançamento, screenshot, tempo do quadro, `ModLog` gravando em `bwms-mods.log` (caminho do build do usuário,
+- Plugins e runtime: argumentos de lançamento, screenshot, tempo do quadro, `ModLog` gravando em `bwms-mods.log` (caminho do build do usuário,
   provado no build de desenvolvimento), native de plugin no `.reds`, `OnUpdate` de plugin em gameplay, `call_global`,
   `class_create`/`class_add_property`.
 - Motor: String inteira, native como argumento, natives em thread de job, vazamento de `ref<>` nos cheats.
@@ -759,20 +765,20 @@ build público na 2.5: a provar.
 **Implementado, sem prova ao vivo**
 
 - `RegisterArchive`/`RegisterDir` com o carregador novo.
-- Pasta `Mods/`: nenhum mod real de TweakXL do Nexus (`.yaml`/`.tweak`) foi testado em jogo; o provado é um mod de teste do BWMS.
+- Pasta `Mods/`: nenhum mod real de tweak do Nexus (`.yaml`/`.tweak`) foi testado em jogo; o provado é um mod de teste do BWMS.
   Erro no BWMS ou em mod direto em `r6/scripts` (o jogo abre com a última compilação que deu certo e o erro sai com arquivo:linha) e
   mod novo direto em `r6/scripts`: testados fora do jogo.
 - Migração da biblioteca no instalador (0.1.2–0.1.4 → 0.1.5): testada fora do jogo, numa pasta de jogo falsa.
 - `GetItemInstance()` do `inkWidgetSpawnEvent` não foi provado em jogo.
 - Tecla entregue a widget de mod: religada no código, sem prova em jogo.
 - O instalado pelo zip com o build público na 2.5: a provar.
-- `Version()` dos três frameworks devolvendo `0.1.5`.
-- O aviso de requisito do Equipment-EX deixando de abrir.
+- `Version()` das três classes-fachada devolvendo a versão do BWMS.
+- O aviso de requisito do mod real deixando de abrir.
 - `ApplyAppearanceOverride` devolvendo o resultado; `ApplyVisualTagOverride` sobre a máscara atual. A regra das máscaras por mod foi
   provada no componente vivo do V por uma função de teste; as natives de produção não foram chamadas ao vivo.
-- Consertos menores do TweakDB (`AddFlat`, `GetRecords`, `!remove`, `ReinheritFlat`, versão do TweakDB, `TweakXL.Reload`, `$type`).
+- Consertos menores do TweakDB (`AddFlat`, `GetRecords`, `!remove`, `ReinheritFlat`, versão do TweakDB, `Reload` da fachada de tweaks, `$type`).
   Os boots de regressão chegaram ao gameplay sem queda.
-- Consertos do Codeware: `FindComponentByType`, `ForgetItemID`, ouvinte do `CallbackSystem`, `BwmsPopulationSystemIsSpawning`,
+- Consertos da API de script: `FindComponentByType`, `ForgetItemID`, ouvinte do `CallbackSystem`, `BwmsPopulationSystemIsSpawning`,
   `ModLog`, tags de outra sessão.
 - `ResourceTarget` com `regex:` casando o caminho inteiro (só testes).
 - `GetPoiMappinPhase`: 48 de 48 leituras na faixa 0..5; sem POI com estado salvo para comparar com o jogo.
@@ -787,7 +793,7 @@ build público na 2.5: a provar.
 - Escala 2× e 3× do terminal e janela mínima: testados fora do jogo contra a referência. Os boots rodam em 1280×800 (1×).
 - Filtro de cor (LUT) com o terminal fechado: o comando aplica; a imagem não foi conferida em jogo.
 - `spawnsub`: a chamada vai ao motor; o NPC nascendo não foi conferido em jogo.
-- `ArchiveXL.Reload()` sem a tabela, recarga de `customizations` e patch de `.ent` na 1ª leva: só testes.
+- `Reload()` da fachada de recursos sem a tabela, recarga de `customizations` e patch de `.ent` na 1ª leva: só testes.
 - Aba Cheats: o mouse em si não entra no teste (ele chama o `AcceptValue` do seletor vivo). A invisibilidade no save é inferida do
   registro do jogo (efeito salvável), não medida.
 - `bwms-report.command` sem Python (saída igual à antiga em 10 de 10 `.ips` reais).
@@ -803,14 +809,14 @@ build público na 2.5: a provar.
 - Plugin `.dll` é de Windows e não carrega no Mac.
 - `RegisterArchive` injeta no grupo `content`, que perde para a expansão.
 - Fora da `Mods/`, as seções do `.xl` não são aplicadas (só tabela escrita à mão em `red4ext/`).
-- `.xl` pela via nativa do jogo (ArchiveXL próprio da 2.5, que lê `.json`): os textos de interface (`localization.onscreens`) e o
+- `.xl` pela via nativa do jogo (carregador de `.xl` próprio da 2.5, que lê `.json`): os textos de interface (`localization.onscreens`) e o
   `factories` dos `.xl` da `Mods/` vão por ela. As outras seções continuam com o BWMS, e os textos também voltam ao BWMS quando há junto
   textos de mod do mod.io ou de outra pasta de mods do jogo. `factories` que o jogo não aplica fica sem efeito, e o mod fica amarelo
   com o motivo.
 - `localization` do `.xl` aplica só `onscreens`. `player.bodyTypes` não está implementado.
 - Só a 2.5 da Steam e da GOG. Epic e Mac App Store: não suportadas. A 2.3.1: não suportada.
 - `{nails_color}` em NPC sem componente de unha fica vazia (no V, sem o componente, vem da customização dos braços).
-- `worldCookedCollisionNode` (colisão cozida da 2.5): sem deleção de shape (`[ator, shape]`), como no ArchiveXL.
+- `worldCookedCollisionNode` (colisão cozida da 2.5): sem deleção de shape (`[ator, shape]`).
 - Records novos da 2.5 que as fontes `.tweak` públicas ainda não trazem ficam sem herança no mapa: mudança num record base desses não
   chega aos filhos.
 - O evento `InkWidget/Spawn` sai só do spawn síncrono, não do `AsyncSpawnFrom*`.

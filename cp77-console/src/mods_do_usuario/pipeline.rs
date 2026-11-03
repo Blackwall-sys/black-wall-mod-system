@@ -2,12 +2,12 @@
 //!
 //! As 6 capacidades do Windows convergem aqui em 2 fases:
 //!
-//!   RED4ext    → plugins Rust de 3os (boot_phase)
+//!   plugins    → plugins Rust de 3os (boot_phase)
 //!   redscript  → compilado pela toolchain; motor carrega automaticamente
-//!   CET        → overlay/console (overlay.rs, sempre ativo)
-//!   TweakXL    → YAML/.tweak auto-apply dos mods ativos (session_phase) + ScriptableTweak dispatch (menu, depois dos arquivos; lib.rs)
-//!   Codeware   → register::register_all (selfboot on_load — antes desta fase)
-//!   ArchiveXL  → resource.link (boot_phase); o factory index é do jogo, pelo `.json` (`xl_no_jogo`)
+//!   mods Lua   → overlay/console (overlay.rs, sempre ativo)
+//!   tweaks     → YAML/.tweak auto-apply dos mods ativos (session_phase) + ScriptableTweak dispatch (menu, depois dos arquivos; lib.rs)
+//!   natives    → register::register_all (selfboot on_load — antes desta fase)
+//!   .xl        → resource.link (boot_phase); o factory index é do jogo, pelo `.json` (`xl_no_jogo`)
 //!
 //! Chamadas de lib.rs:
 //!   `boot_phase()`       — primeira iteração do tick, antes do gate de player
@@ -19,15 +19,15 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static BOOT_DONE: AtomicBool = AtomicBool::new(false);
 
-// `tweakxl-hot-reload`: polling a cada HOT_RELOAD_INTERVAL ticks (~10s).
+// Hot-reload de tweaks: polling a cada HOT_RELOAD_INTERVAL ticks (~10s).
 static HOT_RELOAD_LAST_TICK: AtomicU64 = AtomicU64::new(0);
 static HOT_RELOAD_LAST_MTIME: AtomicU64 = AtomicU64::new(0);
 const HOT_RELOAD_INTERVAL: u64 = 600;
 
 /// **Fase 1** — roda UMA VEZ na primeira iteração do tick (antes do gate de player).
 ///
-/// - ArchiveXL: resource.link (bwms-reslink.txt, gravado dos `.xl` da pasta `Mods/` no `on_load`)
-/// - RED4ext: plugins Rust de 3os (red4ext/plugins/*.dylib, opt-in)
+/// - .xl: resource.link (bwms-reslink.txt, gravado dos `.xl` da pasta `Mods/` no `on_load`)
+/// - plugins Rust de 3os (red4ext/plugins/*.dylib, opt-in)
 pub(crate) fn boot_phase() {
     if BOOT_DONE.swap(true, Ordering::Relaxed) {
         return;
@@ -35,7 +35,7 @@ pub(crate) fn boot_phase() {
 
     recarregar_tabelas_de_runtime(false);
 
-    // --- RED4ext: plugins Rust de 3os --- (normalmente já carregados no bind; aqui só o que faltou)
+    // --- plugins Rust de 3os --- (normalmente já carregados no bind; aqui só o que faltou)
     // Os `register_method` de plugin em classe de script drenam aqui: no 1º tick a classe existe (boots 46 e 271, `register_method
     // ExamplePluginFieldTest -> true`); no bind das funções, mesmo depois do `register_all`, ainda não (boots 272-274, `classe
     // 'PlayerPuppet' não existe`). Antes do `carregar_plugins`: plugin que só carrega aqui acha a classe viva e registra na hora.
@@ -52,28 +52,28 @@ pub(crate) fn carregar_plugins() {
     }
 }
 
-/// Carga das tabelas que o boot grava dos `.xl` da `Mods/` (`pasta_mods::preparar_no_boot`; `bwms-reslink.txt` e as das seções de `carregar_tabelas_do_archivexl`): no boot
-/// (`boot_phase`, 1×, atrás do guard `BOOT_DONE`) e no `ArchiveXL.Reload()` (`PENDENCIAS-UNIFICADAS.md`, Facade.hpp; `tramp_recarregar_tabelas_de_runtime`), sem
+/// Carga das tabelas que o boot grava dos `.xl` da `Mods/` (`pasta_mods::preparar_no_boot`; `bwms-reslink.txt` e as das seções de `carregar_tabelas_xl`): no boot
+/// (`boot_phase`, 1×, atrás do guard `BOOT_DONE`) e no `Reload()` da fachada (`PENDENCIAS-UNIFICADAS.md`; `tramp_recarregar_tabelas_de_runtime`), sem
 /// rebootar o jogo. Os hooks têm guarda própria de "só instala 1x" (`install_reslink`). O `factories` não tem tabela: o jogo o aplica pelo `.json`
 /// (`xl_no_jogo`).
 ///
-/// `substituir` (só o `ArchiveXL.Reload`): cada tabela em memória vira a do arquivo, e o arquivo ausente a esvazia, porque a gravação o apaga
-/// quando nenhum mod gera linha. Saem os pares de `RegisterLink`, como no `Configure` da referência (`ResourceLink/Extension.cpp:38-40`); do
+/// `substituir` (só o `Reload` da fachada): cada tabela em memória vira a do arquivo, e o arquivo ausente a esvazia, porque a gravação o apaga
+/// quando nenhum mod gera linha. Saem os pares de `RegisterLink`; do
 /// journal fica, além do que o arquivo lista, só o já mesclado na árvore viva.
 /// Sem `substituir` (o boot) o que já está na memória fica: a memória do processo começa limpa, e antes desta carga o `on_load` já gravou os pares
-/// de teste do `#11`/`#47a`, e o `OnLoad` de um `ScriptableService` (chamado pelo contêiner do jogo) pode ter gravado pares de `RegisterLink`.
+/// de teste, e o `OnLoad` de um `ScriptableService` (chamado pelo contêiner do jogo) pode ter gravado pares de `RegisterLink`.
 pub(crate) fn recarregar_tabelas_de_runtime(substituir: bool) {
     if let Some(red4) = crate::dylib_dir() {
-        carregar_tabelas_do_archivexl(std::path::Path::new(&red4), substituir);
+        carregar_tabelas_xl(std::path::Path::new(&red4), substituir);
     }
 
-    // --- ArchiveXL #51 (51j-b): reaplica os patches de `persistentStateData` quando a tabela tem patch; os marcadores de sonda e teste são do dev ---
+    // --- persistentStateData: reaplica os patches de `persistentStateData` quando a tabela tem patch; os marcadores de sonda e teste são do dev ---
     unsafe { crate::arquivos_do_jogo::preparar_hook_de_psd() };
 }
 
 /// As tabelas de `red4` (a pasta `red4ext/`, onde o boot as grava), com a regra de `substituir` de `recarregar_tabelas_de_runtime`.
-fn carregar_tabelas_do_archivexl(red4: &std::path::Path, substituir: bool) {
-    // --- ArchiveXL: resource.link ---
+fn carregar_tabelas_xl(red4: &std::path::Path, substituir: bool) {
+    // --- resource.link ---
     // bwms-reslink.txt é gerado por bwms_primitives::instalacao::tabelas_de_runtime::emit_reslink_do_plano a partir das
     // seções `resource.link` dos .xl ativos. O hook é idempotente (só instala 1x).
     let f = red4.join(tabelas::RESLINK.arquivo);
@@ -82,10 +82,10 @@ fn carregar_tabelas_do_archivexl(red4: &std::path::Path, substituir: bool) {
     }
     if f.is_file() || substituir {
         crate::arquivos_do_jogo::reslink_file(&f.to_string_lossy(), substituir);
-        crate::log_dev!("[pipeline] ArchiveXL resource.link: tabela carregada");
+        crate::log_dev!("[pipeline] resource.link: tabela carregada");
     }
 
-    // --- ArchiveXL: streaming.sectors (deleções de node, `#49` parte 4d) ---
+    // --- streaming.sectors (deleções de node) ---
     // bwms-streaming.txt gerado por bwms_primitives::instalacao::tabelas_de_runtime::emit_streaming_table. O hook do `PostLoad` do setor instala no on_load quando o
     // arquivo existe.
     let f = red4.join(tabelas::STREAMING.arquivo);
@@ -93,7 +93,7 @@ fn carregar_tabelas_do_archivexl(red4: &std::path::Path, substituir: bool) {
         crate::mundo::streaming_file(&f.to_string_lossy());
     }
 
-    // --- ArchiveXL: quest.phases (patch de fase na carga, `#35` parte 35c-2d-3) ---
+    // --- quest.phases (patch de fase na carga) ---
     // bwms-questphase.txt gerado por bwms_primitives::instalacao::tabelas_de_runtime::emit_questphase_table. O contexto do patch é resolvido aqui (game thread) e o hook
     // da rota de carga de fase instala quando a tabela tem linha.
     let f = red4.join(tabelas::QUESTPHASE.arquivo);
@@ -104,7 +104,7 @@ fn carregar_tabelas_do_archivexl(red4: &std::path::Path, substituir: bool) {
         unsafe { crate::missoes_e_mapa::install_a35_recriar() };
     }
 
-    // --- ArchiveXL: journal (journals de mod, `#44` parte 7e-2) ---
+    // --- journal (journals de mod) ---
     // bwms-journal.txt gerado por bwms_primitives::instalacao::tabelas_de_runtime::emit_journal_table. Aqui entram a lista e, com linha na tabela, os hooks de busca e
     // reserva de mappins (7e-5, antes de qualquer carga de mundo); a carga e a mescla na árvore viva rodam em gameplay (`register::journal_mods_tick`).
     let f = red4.join(tabelas::JOURNAL.arquivo);
@@ -124,15 +124,15 @@ fn carregar_tabelas_do_archivexl(red4: &std::path::Path, substituir: bool) {
         }
     }
 
-    // --- ArchiveXL: resource.patch nas partes de aparência (`#17` 17d) ---
+    // --- resource.patch nas partes de aparência ---
     // bwms-resource-patch.txt gerado por bwms_primitives::instalacao::tabelas_de_runtime::emit_resource_patch_table. Aqui (game thread) entram as classes da mescla, o
     // token de cada patch e o hook do `ExtractPartComponents`; a mescla roda no hook, a cada extração de parte alvo.
     unsafe { carregar_resource_patch(red4) };
 
-    // --- ArchiveXL: resource.fix (nomes de material do mesh, `#51` 51i-1) ---
+    // --- resource.fix (nomes de material do mesh) ---
     // bwms-resfixes.txt gerado por bwms_primitives::instalacao::tabelas_de_runtime::emit_resfixes. Com linha `names` na tabela (ou `~/.bwms-hook-a51i-teste`), os
     // offsets do `CMesh` saem do RTTI e o hook do `PostLoad` instala; a troca de nomes roda no hook. As linhas `paths` servem ao `FixCustomizationOptions`
-    // do `#47` (caminho do recurso de aparência de uma opção de customização) e entram fora da conferência de offsets do `CMesh`. Uma leitura e um leitor
+    // (caminho do recurso de aparência de uma opção de customização) e entram fora da conferência de offsets do `CMesh`. Uma leitura e um leitor
     // (`resfixes_linhas`) servem as 2 tabelas, então as 2 seguem a mesma regra.
     let f = red4.join(tabelas::RESFIXES.arquivo);
     match std::fs::read_to_string(&f) {
@@ -157,7 +157,7 @@ fn carregar_tabelas_do_archivexl(red4: &std::path::Path, substituir: bool) {
         }
     }
 
-    // --- ArchiveXL: customizations (`#47` 47c) ---
+    // --- customizations ---
     // bwms-customizations.txt gerado por bwms_primitives::instalacao::tabelas_de_runtime::emit_customization_table. Aqui (game thread) o token de cada recurso é pedido e
     // os hooks do fluxo de edição instalam; a mescla roda no hook do `Initialize` do `CharacterCustomizationSystem`, na abertura do criador ou do espelho.
     // Sem o arquivo, a carga desfaz a tabela anterior.
@@ -177,7 +177,7 @@ fn carregar_tabelas_do_archivexl(red4: &std::path::Path, substituir: bool) {
         unsafe { crate::corpo_e_rosto::cust_tabela_ausente() };
     }
 
-    // --- ArchiveXL: resource.scope em runtime (`#20` 20e-2, o `InScope` do `FixCustomizationAppearance`) ---
+    // --- resource.scope em runtime (o `InScope` do `FixCustomizationAppearance`) ---
     // bwms-resscopes.txt gerado por bwms_primitives::instalacao::tabelas_de_runtime::emit_resscopes (os escopos de todos os .xl, expandidos).
     // Só o conserto de aparência do selftest consulta o escopo em runtime; no público os escopos valem só no install (link e cópia expandidos).
     #[cfg(any(test, feature = "devtools"))]
@@ -195,9 +195,8 @@ fn carregar_tabelas_do_archivexl(red4: &std::path::Path, substituir: bool) {
 
 /// Linhas de `bwms-resfixes.txt` (`<recurso> | names|paths | <antigo> | <novo>`, `bwms_primitives::tabelas::Resfix`; linha fora do formato fica de fora)
 /// em `(nomes, caminhos)`, cada um `recurso → [(antigo, novo)]` em hash: o nome de material em `CName` (`None` = 0), o caminho em `ResourcePath`. Nos
-/// dois, o mesmo antigo no mesmo recurso fica com o novo da última linha, a regra do `Merge` da referência (`ResourceMeta/Config.hpp:41-57`, chamado
-/// por `.xl` em `ResourceMeta/Extension.cpp:36-38`): o install concatena as linhas de todos os `.xl`, e 2 mods podem consertar o mesmo antigo. Caminho
-/// novo vazio não entra, e o par da linha anterior fica; a referência grava 0 e o último vence (divergência registrada em `caminhos/xl.md`).
+/// dois, o mesmo antigo no mesmo recurso fica com o novo da última linha: o install concatena as linhas de todos os `.xl`, e 2 mods podem consertar o mesmo antigo. Caminho
+/// novo vazio não entra, e o par da linha anterior fica (divergência registrada em `caminhos/xl.md`).
 pub(crate) fn resfixes_linhas(texto: &str) -> (HashMap<u64, Vec<(u64, u64)>>, HashMap<u64, Vec<(u64, u64)>>) {
     use tabelas::{Resfix, TipoDeFix};
     let (mut nomes, mut caminhos): (HashMap<u64, Vec<(u64, u64)>>, HashMap<u64, Vec<(u64, u64)>>) = (HashMap::new(), HashMap::new());
@@ -220,7 +219,7 @@ pub(crate) fn resfixes_linhas(texto: &str) -> (HashMap<u64, Vec<(u64, u64)>>, Ha
 }
 
 /// As linhas `context` de `bwms-resfixes.txt` (S12): caminho do mesh → `(nome do atributo em snake_case, valor)`. O mesmo parâmetro no mesmo mesh
-/// fica com o valor da última linha (o `Merge` da referência, `ResourceMeta/Config.hpp:53-55`); duas chaves cruas que dão o mesmo nome ficam com a
+/// fica com o valor da última linha; duas chaves cruas que dão o mesmo nome ficam com a
 /// 1ª, como o `emplace` do `PrefillContext`.
 pub(crate) fn resfixes_contexto(texto: &str) -> HashMap<u64, Vec<(String, String)>> {
     use tabelas::{Resfix, TipoDeFix};
@@ -241,7 +240,7 @@ pub(crate) fn resfixes_contexto(texto: &str) -> HashMap<u64, Vec<(String, String
         .collect()
 }
 
-/// `bwms-resource-patch.txt` de `red4` na tabela do `#17` (game thread).
+/// `bwms-resource-patch.txt` de `red4` na tabela de patches de recurso (game thread).
 unsafe fn carregar_resource_patch(red4: &std::path::Path) {
     let f = red4.join(tabelas::RESOURCE_PATCH.arquivo);
     #[cfg(feature = "devtools")]
@@ -262,12 +261,12 @@ unsafe fn carregar_resource_patch(red4: &std::path::Path) {
 
 /// **Fase 2** — roda no timing do Session/Start (player presente, RTTI completo).
 ///
-/// - TweakXL: auto-apply dos tweaks da pasta `Mods/` (`apply_mod_tweaks`)
+/// - tweaks: auto-apply dos tweaks da pasta `Mods/` (`apply_mod_tweaks`)
 /// - (o `OnApply` dos `ScriptableTweak` sai do `cp77_tick` depois destes arquivos, ver [`arquivos_da_sessao_aplicados`])
 pub(crate) unsafe fn session_phase(reg: &crate::rtti::Registry) {
     let _ = reg;
 
-    // --- TweakXL: auto-apply YAML dos mods ativos ---
+    // --- tweaks: auto-apply YAML dos mods ativos ---
     apply_mod_tweaks();
     ARQUIVOS_DA_SESSAO.store(true, Ordering::Release);
 }
@@ -277,7 +276,7 @@ pub(crate) unsafe fn session_phase(reg: &crate::rtti::Registry) {
 static ARQUIVOS_DA_SESSAO: AtomicBool = AtomicBool::new(false);
 
 /// Os arquivos de tweak da 1ª sessão (a do menu, quando o jogador do menu aparece antes do load) foram aplicados: o `OnApply` vem depois
-/// deles, na ordem do TweakXL de referência (`ImportTweaks` e depois `ExecuteTweaks`, no `TweakDB_TryLoad`).
+/// deles: primeiro os arquivos, depois os `ScriptableTweak`.
 pub(crate) fn arquivos_da_sessao_aplicados() -> bool {
     ARQUIVOS_DA_SESSAO.load(Ordering::Acquire) && crate::tweakdb::arquivos_em_aplicacao() == 0
 }
@@ -354,7 +353,7 @@ pub(crate) unsafe fn despachar_onapply_da_recarga(reg: &crate::rtti::Registry) {
 }
 
 /// Aplica os tweaks da pasta `Mods/` (`pasta_mods::tweaks`, em ordem de caminho) num conjunto só pelo `tweakdb::aplicar_arquivos` (o
-/// `.tweak` passa pelo `bwms_primitives::tweakxl::tweak_source::parse`).
+/// `.tweak` passa pelo `bwms_primitives::tweaks::tweak_source::parse`).
 pub(crate) fn apply_mod_tweaks() {
     let Some(root) = game_root() else { return };
     let da_pasta = crate::mods_do_usuario::pasta_mods::tweaks(&crate::mods_do_usuario::pasta_mods::pasta(&root));
@@ -365,7 +364,7 @@ pub(crate) fn apply_mod_tweaks() {
             p.to_string_lossy().into_owned()
         })
         .collect();
-    // Todos num conjunto só (o TweakXL junta os arquivos e aplica as mutações de array depois das atribuições de todos).
+    // Todos num conjunto só (os arquivos juntos, e as mutações de array depois das atribuições de todos).
     crate::tweakdb::aplicar_arquivos(&caminhos);
     // O roteiro de prova lê daqui quando os tweaks da `Mods/` foram para a fila de aplicação (cada arquivo grava ~500 ms depois, na vez dele),
     // em que momento do boot e em que TweakDB: o `flatconf` de gameplay compara o ponteiro.
@@ -378,7 +377,7 @@ pub(crate) fn apply_mod_tweaks() {
             crate::inicio::boot::gameplay_real(),
             da_pasta.iter().map(|p| p.strip_prefix(&root).unwrap_or(p).display().to_string()).collect::<Vec<_>>()
         );
-        crate::log_dev!("[pipeline] TweakXL: {} arquivo(s) da pasta Mods", da_pasta.len());
+        crate::log_dev!("[pipeline] tweaks: {} arquivo(s) da pasta Mods", da_pasta.len());
     }
 }
 
@@ -391,12 +390,12 @@ pub(crate) unsafe fn dispatch_scriptable_tweaks(reg: &crate::rtti::Registry) {
     ONAPPLY_PENDENTE.store(false, Ordering::Release);
     let st_cname = crate::cname::cname("ScriptableTweak");
     if reg.class_by_name("ScriptableTweak").is_null() {
-        crate::log_dev!("[tweakxl] ScriptableTweak não no RTTI — dispatch pulado");
+        crate::log_dev!("[tweaks] ScriptableTweak não no RTTI — dispatch pulado");
         return;
     }
     if let Some((forja, doadora)) = forja_menor_que_a_doadora(reg) {
         crate::log(&format!(
-            "[tweakxl] ScriptableTweak forjada com {forja:#x} B, menor que os {doadora:#x} B que o construtor da doadora escreve: OnApply não roda"
+            "[tweaks] ScriptableTweak forjada com {forja:#x} B, menor que os {doadora:#x} B que o construtor da doadora escreve: OnApply não roda"
         ));
         return;
     }
@@ -409,7 +408,7 @@ pub(crate) unsafe fn dispatch_scriptable_tweaks(reg: &crate::rtti::Registry) {
     const GET_ALL_TYPES_SLOT: usize = 0x40;
     let fn_ptr = reg.vtbl_slot(GET_ALL_TYPES_SLOT);
     if fn_ptr.is_null() {
-        crate::log_dev!("[tweakxl] GetAllTypes@vtbl+0x40 ilegível");
+        crate::log_dev!("[tweaks] GetAllTypes@vtbl+0x40 ilegível");
         return;
     }
 
@@ -430,7 +429,7 @@ pub(crate) unsafe fn dispatch_scriptable_tweaks(reg: &crate::rtti::Registry) {
         || !crate::memoria::is_readable(entries as *const c_void, 8)
     {
         crate::log_dev!(
-            "[tweakxl] GetAllTypes slot+0x40 inválido (count={count} ptr={entries_raw:#x}) — slot errado?"
+            "[tweaks] GetAllTypes slot+0x40 inválido (count={count} ptr={entries_raw:#x}) — slot errado?"
         );
         if crate::dev_mode() {
             for probe_off in [0x38usize, 0x48, 0x50, 0x58] {
@@ -444,14 +443,14 @@ pub(crate) unsafe fn dispatch_scriptable_tweaks(reg: &crate::rtti::Registry) {
                 let pc = u32::from_le_bytes(pa[8..12].try_into().unwrap_or([0u8; 4])) as usize;
                 let pe = u64::from_le_bytes(pa[0..8].try_into().unwrap_or([0u8; 8]));
                 crate::log_dev!(
-                    "[tweakxl] probe vtbl+{probe_off:#x}: count={pc} ptr={pe:#x}"
+                    "[tweaks] probe vtbl+{probe_off:#x}: count={pc} ptr={pe:#x}"
                 );
             }
         }
         return;
     }
     crate::log_dev!(
-        "[tweakxl] GetAllTypes: {count} tipos, varrendo ScriptableTweak"
+        "[tweaks] GetAllTypes: {count} tipos, varrendo ScriptableTweak"
     );
 
     let mut dispatched = 0u32;
@@ -509,7 +508,7 @@ pub(crate) unsafe fn dispatch_scriptable_tweaks(reg: &crate::rtti::Registry) {
 
         let obj = crate::rtti::new_object(reg, &name_str);
         if obj.is_null() {
-            crate::log_dev!("[tweakxl] new_object falhou: {name_str}");
+            crate::log_dev!("[tweaks] new_object falhou: {name_str}");
             continue;
         }
         // Referência forte retida pra sempre antes do `call_func`: o objeto nasce sem bloco de refcount e não tem outro dono.
@@ -534,15 +533,15 @@ pub(crate) unsafe fn dispatch_scriptable_tweaks(reg: &crate::rtti::Registry) {
             let inicio = std::time::Instant::now();
             let (_, subidas) = crate::tweakdb::escritor::em_lote_de_versao(|| crate::rtti::call_func(&rf, obj, &[]));
             dispatched += 1;
-            crate::log_dev!("[tweakxl] OnApply → {name_str}");
-            // Separa "o mod não achou slot/record" de "a escrita do BWMS falhou": o Equipment-EX monta a grade do guarda-roupa pelo último
-            // `placementSlots` de cada roupa, que o `PatchOriginaltems` grava aqui (`array:TweakDBID`).
+            crate::log_dev!("[tweaks] OnApply → {name_str}");
+            // Separa "o mod não achou slot/record" de "a escrita do BWMS falhou": um mod de guarda-roupa monta a grade pelo último
+            // `placementSlots` de cada roupa, que o `OnApply` do mod grava aqui (`array:TweakDBID`).
             #[cfg(feature = "devlog")]
             {
                 let (contagem, falhos) = crate::tweakdb::natives::tirar_contagem();
-                crate::veredito_dev!("[tweakxl] VEREDITO-ONAPPLY {name_str}: {contagem}; escritas-ok={} = {}", falhos == 0, (falhos == 0) as u8);
+                crate::veredito_dev!("[tweaks] VEREDITO-ONAPPLY {name_str}: {contagem}; escritas-ok={} = {}", falhos == 0, (falhos == 0) as u8);
                 crate::veredito_dev!(
-                    "[tweakxl] ONAPPLY-MEDIDA {name_str}: {subidas} subida(s) do byte de versão do TweakDB viraram {}; {} ms com o log de dev",
+                    "[tweaks] ONAPPLY-MEDIDA {name_str}: {subidas} subida(s) do byte de versão do TweakDB viraram {}; {} ms com o log de dev",
                     (subidas > 0) as u8,
                     inicio.elapsed().as_millis()
                 );
@@ -564,13 +563,13 @@ pub(crate) unsafe fn dispatch_scriptable_tweaks(reg: &crate::rtti::Registry) {
         // `obj` e o handle ficam vazados de propósito (instância efêmera, nunca liberada por nós)
     }
     crate::log_dev!(
-        "[tweakxl] dispatch_scriptable_tweaks: {dispatched} OnApply() chamados"
+        "[tweaks] dispatch_scriptable_tweaks: {dispatched} OnApply() chamados"
     );
     // Stat novo criado pelo `OnApply` (`CreateRecord` + `SetFlat` do `enumName`) entra no sistema de stats.
     crate::tweakdb::stats::registrar_tardio();
 }
 
-/// **TweakXL hot-reload** — roda a cada `HOT_RELOAD_INTERVAL` ticks em gameplay.
+/// **Hot-reload de tweaks** — roda a cada `HOT_RELOAD_INTERVAL` ticks em gameplay.
 /// Varre o mtime máximo dos yamls ativos; se mudou desde a última checagem, re-aplica.
 pub(crate) unsafe fn hot_reload_tick() {
     let now = crate::ticks();
@@ -588,7 +587,7 @@ pub(crate) unsafe fn hot_reload_tick() {
     }
     let old_mt = HOT_RELOAD_LAST_MTIME.swap(new_mt, Ordering::Relaxed);
     if old_mt != 0 && new_mt != old_mt {
-        crate::log_dev!("[tweakxl-hotreload] arquivo de tweak modificado → recarga sem empilhar");
+        crate::log_dev!("[tweaks-hotreload] arquivo de tweak modificado → recarga sem empilhar");
         recarregar_tweaks();
     }
 }
@@ -606,12 +605,12 @@ pub(crate) mod testes {
     use crate::arquivos_do_jogo::{PatchDeRecurso, TabelaDePatches, PATCHES_DE_RECURSO, PATCHES_DE_RECURSO_ATIVOS, A17_PROP_COMPONENTS, ESPERA_DE_PATCH_ATIVA, ESPERAS_DE_PATCH};
     use std::sync::atomic::Ordering;
 
-    /// As tabelas que a carga do ArchiveXL grava são do processo de teste inteiro, e a recarga com `substituir` troca todas de uma vez: todo teste que
+    /// As tabelas que a carga dos `.xl` grava são do processo de teste inteiro, e a recarga com `substituir` troca todas de uma vez: todo teste que
     /// grava ou confere uma delas segura esta trava, ou a recarga de outro teste a esvazia no meio da asserção.
-    static TRAVA_DAS_TABELAS_DO_ARCHIVEXL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    static TRAVA_DAS_TABELAS_XL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    pub(crate) fn travar_tabelas_do_archivexl() -> std::sync::MutexGuard<'static, ()> {
-        TRAVA_DAS_TABELAS_DO_ARCHIVEXL.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    pub(crate) fn travar_tabelas_xl() -> std::sync::MutexGuard<'static, ()> {
+        TRAVA_DAS_TABELAS_XL.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Pasta do teste em `temp_dir`, vazia; o teste a apaga por caminho explícito no fim.
@@ -684,37 +683,37 @@ pub(crate) mod testes {
 
     #[test]
     fn recarga_sem_a_tabela_de_resource_patch_desliga_os_patches() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         // Carga anterior com 1 patch ligado e 1 espera no `Deserialize`; a gravação do boot apaga o arquivo quando nenhum mod gera linha, e a
         // recarga não o acha.
-        *PATCHES_DE_RECURSO.write().expect("tabela do #17") =
+        *PATCHES_DE_RECURSO.write().expect("tabela de patches de recurso") =
             TabelaDePatches::nova(vec![PatchDeRecurso { mod_id: "m".into(), patch: 1, alvo: 2, props: A17_PROP_COMPONENTS, token: [0; 2], alvo_token: [0; 2], app: false }]);
         PATCHES_DE_RECURSO_ATIVOS.store(true, Ordering::Relaxed);
         *ESPERAS_DE_PATCH.write().expect("esperas do 51k") = Some(std::collections::HashMap::from([(2u64, vec![1u64])]));
         ESPERA_DE_PATCH_ATIVA.store(true, Ordering::Relaxed);
         let red4 = std::env::temp_dir().join(format!("bwms-teste-sem-resource-patch-{}", std::process::id()));
         unsafe { super::carregar_resource_patch(&red4) };
-        assert!(PATCHES_DE_RECURSO.read().expect("tabela do #17").patches.is_empty());
+        assert!(PATCHES_DE_RECURSO.read().expect("tabela de patches de recurso").patches.is_empty());
         assert!(!PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed));
         assert!(ESPERAS_DE_PATCH.read().expect("esperas do 51k").is_none(), "a espera do patch sai com a tabela");
         assert!(!ESPERA_DE_PATCH_ATIVA.load(Ordering::Relaxed));
     }
 
     /// `apply-03`, a fiação: a carga contra uma pasta sem nenhuma tabela. Sem `substituir` (o boot) nada muda, e as linhas gravadas antes da carga (o
-    /// `RegisterLink` do `OnLoad`) ficam. Com `substituir` (o `ArchiveXL.Reload`) cada tabela esvazia, porque a gravação
+    /// `RegisterLink` do `OnLoad`) ficam. Com `substituir` (o `Reload` da fachada) cada tabela esvazia, porque a gravação
     /// do boot apaga o arquivo de que nenhum mod gera linha; do journal fica só o mesclado.
     #[test]
     fn carga_sem_arquivos_so_esvazia_as_tabelas_na_recarga() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let red4 = pasta_vazia("sem-tabelas");
         semear(&red4);
 
-        super::carregar_tabelas_do_archivexl(&red4, false);
+        super::carregar_tabelas_xl(&red4, false);
         let (tabelas, journals) = semeadas();
         assert!(tabelas.iter().all(|(_, tem)| *tem), "o boot sem arquivo não mexe: {tabelas:?}");
         assert_eq!(journals, [JOURNAL_MESCLADO, JOURNAL_PEDIDO]);
 
-        super::carregar_tabelas_do_archivexl(&red4, true);
+        super::carregar_tabelas_xl(&red4, true);
         let (tabelas, journals) = semeadas();
         assert!(tabelas.iter().all(|(_, tem)| !*tem), "a recarga sem arquivo esvazia: {tabelas:?}");
         assert_eq!(journals, [JOURNAL_MESCLADO], "o pedido e não mesclado sai; o mesclado está na árvore viva");
@@ -727,14 +726,14 @@ pub(crate) mod testes {
     /// arquivo, esvaziam: a recarga rodou.
     #[test]
     fn recarga_com_resfixes_ilegivel_mantem_as_duas_tabelas_do_fix() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let red4 = pasta_vazia("resfixes-ilegivel");
         semear(&red4);
         let resfixes = red4.join(bwms_primitives::tabelas::RESFIXES.arquivo);
         std::fs::create_dir(&resfixes).expect("pasta no lugar da tabela");
         assert!(std::fs::read_to_string(&resfixes).is_err_and(|e| e.kind() != std::io::ErrorKind::NotFound));
 
-        super::carregar_tabelas_do_archivexl(&red4, true);
+        super::carregar_tabelas_xl(&red4, true);
         let (tabelas, _) = semeadas();
         for (nome, tem) in tabelas {
             assert_eq!(tem, nome.starts_with("fix de "), "{nome}: {tabelas:?}");
@@ -762,7 +761,7 @@ pub(crate) mod testes {
 
     #[test]
     fn carga_do_resfixes_so_com_paths_fica_com_o_ultimo_sem_o_fix_de_nomes() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let red4 = pasta_vazia("resfixes-paths");
         let resfixes = red4.join(bwms_primitives::tabelas::RESFIXES.arquivo);
         std::fs::write(
@@ -778,22 +777,22 @@ pub(crate) mod testes {
             crate::corpo_e_rosto::CUST_FIX_CAMINHOS.read().expect("fix de caminhos").as_ref().map(|m| m.get(&h("base.app")).cloned().unwrap_or_default())
         };
 
-        super::carregar_tabelas_do_archivexl(&red4, false);
+        super::carregar_tabelas_xl(&red4, false);
         assert_eq!(caminhos_de_base(), Some(vec![(h("antigo.app"), h("mod2.app"))]));
         assert!(crate::aparencia::FIXES_DE_NOME_DO_MESH.read().expect("fix de nomes").is_none());
 
         std::fs::remove_file(&resfixes).expect("tabela do teste");
-        super::carregar_tabelas_do_archivexl(&red4, true);
+        super::carregar_tabelas_xl(&red4, true);
         assert_eq!(caminhos_de_base(), Some(Vec::new()));
 
         std::fs::remove_dir(&red4).expect("pasta do teste");
     }
 
-    /// `apply-03`, a ponta: a native `ArchiveXL.Reload` recarrega com `substituir`. No processo de teste, a pasta das tabelas é a do executável do
+    /// `apply-03`, a ponta: a native `Reload` da fachada recarrega com `substituir`. No processo de teste, a pasta das tabelas é a do executável do
     /// teste (`crate::dylib_dir`), sem nenhuma tabela: o par de `RegisterLink` e o resto do que `semear` grava saem.
     #[test]
     fn native_reload_substitui_as_tabelas() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let red4 = std::path::PathBuf::from(crate::dylib_dir().expect("pasta do executável do teste"));
         for nome in bwms_primitives::tabelas::TODAS.map(|t| t.arquivo) {
             assert!(!red4.join(nome).exists(), "{nome} em {}: o teste supõe a pasta sem tabela", red4.display());
@@ -815,7 +814,7 @@ pub(crate) mod testes {
     #[test]
     fn journal_com_substituir_fica_com_o_arquivo_e_com_o_mesclado() {
         use crate::mundo::{journal_tabela, JOURNAL_MODS};
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         let dir = pasta_vazia("journal");
         let (dois, b_e_c, so_c, ausente) = (dir.join("dois.txt"), dir.join("b_e_c.txt"), dir.join("so_c.txt"), dir.join("ausente.txt"));
         std::fs::write(&dois, "# bwms-journal\nm1 | mod\\a.journal\nm2 | mod\\b.journal\n").expect("tabela com a e b");

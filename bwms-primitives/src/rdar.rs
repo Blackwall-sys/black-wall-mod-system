@@ -2,7 +2,7 @@
 //! confere o arquivo antes de entregá-lo ao motor (`archive_valido`, em `cp77-console/src/arquivos_do_jogo`) e acha os recursos repetidos
 //! entre mods da pasta `Mods/` (`hashes_do_archive`, no mesmo módulo), e o `bwms archive` lê o índice (`bwms/src/archive/archive.rs`). Cada
 //! um soma a regra própria por cima: o runtime, a do assert do motor (versão, índice alinhado, teto de recursos); o `bwms archive`, a do
-//! WolvenKit (tamanho declarado, teto do índice). Sem `panic` e sem alocação: roda no dylib público.
+//! formato (tamanho declarado, teto do índice). Sem `panic` e sem alocação: roda no dylib público.
 
 /// O primeiro u32 (little-endian) do `.archive`: os bytes `RDAR`.
 pub const RDAR_MAGIC: u32 = 0x5241_4452;

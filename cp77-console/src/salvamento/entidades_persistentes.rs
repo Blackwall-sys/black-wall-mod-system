@@ -1,4 +1,4 @@
-//! Codeware `#153`: entidade criada por mod sobrevive a salvar e carregar.
+//! Entidade criada por mod sobrevive a salvar e carregar.
 //!
 //! O `DynamicEntitySpec` já tem `persistSpawn`/`persistState` e, até aqui, os dois campos não faziam
 //! nada. A referência do Windows resolve isso serializando as entidades DENTRO do save

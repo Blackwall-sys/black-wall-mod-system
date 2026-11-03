@@ -191,7 +191,7 @@ pub(crate) unsafe extern "C" fn tramp_fire_start(_c: *mut c_void, frame: *mut c_
     write_bool_ret(out, true);
 }
 
-/// `BwmsGetLaunchArg(nome) -> String` (RED4ext `#458`): valor do argumento de lançamento, vazio se não veio ou se veio sem valor.
+/// `BwmsGetLaunchArg(nome) -> String`: valor do argumento de lançamento, vazio se não veio ou se veio sem valor.
 pub(crate) unsafe extern "C" fn tramp_launch_arg(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let (_args, strings) = rtti::read_params_consuming_with_strings(current_native_func(), frame);
     let nome = strings.first().cloned().flatten().unwrap_or_default();
@@ -220,7 +220,7 @@ pub(crate) unsafe extern "C" fn tramp_poller_tick(_c: *mut c_void, frame: *mut c
     crate::log_dev!("[poller-tick] {label} n={n}");
 }
 
-/// Codeware `#153`: `BwmsSaveCarregado(nome: String)` — o menu de load informa qual save entra, e
+/// `BwmsSaveCarregado(nome: String)` — o menu de load informa qual save entra, e
 /// o BWMS usa o nome pra achar o arquivo de specs (que vive fora do save).
 pub(crate) unsafe extern "C" fn tramp_save_carregado(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
@@ -465,7 +465,7 @@ enum DecisaoDaAlavanca {
 fn decidir_alavanca(o: OrdemNoMenu, pedida_ha_s: u64) -> DecisaoDaAlavanca {
     match o {
         OrdemNoMenu::OnApplyFeito | OrdemNoMenu::AlavancaPrimeiro => DecisaoDaAlavanca::Dispara,
-        // O despacho é síncrono e curto (3 `OnApply` do Equipment-EX: ~4 s com o log de dev); disparar no meio dele é o caso que travou.
+        // O despacho é síncrono e curto (3 `OnApply` de mod: ~4 s com o log de dev); disparar no meio dele é o caso que travou.
         OrdemNoMenu::OnApplyEmCurso => DecisaoDaAlavanca::Adia,
         OrdemNoMenu::Aberta if pedida_ha_s < ALAVANCA_ESPERA_MAX_S => DecisaoDaAlavanca::Adia,
         OrdemNoMenu::Aberta => DecisaoDaAlavanca::DisparaECancelaOnApply,
@@ -646,7 +646,7 @@ mod ordem_no_menu_teste {
     }
 }
 
-/// `GameSessionEvent extends CallbackSystemEvent` — `cw-controller-session` (2026-07-18, sessão
+/// `GameSessionEvent extends CallbackSystemEvent` — controller de sessão (2026-07-18, sessão
 /// `handle-ctor-re`, 6ª rodada). Fonte real: `public native class GameSessionEvent extends
 /// CallbackSystemEvent { public native func IsRestored() -> Bool; public native func IsPreGame()
 /// -> Bool }` (`GameSessionEvent.reds`) — dados reais (`GameSessionEvent.hpp` vendorizado):
@@ -757,7 +757,7 @@ pub(crate) unsafe fn session_ready_tick() {
     use crate::inicio::sessao_do_jogo as sessao;
     for (restored, fim_pendente) in pendentes {
         // O mundo anterior saiu sem `Session/End` (sem `OnWorldDetached` do jogo nem despawn visto no tick): o dele vem antes do `Ready` deste,
-        // como o `OnWorldDetached` da referência entre o mundo do menu e o da carga de save.
+        // entre o mundo do menu e o da carga de save.
         if fim_pendente {
             let anterior = SESSAO_DO_ULTIMO_SPAWN.load(std::sync::atomic::Ordering::Relaxed);
             let (pg, rs) = (anterior & 1 != 0, anterior & 2 != 0);
@@ -775,7 +775,7 @@ pub(crate) unsafe fn session_ready_tick() {
             d.push((pregame, restored, k));
         }
         crate::veredito_dev!("[c129] spawn do jogador: pregame={pregame} restored={restored} → Session/Ready com {k} callback(s)");
-        // Carga de save: o C#129 não despacha (a fonte é o `OnGameRestored`, que com o despachante mudo não chega). A reserva entrega aqui,
+        // Carga de save: o hook do spawn não despacha (a fonte é o `OnGameRestored`, que com o despachante mudo não chega). A reserva entrega aqui,
         // fora do `C129_DESPACHOS`: o `cp77_tick` só tem a dele antes da 1ª presença do jogador (`in_crash_window`), que é no mundo do menu.
         if restored && sessao::pela_reserva(sessao::SESSAO_PRONTA, "Session/Ready") {
             let n = disparar_evento_de_sessao("Session/Ready", pregame, true);

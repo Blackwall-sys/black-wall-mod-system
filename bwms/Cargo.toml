@@ -28,10 +28,8 @@ path = "src/bin/bwms-helper.rs"
 bwms-primitives = { path = "../bwms-primitives" }
 
 [features]
-# `kraken`: o build.rs compila/linka o ooz (../_referencia-de-terceiro/ooz) com o ooz_shim.cpp: o `bwms archive` extrai segmentos
-# comprimidos e lê a usedhashes.kark, e o `bwms tweak` descomprime a tweakdbstr.kark (lista de nomes). OPT-IN: zero código de
-# terceiro no build padrão. `cargo build --release` sozinho é 100% puro-std (extrai só o que não é comprimido, lê listas já
-# descomprimidas). `--features kraken` pra descomprimir (precisa de clang++ + fonte do ooz).
+# `kraken`: declarada para o `cfg` de `src/archive/kraken.rs`. Quem a liga é o crate de dev `bwms-dev/bwms-kraken`, que traz o
+# descompressor; ligada aqui, o link falha. O build público extrai só o que não é comprimido.
 default = []
 kraken = []
 

@@ -1,82 +1,75 @@
-//! Parser do formato-texto NATIVO `.tweak` do TweakXL (item TweakXL `#48`, catálogo
-//! `CATALOGO-EXAUSTIVO-TWEAKXL.md`) — a 3ª via de autoria de mod, distinta do YAML já coberto
-//! por `yaml.rs`/`tweakxl/mod.rs`. Gramática espelhada 1:1 de `enablers/TweakXL/src/Red/TweakDB/
-//! Source/Grammar.hpp` (PEG via `tao::pegtl` na fonte real) + semântica das `ParseAction` reais
-//! de `Parser.cpp` (lido por completo, 2026-08-11 — nunca tinha sido lido antes desta sessão,
-//! só a gramática/tokenização). Produz a MESMA `Vec<Op>` que o pipeline YAML já consome
+//! Parser do formato-texto NATIVO `.tweak` do TweakDB (item `#48` do catálogo exaustivo)
+//! — a 3ª via de autoria de mod, distinta do YAML já coberto
+//! por `yaml.rs`/`tweaks/mod.rs`. Produz a MESMA `Vec<Op>` que o pipeline YAML já consome
 //! (`operacoes::Op`/`EditOp`) — reusa `apply_ops_runtime` existente sem duplicar nada runtime.
 //!
-//! Mapeamento semântico (confirmado lendo as `ParseAction` reais, não suposição):
-//! - `TweakGroup{name, base}` (sem inline) → `base` não-vazio vira `Op::Clone{record:name,base}`
+//! Mapeamento semântico:
+//! - grupo `{name, base}` (sem inline) → `base` não-vazio vira `Op::Clone{record:name,base}`
 //!   (equivalente a `$base` do YAML); sem `base`, edita o record já existente direto (mesmo
 //!   comportamento de um record YAML top-level sem `$base`/`$type`).
-//! - `TweakFlat{name, operation, values, isArray}` → `group.name` vira o `flat` de 1+ `Op::Edit`.
+//! - flat `{name, operation, values, isArray}` → `group.name` vira o `flat` de 1+ `Op::Edit`.
 //!   `Assign` sempre 1 op; `Append`/`Remove` com valor-array (`tags[] += [A,B,C];`) viram VÁRIOS
 //!   `Op::Edit{EditOp::Append(X)}` (1 por elemento) — o `.tweak` real permite múltiplos elementos
 //!   por statement (distinto do YAML, que tageia item-por-item); componível 1:1 na `EditOp`
 //!   existente sem precisar de variante nova.
-//! - `TweakValue` escalar (bool/number/string) → texto cru (sufixo `f` de float REMOVIDO, já
+//! - valor escalar (bool/number/string) → texto cru (sufixo `f` de float REMOVIDO, já
 //!   que o resto do pipeline espera número puro parseável); struct (`Vector3` etc.) → componentes
 //!   NUMÉRICOS comma-joined (mesmo formato `"f,f,…"` que `struct_map_to_scalar`/`encode_value`
 //!   já esperam do lado YAML).
 //!
-//! Record em linha (`{ … }` como valor ou item de array, com `: Base` opcional depois) vira record com nome sintético (o
-//! `ComposeInlineName` do TweakXL); sem base, a classe vai como `@Pai.prop` para o runtime resolver pela propriedade. `package` prefixa o
+//! Record em linha (`{ … }` como valor ou item de array, com `: Base` opcional depois) vira record com nome sintético
+//! (o mesmo dos records inline do YAML); sem base, a classe vai como `@Pai.prop` para o runtime resolver pela propriedade. `package` prefixa o
 //! nome dos grupos e, com os `using`, dá os candidatos da base sem ponto (`?Base|pacote.Base`), que o runtime resolve (tipo de record,
-//! record existente) como o `RedReader::ResolveGroupState`.
+//! record existente).
 //!
-//! Fora do escopo (erro claro, não parse silencioso errado — mesma filosofia de `tweakxl/mod.rs`):
-//! **pacotes de schema (`RTDB`) / query (`Query`)** — nenhum mod real do Nexus usa `.tweak`
-//! ainda (achado da triagem original, 2026-08-09: "não havia nenhum arquivo `.tweak` real
+//! Fora do escopo (erro claro, não parse silencioso errado — mesma filosofia de `tweaks/mod.rs`):
+//! **pacotes de schema (`RTDB`) / query (`Query`)** — nenhum mod real usa `.tweak`
+//! ainda (achado da triagem, 2026-08-09: "não havia nenhum arquivo `.tweak` real
 //! disponível pra testar"), então a prioridade foi cobrir o caso comum (mod regular: `package`
 //! opcional, `using` opcional, groups com/sem herança, flats escalar/struct/array com `=`/`+=`/
 //! `-=`) com fidelidade total, em vez de arriscar mapear semântica de schema/query sem exemplo
 //! real pra validar contra (mesma disciplina já aplicada a `$dlc`/`$game`/`$instances`).
 
+use std::collections::HashMap;
+
 use crate::operacoes::{EditOp, Op};
 
 /// Entrada principal: parseia uma fonte `.tweak` inteira em uma lista de `Op`, na MESMA
-/// representação que `tweakxl::interpret` produz a partir de YAML.
+/// representação que `tweaks::interpret` produz a partir de YAML.
 pub fn parse(src: &str) -> Result<Vec<Op>, String> {
     parse_com_origem(src, "")
 }
 
-/// Como [`parse`], com o caminho do arquivo: ele entra no nome sintético dos records em linha (o `m_path` do `ComposeInlineName`).
+/// Como [`parse`], com o caminho do arquivo: ele entra no nome sintético dos records em linha.
 pub fn parse_com_origem(src: &str, origem: &str) -> Result<Vec<Op>, String> {
-    // BOM UTF-8 no início: fica fora do texto, senão gruda no 1º identificador.
-    let src = src.strip_prefix('\u{feff}').unwrap_or(src);
-    let mut p = P::new(src);
+    let mut p = P::new(src.strip_prefix('\u{feff}').unwrap_or(src));
     p.origem = origem.to_string();
     p.skip_ws();
-
     if p.eat_keyword("package") {
         p.skip_ws1()?;
-        let name = p.parse_package_id()?;
-        p.skip_ws();
-        if name == "RTDB" || name == "Query" {
+        let pacote = p.parse_package_id()?;
+        if pacote == "RTDB" || pacote == "Query" {
             return Err(format!(
-                "package '{name}' (schema/query) não suportado — fora do escopo desta implementação"
+                "package {pacote}: é pacote de schema/consulta do TweakDB, não de mod; troque `package {pacote}` pelo nome do seu mod"
             ));
         }
-        p.usings.push(name.clone());
-        p.package = Some(name);
+        p.package = Some(pacote);
+        p.skip_ws();
     }
     if p.eat_keyword("using") {
         p.skip_ws1()?;
-        let u = p.parse_package_id()?;
-        p.usings.push(u);
+        let primeiro = p.parse_package_id()?;
+        p.usings.push(primeiro);
         p.skip_ws();
         while p.eat_char(b',') {
             p.skip_ws();
-            let u = p.parse_package_id()?;
-            p.usings.push(u);
+            let pacote = p.parse_package_id()?;
+            p.usings.push(pacote);
             p.skip_ws();
         }
     }
-
-    // Flat solto no arquivo (`float baseSpeed = 10.f;` dos `.tweak` da CDPR): o `RedReader` aplica depois de todos os grupos, com o
-    // `package` como pai, e não aplica sem `package`.
     let mut ops = Vec::new();
+    // Flat solto é do `package`; entra depois de todos os grupos. Sem `package` não tem record dono: é lido (erro de sintaxe vale) e fica fora.
     let mut soltos = Vec::new();
     loop {
         p.skip_ws();
@@ -85,14 +78,16 @@ pub fn parse_com_origem(src: &str, origem: &str) -> Result<Vec<Op>, String> {
         }
         if p.e_grupo() {
             p.parse_group(&mut ops)?;
-        } else {
-            let pai = p.package.clone().unwrap_or_default();
-            p.parse_flat(&pai, &mut soltos)?;
+            continue;
+        }
+        let pai = p.package.clone().unwrap_or_default();
+        let mut do_flat = Vec::new();
+        p.parse_flat(&pai, &mut do_flat)?;
+        if p.package.is_some() {
+            soltos.append(&mut do_flat);
         }
     }
-    if p.package.is_some() {
-        ops.extend(soltos);
-    }
+    ops.append(&mut soltos);
     Ok(ops)
 }
 
@@ -107,16 +102,16 @@ struct P<'a> {
     s: &'a [u8],
     i: usize,
     /// Tipo de flat do motor declarado no flat em leitura (`int` → `Int32`, `fk<X>[]` → `array:TweakDBID`): com ele o flat nasce se não
-    /// existir (`RedReader::HandleFlat` usa o tipo declarado pra prop que o record não tem).
+    /// existir (o tipo declarado vale pra prop que o record não tem).
     tipo: Option<String>,
-    /// `package` do arquivo: prefixo do nome dos grupos (`ComposeGroupName`).
+    /// `package` do arquivo: prefixo do nome dos grupos.
     package: Option<String>,
-    /// O `package` e os `using`, nessa ordem: onde a base sem ponto é procurada.
+    /// Os `using` do cabeçalho.
     usings: Vec<String>,
     /// Caminho do arquivo, no nome dos records em linha.
     origem: String,
-    /// Contador por hash do nome em linha (o `m_inlineIndexSuffix` do TweakXL).
-    contador_em_linha: std::collections::HashMap<String, u32>,
+    /// Nomes de item de array em linha já dados neste arquivo (`tweaks::nome_de_record_em_linha`).
+    itens_em_linha: HashMap<String, u32>,
 }
 
 fn is_name_first(b: u8) -> bool {
@@ -128,7 +123,7 @@ fn is_name_other(b: u8) -> bool {
 
 impl<'a> P<'a> {
     fn new(s: &'a str) -> Self {
-        P { s: s.as_bytes(), i: 0, tipo: None, package: None, usings: Vec::new(), origem: String::new(), contador_em_linha: std::collections::HashMap::new() }
+        P { s: s.as_bytes(), i: 0, tipo: None, package: None, usings: Vec::new(), origem: String::new(), itens_em_linha: HashMap::new() }
     }
     fn at_end(&self) -> bool {
         self.i >= self.s.len()
@@ -227,8 +222,7 @@ impl<'a> P<'a> {
 
     /// `path`/`group_path`/`group_id` da gramática real são, na prática, todos "identificador
     /// com pontos permitidos no meio" — nunca precisamos distinguir package-qualificado de
-    /// não-qualificado pra tradução em `Op` (o nome vira o `record`/`base` como está, cru,
-    /// igual ao que `Parser.cpp::group_name`/`group_base` fazem — `in.string()` direto).
+    /// não-qualificado pra tradução em `Op` (o nome vira o `record`/`base` como está, cru).
     fn parse_path(&mut self) -> Result<String, String> {
         let start = self.i;
         match self.peek() {
@@ -345,18 +339,28 @@ impl<'a> P<'a> {
         Ok(())
     }
 
-    /// A base de `X : Base` como o `RedReader::ResolveGroupState`: com ponto (e sem ser nome de tipo `…_Record`) é record; sem ponto pode
-    /// ser tipo de record ou record do `package`/dos `using`, o que só o TweakDB vivo diz — vai como `?Base|pacote.Base|…`, nessa ordem.
+    /// O texto do `base` de `Op::Clone` para a base `base` escrita em `X : Base` (grupo ou record em linha). Nome com ponto é record
+    /// completo; sem ponto (ou tipo `_Record`) vira os candidatos `?base|pacote.base|using.base…`, que o runtime resolve em ordem (tipo de
+    /// record, depois record existente).
     fn base_a_resolver(&self, base: &str) -> String {
         if base.contains('.') && !base.ends_with("_Record") {
             return base.to_string();
         }
-        std::iter::once(format!("?{base}")).chain(self.usings.iter().map(|u| format!("{u}.{base}"))).collect::<Vec<_>>().join("|")
+        let mut candidatos = format!("?{base}");
+        for pacote in self.package.iter().chain(&self.usings) {
+            candidatos.push_str(&format!("|{pacote}.{base}"));
+        }
+        candidatos
+    }
+
+    /// O nome do record em linha valor do flat `pai` (`indice` = -1) ou item `indice` (≥ 0) de array, com a base escrita depois do `}`
+    /// (`None` sem base). A base entra como escrita, sem [`P::base_a_resolver`]: é o que dá o mesmo nome que o `.yaml`.
+    fn nome_em_linha(&mut self, pai: &str, base: Option<&str>, indice: i32) -> String {
+        super::nome_de_record_em_linha(&self.origem, pai, base.unwrap_or("@"), indice, &mut self.itens_em_linha)
     }
 
     /// Record em linha (`{ … }` com `: Base` opcional depois), valor do flat `pai` ou item `indice` (≥ 0) de array: as operações dele e o
-    /// nome sintético (`ComposeInlineName`: `pai$FNV1a32(origem|pai|tipo[|indice|contador])`). Sem base, a classe vai como `@pai` (o tipo
-    /// da propriedade, resolvido no runtime).
+    /// nome sintético ([`P::nome_em_linha`]). Sem base, a classe vai como `@pai` (o tipo da propriedade, resolvido no runtime).
     fn parse_em_linha(&mut self, pai: &str, indice: i32, ops: &mut Vec<Op>) -> Result<String, String> {
         let inicio = self.i;
         self.expect_char(b'{')?;
@@ -388,14 +392,7 @@ impl<'a> P<'a> {
             None
         };
         let fim = self.i;
-        let mut h = format!("{}|{pai}|{}", self.origem, base.as_deref().unwrap_or("@"));
-        if indice >= 0 {
-            h.push_str(&format!("|{indice}|"));
-            let c = self.contador_em_linha.entry(h.clone()).or_insert(0);
-            *c += 1;
-            h.push_str(&c.to_string());
-        }
-        let nome = format!("{pai}${:08X}", crate::fnv1a32(h.as_bytes()));
+        let nome = self.nome_em_linha(pai, base.as_deref(), indice);
         match &base {
             Some(b) => ops.push(Op::Clone { record: nome.clone(), base: self.base_a_resolver(b) }),
             None => ops.push(Op::Create { record: nome.clone(), class: format!("@{pai}") }),
@@ -673,7 +670,7 @@ fn op_tipada(flat: &str, tipo: &Option<String>, op: EditOp) -> Op {
     }
 }
 
-/// O tipo de flat do motor de cada palavra de tipo do `.tweak` (`Grammar.hpp` + `RedReader::GetFlatTypeName`).
+/// O tipo de flat do motor de cada palavra de tipo do `.tweak`.
 fn tipo_de_flat(palavra: &str) -> Option<&'static str> {
     Some(match palavra {
         "int" => "Int32",
@@ -809,7 +806,7 @@ mod tests {
     use super::*;
 
     /// Formata a lista de ops pra string legível, mesmo padrão de teste já usado em
-    /// `tweakxl/mod.rs` (evita precisar de `Debug`/`PartialEq` em `Op`/`EditOp`, que não derivam).
+    /// `tweaks/mod.rs` (evita precisar de `Debug`/`PartialEq` em `Op`/`EditOp`, que não derivam).
     fn fmt(ops: &[Op]) -> Vec<String> {
         ops.iter()
             .map(|o| match o {
@@ -835,7 +832,7 @@ mod tests {
     fn run(src: &str) -> Vec<String> {
         fmt(&parse(src).expect("parse falhou"))
     }
-    /// `Op` não deriva `Debug` (mesma convenção de `tweakxl/mod.rs`) — `.unwrap_err()` exigiria
+    /// `Op` não deriva `Debug` (mesma convenção de `tweaks/mod.rs`) — `.unwrap_err()` exigiria
     /// `Vec<Op>: Debug` pro branch Ok, então extrai o erro manualmente.
     fn err_of(src: &str) -> String {
         match parse(src) {
@@ -852,7 +849,7 @@ mod tests {
         assert_eq!(
             s,
             vec![
-                // `package` prefixa o nome do grupo (`ComposeGroupName` do `RedReader`).
+                // `package` prefixa o nome do grupo.
                 "clone MyMod.Items.MyWeapon <- Items.Preset_Lexington_Default",
                 "edit MyMod.Items.MyWeapon.damage = 50",
                 "edit MyMod.Items.MyWeapon.attackRadius = 3.5",
@@ -970,7 +967,7 @@ mod tests {
     }
 
     #[test]
-    /// Record em linha da wiki do TweakXL (RED Tweaks, "Inline records"): como valor, sem tipo (o runtime resolve pela propriedade), e em
+    /// Record em linha: como valor, sem tipo (o runtime resolve pela propriedade), e em
     /// array, com `: Tipo`; o nome sintético é o mesmo para a mesma origem.
     fn record_em_linha_como_valor_e_em_array() {
         let s = run("Items.A {\n  baseItem = { damage = 1; };\n}\n");
@@ -986,7 +983,7 @@ mod tests {
         assert_ne!(fmt(&parse_com_origem("X { y = { z = 1; }; }", "a.tweak").unwrap())[0], fmt(&parse_com_origem("X { y = { z = 1; }; }", "b.tweak").unwrap())[0]);
     }
 
-    /// `package` e `using` dão os candidatos da base sem ponto, na ordem do `RedReader` (o package primeiro).
+    /// `package` e `using` dão os candidatos da base sem ponto (o package primeiro).
     #[test]
     fn package_e_using_na_base_sem_ponto() {
         let s = run("package Attacks\nusing AttackModifier\n\nGenjiReflect : BaseExplosion {\n  float x = 1;\n}\n");
@@ -1026,7 +1023,7 @@ mod tests {
         assert!(parse("Items.A {\n  damage = 1\n}\n").is_err());
     }
 
-    /// Diferença 1 no `.tweak`: o tipo declarado vai na operação e o flat nasce com ele se o record não tiver a prop (`RedReader`).
+    /// Diferença 1 no `.tweak`: o tipo declarado vai na operação e o flat nasce com ele se o record não tiver a prop.
     #[test]
     fn tipo_declarado_vai_na_operacao() {
         let ops = parse("Items.A {\n  int bwmsNivel = 3;\n  float[] bwmsPesos = [1.5, 2];\n  fk<Item>[] bwmsIds += [\"Items.B\"];\n  EulerAngles giro = (10, 20, 30);\n  damage = 4;\n}\n").unwrap();

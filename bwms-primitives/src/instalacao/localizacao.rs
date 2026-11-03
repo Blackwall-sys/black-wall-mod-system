@@ -1,15 +1,14 @@
-//! ArchiveXL `#45` — quais códigos de idioma o `.xl` pode declarar. Reimplementado da semântica de
-//! `Localization/Language.cpp`. Nada copiado.
+//! Quais códigos de idioma o `.xl` pode declarar.
 //!
 //! Consumidor: `xl::parse_localization`, que tira do `.xl` todo código que não é idioma de jogador
 //! antes de a tabela do runtime ser emitida.
 //!
 //! # 20 códigos, 19 idiomas: o `db-db` fica de fora de propósito
 //!
-//! Os mapas de path do original têm **20** códigos; o `IsKnown` lista **19**. O `db-db` (locale de
+//! Os mapas de path têm **20** códigos; os idiomas conhecidos são **19**. O `db-db` (locale de
 //! debug) resolve a partir de um path mas NÃO é idioma de jogador. Uniformizar em 20 faria o debug
 //! ser aceito como idioma de verdade e, na tabela do runtime, virar a reserva do mod quando declarado
-//! primeiro. A comparação diferencia caixa, como o `IsKnown` por CName do original: `PT-BR` não é
+//! primeiro. A comparação diferencia caixa, como a comparação por CName: `PT-BR` não é
 //! idioma.
 
 /// Os 20 códigos que aparecem nos paths de localização.

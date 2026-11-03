@@ -1,5 +1,5 @@
-// bwms-resourcedepot.reds — Codeware `#16`/`#198` (`ResourceDepot`): `ResourceExists`/`ArchiveExists`, o cache de recursos vivos do
-// motor, `RemoveResourceFromCache` e `LoadResource`, com nomes do BWMS (a classe `ResourceDepot` com os nomes do Codeware e o
+// bwms-resourcedepot.reds — `ResourceDepot`: `ResourceExists`/`ArchiveExists`, o cache de recursos vivos do
+// motor, `RemoveResourceFromCache` e `LoadResource`, com nomes do BWMS (a classe `ResourceDepot` com os nomes que os mods chamam e o
 // `GameInstance.GetResourceDepot()` estão em `ponte-nomes-windows.reds`).
 native func BwmsResourceExists(path: String) -> Bool
 native func BwmsArchiveExists(name: String) -> Bool
@@ -12,12 +12,12 @@ native func BwmsArchiveExists(name: String) -> Bool
 native func BwmsDepotIsResourceLoaded(path: String) -> Bool
 native func BwmsDepotLoadedResourceClass(path: String) -> String
 
-// `BwmsDepotRemoveResourceFromCache(path)` — o `RemoveResourceFromCache` do Codeware: `ResourceBank::ForgetResource`
+// `BwmsDepotRemoveResourceFromCache(path)` — o `RemoveResourceFromCache`: `ResourceBank::ForgetResource`
 // no bank do loader. Tira o recurso do cache e do mapa do bank; o próximo load do path lê de novo do archive. `path` é o hash
 // FNV-1a64 do ResRef (`BwmsResRefToHash`). `false` só quando não há loader; o log diz se o bank tinha o recurso.
 native func BwmsDepotRemoveResourceFromCache(path: Uint64) -> Bool
 
-// `BwmsDepotLoadResource(path)` — o `ResourceDepot.LoadResource` do Codeware: pede a carga ao loader do motor e devolve
+// `BwmsDepotLoadResource(path)` — o `ResourceDepot.LoadResource`: pede a carga ao loader do motor e devolve
 // o `ResourceToken` (sem esperar; `WaitForJob()` ou `RegisterCallback` pra saber quando terminou). `null` sem loader.
 native func BwmsDepotLoadResourceToken(path: Uint64) -> Uint64
 

@@ -1,6 +1,6 @@
-// bwms-inksystem-layer-e-foco.reds — Codeware `#100` (`inkSystem`) com nomes BWMS: layer por nome e foco.
+// bwms-inksystem-layer-e-foco.reds — `inkSystem` com nomes BWMS: layer por nome e foco.
 //
-// `GetLayer(name)` do Codeware devolve o layer pela classe; aqui é composição sobre `BwmsInkSystemFindLayerIndexByClassName` e `BwmsInkSystemGetLayer`
+// `GetLayer(name)` devolve o layer pela classe: composição sobre `BwmsInkSystemFindLayerIndexByClassName` e `BwmsInkSystemGetLayer`
 // (handle do layer existente). Foco: `SetFocus(widget)`/`ResetFocus()` usam o `RequestSetFocus` vanilla do game controller do layer de notificações,
 // e o handler grava o widget em `InkSystem+0x2E8` no mesmo call.
 

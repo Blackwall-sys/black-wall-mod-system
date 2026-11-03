@@ -1,10 +1,10 @@
-// bwms-inksystem-layers.reds — Codeware `#100`/`#120` (`InkSystem.hpp`): os layers do `InkSystem` vivo. O singleton sai de
+// bwms-inksystem-layers.reds — os layers do `InkSystem` vivo. O singleton sai de
 // `ink_system()` (jogo/interface.rs), achado e guardado em cache.
 //
-// Navegação até os layers (offsets do header vendorizado `enablers/Codeware/src/Red/InkSystem.hpp`):
+// Navegação até os layers (offsets do `InkSystem`):
 //   InkSystem+0x380 = layerManagers: DynArray<SharedPtr<InkLayerManager>>
-//   layerManagers[0].instance = InkLayerManager* (o `GetLayerManager()` do Codeware)
-//   InkLayerManager+0x38 = layers: DynArray<Handle<inkLayer>> (o array que o `GetLayers()` do Codeware devolve)
+//   layerManagers[0].instance = InkLayerManager*
+//   InkLayerManager+0x38 = layers: DynArray<Handle<inkLayer>>
 //
 // `inkLayer`/`inkWorldLayer` não aparecem no corpus vanilla nem nos símbolos do binário: declará-los é a categoria do `CMesh`, que
 // derruba o bind. Por isso as natives devolvem `CName`/`Int32` (identidade, contagem, índice) e o handle do layer sai como
@@ -20,7 +20,7 @@ native func BwmsInkSystemFindWorldLayerIndex() -> Int32;
 // `GetClassName()` do handle. Índice fora do alcance ou ponteiro inválido devolve nulo.
 native func BwmsInkSystemGetLayer(index: Int32) -> ref<IScriptable>;
 
-// `BwmsInkSystemGetLayers()`: o `GetLayers()` do Codeware por composição sobre `BwmsInkSystemGetLayerCount` + `BwmsInkSystemGetLayer(i)`,
+// `BwmsInkSystemGetLayers()`: os layers por composição sobre `BwmsInkSystemGetLayerCount` + `BwmsInkSystemGetLayer(i)`,
 // no mesmo espaço de índice (`layerManagers[0]->layers`), com o retorno genérico do `GetLayer`.
 public func BwmsInkSystemGetLayers() -> array<ref<IScriptable>> {
     let result: array<ref<IScriptable>>;

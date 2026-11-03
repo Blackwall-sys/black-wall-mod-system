@@ -1,8 +1,6 @@
-//! Depot de recursos: o `resource.copy` do `.archive.xl` servido no nível do depot (ArchiveXL `#26`). A cópia é um recurso próprio — o loader
-//! cria token e instância pelo caminho da cópia — com os bytes do original: o `RequestResource` do depot (`0x10151a748`, entrada da vtable do
-//! `ResourceDepot`; depot `x0`, caminho `x1`, `x2`, handle devolvido por sret `x8`) lê o original quando pedem a cópia, e o `CheckResource`
-//! (`0x10151aa2c`, depot `x0`, caminho `x1`) diz que a cópia existe. O `resource.link` fica no loader (`selftest::reslink_*`), onde o pedido
-//! vira o recurso do alvo; o `CheckResource` responde pelos dois, como a união de mapeamentos da referência.
+//! Depot de recursos: o `resource.copy` do `.archive.xl`. Fatos do motor: `RequestResource` do depot (`0x10151a748`, entrada da
+//! vtable do `ResourceDepot`; depot `x0`, caminho `x1`, `x2`, handle devolvido por sret `x8`) e `CheckResource` (`0x10151aa2c`, depot `x0`, caminho
+//! `x1`, devolve u8).
 //!
 //! O mapa de recursos vivos também é lido aqui, só leitura: `depot_cache_buscar` devolve o recurso já carregado de um caminho, sem iniciar
 //! carga. O mapa fica em `+0x00` do bank do `ResourceLoader` (`[loader+0x48]`, `loader` = `[CARREGADOR_VM]`), o caminho do `FindToken`
@@ -20,7 +18,7 @@ const REQUEST_RESOURCE_VM: u64 = 0x1_0151_a748;
 static COPIAS_FILTRO: [AtomicU64; PALAVRAS_DO_FILTRO] = [const { AtomicU64::new(0) }; PALAVRAS_DO_FILTRO];
 /// Cópia → original (hashes de caminho), com a regra de toda entrada do `resource.copy` (`TabelaDeRedirecionamento`).
 pub(crate) static COPIAS: TabelaDeRedirecionamento = TabelaDeRedirecionamento::nova("depot", &COPIAS_FILTRO, &COPIAS_N);
-/// Quantas cópias há: o shim só sai do caminho direto com alguma.
+/// Quantas cópias há (a `TabelaDeRedirecionamento` mantém igual ao tamanho da tabela).
 static COPIAS_N: AtomicU64 = AtomicU64::new(0);
 /// Trampolins dos originais, publicados antes de o salto ser escrito (com as outras threads paradas).
 static ORIG_REQUEST: AtomicU64 = AtomicU64::new(0);
@@ -28,108 +26,121 @@ static ORIG_CHECK: AtomicU64 = AtomicU64::new(0);
 /// Pedidos de cópia servidos pelo original, pra conferência.
 pub(crate) static SERVIDAS: AtomicU64 = AtomicU64::new(0);
 
-/// Registra a cópia `copia` com os bytes de `original` por cima das que já estão.
+const CHECK_RESOURCE_VM: u64 = 0x1_0151_aa2c;
+
+/// Registra a cópia `copia` com os bytes de `original` (a regra de entrada é a da `TabelaDeRedirecionamento`: caminho nulo não entra, cópia
+/// repetida fica com o último original). `true` quando entrou.
 pub(crate) fn adicionar_copia(copia: u64, original: u64) -> bool {
-    COPIAS.acrescentar(copia, original)
+    if !COPIAS.acrescentar(copia, original) {
+        return false;
+    }
+    crate::log_dev!("[depot] +cópia {copia:#018x} <- {original:#018x} (tabela: {} cópias)", COPIAS_N.load(Ordering::Relaxed));
+    true
 }
 
+/// Original da cópia `copia`, ou `None`.
 pub(crate) fn original_de(copia: u64) -> Option<u64> {
     COPIAS.alvo(copia)
 }
 
-/// Põe em `saida` os apelidos de `path` pelas cópias, nos dois sentidos: o original quando `path` é cópia, e cada cópia quando `path` é o original. A
-/// cópia que também é chave de `resource.link` (`chaves_de_link`, um `RegisterLink` em runtime sobre ela) fica de fora: na referência o
-/// `s_mappings[aLink] = aTarget` do `RegisterLink` tira a cópia da união (`ResourceLink/Extension.cpp:277`).
+/// Apelidos de `path` pelas cópias, nos dois sentidos (a cópia dá o original, o original dá a cópia), em `saida`. A cópia que também é origem de
+/// link (`chaves_de_link`) responde só pelo link.
 pub(crate) fn apelidos_de_copia(path: u64, saida: &mut Vec<u64>, chaves_de_link: &[u64]) {
-    let Some(c) = COPIAS.ler() else { return };
-    for &(copia, original) in c.iter() {
-        let apelido = if copia == path {
-            original
-        } else if original == path {
-            copia
-        } else {
+    let Some(pares) = COPIAS.ler() else { return };
+    for &(copia, original) in pares.iter() {
+        if chaves_de_link.contains(&copia) {
             continue;
-        };
-        if !chaves_de_link.contains(&copia) {
-            saida.push(apelido);
+        }
+        if path == copia {
+            saida.push(original);
+        } else if path == original {
+            saida.push(copia);
         }
     }
 }
 
-/// Chamado pelo shim com o caminho pedido; devolve o do original quando é uma cópia.
+/// Caminho que o depot lê quando pedem `caminho`: o original quando é cópia, senão o próprio. O `RequestResource` monta token e instância para o
+/// caminho pedido e só os bytes saem do original.
 unsafe extern "C" fn caminho_servido(caminho: u64) -> u64 {
-    match original_de(caminho) {
-        Some(o) => {
+    match COPIAS.alvo(caminho) {
+        Some(original) => {
             SERVIDAS.fetch_add(1, Ordering::Relaxed);
-            o
+            original
         }
         None => caminho,
     }
 }
 
+/// Gancho do `CheckResource`; a original fica em `ORIG_CHECK`. Responde pela união: o caminho do jogo pela original; a cópia pelo original dela;
+/// o pedido de `resource.link` pelo alvo dele. Quem quer saber se o caminho existe de fato no depot (a recusa de link por existência) pergunta à
+/// original, não a este gancho.
+unsafe extern "C" fn check(depot: *mut c_void, caminho: u64) -> u8 {
+    let original: unsafe extern "C" fn(*mut c_void, u64) -> u8 = core::mem::transmute(crate::ganchos::original_publicado(&ORIG_CHECK));
+    let r = original(depot, caminho);
+    if r != 0 {
+        return r;
+    }
+    match original_de(caminho).or_else(|| crate::arquivos_do_jogo::reslink_alvo(caminho)) {
+        Some(outro) => original(depot, outro),
+        None => 0,
+    }
+}
+
+/// Gancho do `RequestResource` (depot `x0`, caminho `x1`, `x2`-`x7`, sret `x8`, volta `x30`). Sem cópia nenhuma vai direto à original. Com
+/// cópias, troca só o `x1` pelo `caminho_servido` e devolve todo o resto como chegou: `x0`, `x2`-`x8` e `x30` são salvos em volta da chamada
+/// Rust, que os pode sujar. `x9` é rascunho (nenhum argumento mora nele).
 #[unsafe(naked)]
 unsafe extern "C" fn shim_request() {
     core::arch::naked_asm!(
         "adrp x9, {n}@PAGE",
         "add  x9, x9, {n}@PAGEOFF",
         "ldr  x9, [x9]",
-        "cbz  x9, 2f",                 // sem cópias: direto pro original
-        "stp  x0, x1, [sp, #-0x60]!",
-        "stp  x2, x3, [sp, #0x10]",
-        "stp  x4, x5, [sp, #0x20]",
-        "stp  x6, x7, [sp, #0x30]",
-        "stp  x8, x30, [sp, #0x40]",   // x8 = sret do handle devolvido
+        "cbz  x9, 2f",
+        "stp  x0, x2, [sp, #-0x50]!",
+        "stp  x3, x4, [sp, #0x10]",
+        "stp  x5, x6, [sp, #0x20]",
+        "stp  x7, x8, [sp, #0x30]",
+        "str  x30, [sp, #0x40]",
         "mov  x0, x1",
         "bl   {servido}",
-        "mov  x1, x0",                 // caminho que o depot lê
-        "ldp  x8, x30, [sp, #0x40]",
-        "ldp  x6, x7, [sp, #0x30]",
-        "ldp  x4, x5, [sp, #0x20]",
-        "ldp  x2, x3, [sp, #0x10]",
-        "ldr  x0, [sp]",
-        "add  sp, sp, #0x60",
+        "mov  x1, x0",
+        "ldr  x30, [sp, #0x40]",
+        "ldp  x7, x8, [sp, #0x30]",
+        "ldp  x5, x6, [sp, #0x20]",
+        "ldp  x3, x4, [sp, #0x10]",
+        "ldp  x0, x2, [sp], #0x50",
         "2:",
         "adrp x9, {o}@PAGE",
         "add  x9, x9, {o}@PAGEOFF",
         "ldr  x9, [x9]",
         "br   x9",
         n = sym COPIAS_N,
-        o = sym ORIG_REQUEST,
         servido = sym caminho_servido,
+        o = sym ORIG_REQUEST,
     )
 }
 
-/// `CheckResource`: a cópia existe se o original existe; o caminho de um `link` existe se o alvo existe. O recurso que o depot não tem pega trava só
-/// quando a tabela não está vazia e o bit do caminho está ligado (`TabelaDeRedirecionamento::alvo`).
-unsafe extern "C" fn check(depot: *mut c_void, caminho: u64) -> u8 {
-    let orig: unsafe extern "C" fn(*mut c_void, u64) -> u8 = std::mem::transmute(ORIG_CHECK.load(Ordering::Relaxed) as usize);
-    let r = orig(depot, caminho);
-    if r != 0 {
-        return r;
-    }
-    match original_de(caminho).or_else(|| crate::arquivos_do_jogo::reslink_alvo(caminho)) {
-        Some(alvo) => orig(depot, alvo),
-        None => r,
-    }
-}
-
-/// Instala os dois ganchos (uma vez). Chamado quando a tabela de `bwms-reslink.txt` é lida.
+/// Ganchos do depot pro `resource.copy` (uma vez), chamado quando a tabela de `bwms-reslink.txt` é lida. O `CheckResource` sobe antes do
+/// `RequestResource`: com o pedido já servido, quem confere a existência da cópia antes de pedir tem de ouvir "existe".
 pub(crate) unsafe fn instalar() {
-    if ORIG_REQUEST.load(Ordering::Relaxed) != 0 {
+    static INSTALADO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if INSTALADO.swap(true, Ordering::Relaxed) {
         return;
     }
-    let (req, chk) = (crate::rebase(REQUEST_RESOURCE_VM), crate::rebase(crate::jogo::recursos::CHECAR_RECURSO_VM));
-    if !crate::memoria::is_readable(req as *const c_void, 16) || !crate::memoria::is_readable(chk as *const c_void, 16) {
-        return crate::log_dev!("[depot] RequestResource/CheckResource ilegíveis");
+    let (alvo_check, alvo_request) = (crate::rebase(CHECK_RESOURCE_VM), crate::rebase(REQUEST_RESOURCE_VM));
+    if !crate::memoria::is_readable(alvo_check as *const c_void, 16) || !crate::memoria::is_readable(alvo_request as *const c_void, 16) {
+        crate::log_dev!("[depot] CheckResource/RequestResource ilegíveis; resource.copy fora do ar");
+        return;
     }
-    // O `CheckResource` antes: sem ele o `RequestResource` sozinho ainda serve a cópia; o contrário não teria efeito.
-    if crate::ganchos::instalar_com_threads_paradas(chk as *mut c_void, check as *mut c_void, Some(&ORIG_CHECK)).is_none() {
-        return crate::log_dev!("[depot] gancho do CheckResource recusado");
+    if crate::ganchos::instalar_com_threads_paradas(alvo_check, check as *mut c_void, Some(&ORIG_CHECK)).is_none() {
+        crate::log_dev!("[depot] gancho do CheckResource recusado; resource.copy fora do ar");
+        return;
     }
-    if crate::ganchos::instalar_com_threads_paradas(req as *mut c_void, shim_request as *mut c_void, Some(&ORIG_REQUEST)).is_none() {
-        return crate::log_dev!("[depot] gancho do RequestResource recusado");
+    if crate::ganchos::instalar_com_threads_paradas(alvo_request, shim_request as *mut c_void, Some(&ORIG_REQUEST)).is_none() {
+        crate::log_dev!("[depot] gancho do RequestResource recusado; a cópia existe no CheckResource mas não é servida");
+        return;
     }
-    crate::veredito_dev!("[depot] cópias servidas no depot: RequestResource e CheckResource com gancho ({} cópia(s))", COPIAS_N.load(Ordering::Relaxed));
+    crate::log_dev!("[depot] ganchos do CheckResource e do RequestResource no ar ({} cópias)", COPIAS_N.load(Ordering::Relaxed));
 }
 
 /// Anda o mapa de recursos vivos (`HashMap` do RED no bank do loader, índice de `u32` e nó com próximo em `+0x00`, chave em `+0x08` e valor em
@@ -226,8 +237,8 @@ depot_cache_cabecalho={:?}",
     )
 }
 
-/// Hasher do cache do depot, conferido em nós reais: 0 não conferido, 1 XOR-fold (o `HashMapHash<ResourcePath>` do SDK,
-/// `(u32)k ^ (u32)(k >> 32)`), 2 os 32 bits baixos, 3 nenhum dos dois (a busca fica na varredura).
+/// Hasher do cache do depot, conferido em nós reais: 0 não conferido, 1 XOR-fold
+/// (`(u32)k ^ (u32)(k >> 32)`), 2 os 32 bits baixos, 3 nenhum dos dois (a busca fica na varredura).
 static HASHER_DO_DEPOT: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 fn hash_do_depot(chave: u64, hasher: u8) -> u32 {
@@ -297,7 +308,7 @@ pub(crate) unsafe fn depot_cache_buscar(chave: u64) -> *mut c_void {
             crate::veredito_dev!(
                 "[depot] hasher do cache: {}",
                 match hasher {
-                    1 => "XOR-fold (o do SDK)",
+                    1 => "XOR-fold",
                     2 => "32 bits baixos",
                     _ => "nenhum dos dois — busca pela varredura",
                 }
@@ -383,11 +394,11 @@ pub(crate) unsafe fn depot_cache_faixa(inicio: usize, quantos: usize, mut f: imp
 #[cfg(test)]
 mod testes {
     use super::*;
-    use crate::mods_do_usuario::pipeline::testes::travar_tabelas_do_archivexl;
+    use crate::mods_do_usuario::pipeline::testes::travar_tabelas_xl;
 
     #[test]
     fn copia_serve_o_original_e_o_resto_passa() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         adicionar_copia(0x11, 0x22);
         adicionar_copia(0x11, 0x33);
         assert_eq!(original_de(0x11), Some(0x33));
@@ -402,13 +413,13 @@ mod testes {
         assert_eq!(COPIAS_N.load(Ordering::Relaxed), c.len() as u64);
     }
 
-    /// O gancho do `CheckResource` responde pela união das tabelas (o `OnDepotResourceCheck` de `ResourceLink/Extension.cpp:237-249`): a cópia e o
-    /// pedido de link existem quando o original ou o alvo existe, e o caminho do jogo passa direto. Por isso a recusa por existência da referência
-    /// (`Extension.cpp:65`, `:99`, `:177`) só vale contra o original (`ORIG_CHECK`): por este gancho todo link carregado daria "já existe". O depot
+    /// O gancho do `CheckResource` responde pela união das tabelas: a cópia e o pedido de link existem quando o original ou o alvo existe, e o
+    /// caminho do jogo passa direto. Por isso a recusa de link por existência do caminho pedido só vale contra a original (`ORIG_CHECK`): por este
+    /// gancho todo link carregado daria "já existe". O depot
     /// falso conhece só `bwms\f126\vanilla.mesh`, e os caminhos `bwms\f126\…` são só deste teste (as tabelas são do processo de teste inteiro).
     #[test]
     fn check_responde_pela_uniao_e_o_original_nao() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         unsafe extern "C" fn depot_falso(_depot: *mut c_void, caminho: u64) -> u8 {
             u8::from(caminho == bwms_primitives::resource_path_hash("bwms\\f126\\vanilla.mesh"))
         }
@@ -431,7 +442,7 @@ mod testes {
     /// nulo não entra) e com a contagem que o shim lê igual à da tabela nova; a lista vazia esvazia, e o shim volta a servir o próprio caminho.
     #[test]
     fn substituir_troca_a_tabela_de_copias_e_a_contagem_do_shim() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         assert!(adicionar_copia(0x12701, 0x12702));
         assert_eq!(COPIAS.substituir(&[(0x12711, 0x12712), (0x12711, 0x12713), (0, 0x12714), (0x12715, 0)]), 2);
         assert_eq!(*COPIAS.ler().expect("tabela de cópias"), vec![(0x12711, 0x12713)]);
@@ -472,13 +483,13 @@ mod testes {
 
     /// O mapa de recursos vivos com o layout do bank do motor (índice de `u32`, nó `{próximo, hash, chave, WeakPtr{valor, bloco}}` de 0x28, o
     /// stride medido no boot 257), montado na memória do processo de teste e achado pelo loader falso em `[loader+0x48]`: a conferência acha o
-    /// XOR-fold do SDK, a busca pelo balde e a varredura devolvem o valor do bank. Um depot falso em `PATHB_DEPOT` com outro mapa coerente em
+    /// XOR-fold, a busca pelo balde e a varredura devolvem o valor do bank. Um depot falso em `PATHB_DEPOT` com outro mapa coerente em
     /// `+0xc8` (o que o bloco seguinte ao depot guarda quando é o loader) não muda nada: a busca não lê o depot. Sem loader, ou com o bank nulo,
     /// tudo devolve nulo. O loader e o depot falsos só ficam nos globais com a trava das tabelas (a carga do pipeline, que os outros testes rodam com
     /// ela, lê o depot); a volta a nulo vale também quando uma asserção falha.
     #[test]
     fn mapa_de_recursos_vem_do_bank_do_loader_e_nao_do_depot() {
-        let _trava = travar_tabelas_do_archivexl();
+        let _trava = travar_tabelas_xl();
         struct VoltaSemLoader;
         impl Drop for VoltaSemLoader {
             fn drop(&mut self) {

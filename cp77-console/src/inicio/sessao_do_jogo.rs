@@ -230,7 +230,7 @@ unsafe extern "C" fn despacho_do_jogo(sys: *mut c_void, evento: u64, pregame: *c
 }
 
 /// Entrega `nome` aos ouvintes do BWMS com um `GameSessionEvent` (`pregame`, `restored`); devolve quantos receberam. Sem ouvinte não constrói o
-/// evento (Codeware `#118`), salvo o `Session/End`, que sempre passa pelo despacho: a varredura do `CallbackLifetime.Session` roda nele mesmo sem
+/// evento, salvo o `Session/End`, que sempre passa pelo despacho: a varredura do `CallbackLifetime.Session` roda nele mesmo sem
 /// ouvinte do próprio `End`.
 pub(crate) unsafe fn repassar(nome: &'static str, pregame: bool, restored: bool) -> usize {
     if crate::tipos_do_motor::tem_ouvinte(nome) {

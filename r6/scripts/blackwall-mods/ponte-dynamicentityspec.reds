@@ -1,17 +1,15 @@
 // -----------------------------------------------------------------------------
-// Codeware.World.DynamicEntitySpec — item `#74` do catálogo exaustivo
+// DynamicEntitySpec
 // -----------------------------------------------------------------------------
 //
-// Companion struct do `#73`/`DynamicEntitySystem` — porte direto do irmão `#76`/`StaticEntitySpec`
-// (`ponte-staticentityspec.reds`, FECHADO 2026-08-15) usando o MESMO template estrutural: a
-// investigação dedicada de 2026-08-19 (offline, ver `PENDENCIAS-UNIFICADAS.md`/item `#74`) leu
-// `DynamicEntitySpec.hpp` (`enablers/Codeware/src/App/World/DynamicEntitySpec.hpp`, 79 linhas) por
-// completo e confirmou que é a MESMA receita (`extends IScriptable` direto, mesmo registry-Rust-
+// Companion struct do `DynamicEntitySystem`, no MESMO template estrutural do irmão `StaticEntitySpec`
+// (`ponte-staticentityspec.reds`, FECHADO 2026-08-15): a investigação de 2026-08-19 (offline)
+// confirmou que é a MESMA receita (`extends IScriptable` direto, mesmo registry-Rust-
 // por-ponteiro, mesmo `Vector4`/`Quaternion`-como-parâmetro já resolvido, mesmo idioma Count+ByIndex
 // pra tags) — só com 12 campos em vez de 6:
 //
 //   Red::TweakDBID            recordID;       // NOVO
-//   Red::RaRef<>              templatePath;   // igual StaticEntitySpec (ResRef, divergência do #63)
+//   Red::RaRef<>              templatePath;   // igual StaticEntitySpec (ResRef)
 //   uint64_t                  templateHash;   // NOVO
 //   Red::CName                appearanceName; // igual
 //   Red::Vector4               position;       // igual
@@ -23,11 +21,9 @@
 //   Red::DynArray<Red::CName> tags;           // igual
 //   bool                      active;         // NOVO
 //
-// `IsRecord()`/`IsTemplate()`/`PrepareForSaving()`/`RestoreAfterLoading()` (métodos C++ inline da
-// fonte real, não `RTTI_METHOD`) ficam FORA de escopo — nunca declarados em nenhum `.reds` real do
-// Codeware (o `DynamicEntitySpec.reds` vendorizado só declara os 12 campos como `native let`, zero
-// método) — mesma divergência de design já aceita pro `#76` (Create+Setters/Getters em vez de campos
-// `native let` diretos).
+// `IsRecord()`/`IsTemplate()`/`PrepareForSaving()`/`RestoreAfterLoading()` (métodos C++ inline,
+// não `RTTI_METHOD`) ficam FORA de escopo — mesma decisão de design do `StaticEntitySpec`
+// (Create+Setters/Getters em vez de campos `native let` diretos).
 
 public native class DynamicEntitySpec extends IScriptable {
     public static native func Create() -> ref<DynamicEntitySpec>

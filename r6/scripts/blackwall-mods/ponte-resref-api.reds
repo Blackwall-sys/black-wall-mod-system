@@ -1,4 +1,4 @@
-// Codeware #17 — a superfície de API de `ResourceAsyncRef` sobre `ResRef`, por composição.
+// A superfície de API de `ResourceAsyncRef` sobre `ResRef`, por composição.
 //
 // O QUE O ITEM PEDE. `ResourceAsyncRef` (a versão assíncrona) expõe 4 métodos:
 // `SetPath`/`GetPath`/`GetHash`/`IsEmpty`. No BWMS o tipo vivo correspondente é o `ResRef`
@@ -6,8 +6,8 @@
 // superfície: um mod não alcança uma native sem declaração, e chamar `BwmsResRefIsEmpty(hash)`
 // não é a mesma coisa que ter a API do item.
 //
-// NOMES PRÓPRIOS, DE PROPÓSITO. Pela regra de nome do projeto, API de framework de terceiro
-// (Codeware) é reimplementada com nome do BWMS — só nome VANILLA da CDPR precisa bater exato.
+// NOMES PRÓPRIOS, DE PROPÓSITO. Pela regra de nome do projeto, API que não é do jogo
+// leva nome do BWMS — só nome VANILLA da CDPR precisa bater exato.
 // Por isso `ResRefIsEmpty` e não `ResourceAsyncRef.IsEmpty`.
 //
 // `GetPath` devolveria texto, mas `ResourceAsyncReference` guarda SÓ o `ResourcePath` (u64); o nome que diz o que sai é

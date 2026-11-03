@@ -1,4 +1,4 @@
-//! Mini ferramenta (ArchiveXL `#49` parte 4d): gera o conteúdo de `red4ext/bwms-streaming.txt` a partir de `.xl`, sem o `bwms install`.
+//! Mini ferramenta: gera o conteúdo de `red4ext/bwms-streaming.txt` a partir de `.xl`, sem o `bwms install`.
 //!
 //!     cargo run -q --example emitir_streaming -- <mod>=<arquivo.xl> [<mod>=<arquivo.xl> ...] > bwms-streaming.txt
 //!

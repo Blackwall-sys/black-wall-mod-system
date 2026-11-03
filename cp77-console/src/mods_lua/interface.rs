@@ -1,4 +1,4 @@
-//! A tabela `ImGui` dos mods CET sobre os widgets do terminal (`terminal::imediato`), sem o ImGui C++ que saiu em 2026-10-03. Cada função
+//! A tabela `ImGui` dos mods Lua sobre os widgets do terminal (`terminal::imediato`), sem o ImGui C++ que saiu em 2026-10-03. Cada função
 //! desenha na janela de plugin do mod pela `Tela` do quadro (`mods_do_usuario::api::com_tela`), que só existe dentro do `onDraw`; fora
 //! dele devolve o valor neutro. Função do ImGui que o terminal não tem devolve `nil` e avisa uma vez no log.
 
@@ -17,7 +17,7 @@ struct BarraDeAbas {
 }
 
 static BARRAS: Mutex<Vec<BarraDeAbas>> = Mutex::new(Vec::new());
-/// Barras abertas na janela, a de dentro por último (o JB aninha a "Cameras" numa aba da "Tabbar").
+/// Barras abertas na janela, a de dentro por último (um mod pode aninhar a "Cameras" numa aba da "Tabbar").
 static BARRAS_ABERTAS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// `f` na `Tela` do quadro com a janela do mod aberta; `None` fora do `onDraw` ou com a janela recolhida.
@@ -74,7 +74,7 @@ pub(super) fn instalar(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
         na_janela(|tela| tela.dica(&t));
         Ok(())
     })?)?;
-    // Checkbox(rótulo, valor) -> (valor, mudou), como o binding do CET.
+    // Checkbox(rótulo, valor) -> (valor, mudou), a forma que os mods esperam.
     ig.set("Checkbox", lua.create_function(|_, (rotulo, mut v): (String, bool)| {
         let mudou = na_janela(|t| t.caixa_de_marcar(&rotulo, &mut v)).unwrap_or(false);
         Ok((v, mudou))
@@ -97,7 +97,7 @@ pub(super) fn instalar(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
             }
         };
         let b = &mut barras[i];
-        // As abas do quadro anterior valem a partir daqui: o ImGui não exige `EndTabBar` (o `End` da janela fecha), e o JB não chama o da barra
+        // As abas do quadro anterior valem a partir daqui: o ImGui não exige `EndTabBar` (o `End` da janela fecha), e há mod que não chama o da barra
         // de fora.
         if !b.deste_quadro.is_empty() {
             b.anteriores = std::mem::take(&mut b.deste_quadro);
@@ -136,7 +136,7 @@ pub(super) fn instalar(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
             static AVISADAS: Mutex<Vec<String>> = Mutex::new(Vec::new());
             let mut a = AVISADAS.lock().unwrap_or_else(|e| e.into_inner());
             if !a.contains(&nome) {
-                crate::log(&format!("[cet] ImGui.{nome} não existe no terminal do BWMS: a chamada não desenha nada"));
+                crate::log(&format!("[lua] ImGui.{nome} não existe no terminal do BWMS: a chamada não desenha nada"));
                 a.push(nome);
             }
             Ok(bwms_lua::Value::Function(lua.create_function(|_, _: bwms_lua::MultiValue| Ok(bwms_lua::Value::Nil))?))
@@ -147,7 +147,7 @@ pub(super) fn instalar(lua: &bwms_lua::Lua) -> bwms_lua::Result<()> {
     Ok(())
 }
 
-/// `onDraw` dos mods CET no quadro do terminal, com a `Tela` ao alcance da tabela `ImGui`.
+/// `onDraw` dos mods Lua no quadro do terminal, com a `Tela` ao alcance da tabela `ImGui`.
 pub(crate) fn desenhar(t: &mut Tela<'_>) {
     crate::mods_do_usuario::api::com_tela_dos_plugins(t, || unsafe { super::run_event_draw() });
 }
@@ -158,7 +158,7 @@ fn primeira_janela(titulo: &str, aberta: Option<bool>) {
     let mut v = VISTAS.lock().unwrap_or_else(|e| e.into_inner());
     if !v.iter().any(|t| t == titulo) {
         v.push(titulo.to_string());
-        crate::veredito_dev!("[cet] ImGui.Begin \"{titulo}\": aberta={aberta:?}");
+        crate::veredito_dev!("[lua] ImGui.Begin \"{titulo}\": aberta={aberta:?}");
     }
 }
 
@@ -167,10 +167,10 @@ mod testes {
     use super::*;
     use crate::terminal::imediato::{Alvo, Entrada, Persistente};
 
-    /// A sequência do `onDraw` do JB (janela, barra de abas sem `EndTabBar`, 1ª aba com a caixa, barra aninhada noutra aba) desenha a
+    /// A sequência do `onDraw` de um mod de câmera (janela, barra de abas sem `EndTabBar`, 1ª aba com a caixa, barra aninhada noutra aba) desenha a
     /// "Disable Mod": a barra aprende as abas no 1º quadro e mostra a 1ª a partir do 2º.
     #[test]
-    fn caixa_da_1a_aba_do_jb_sai_no_quadro() {
+    fn caixa_da_1a_aba_do_mod_de_camera_sai_no_quadro() {
         let lua = bwms_lua::Lua::new();
         instalar(&lua).expect("ImGui");
         let ig: bwms_lua::Table = lua.globals().get("ImGui").expect("tabela");
@@ -181,7 +181,7 @@ mod testes {
             let e = Entrada { procura: Some(Alvo::Rotulo("Disable Mod".into())), ..Entrada::default() };
             let mut t = Tela::nova(e, &mut p, 1);
             crate::mods_do_usuario::api::com_tela_dos_plugins(&mut t, || {
-                if f("Begin").call::<bool>("JB Third Person Mod DEBUG MENU").expect("Begin") && f("BeginTabBar").call::<bool>("Tabbar").expect("bar") {
+                if f("Begin").call::<bool>("Camera Mod DEBUG MENU").expect("Begin") && f("BeginTabBar").call::<bool>("Tabbar").expect("bar") {
                     if f("BeginTabItem").call::<bool>("Main settings").expect("item") {
                         f("TextColored").call::<()>((0.5, 0.57, 0.59, 1.0, "Fixes")).expect("texto");
                         let _: (bool, bool) = f("Checkbox").call(("Disable Mod", false)).expect("caixa");
@@ -194,7 +194,7 @@ mod testes {
                         f("EndTabBar").call::<()>(()).expect("fim bar 2");
                         f("EndTabItem").call::<()>(()).expect("fim item 2");
                     }
-                    // Como no JB: a barra de fora fica sem `EndTabBar`; o `End` fecha.
+                    // Como no mod: a barra de fora fica sem `EndTabBar`; o `End` fecha.
                 }
                 f("End").call::<()>(()).expect("End");
             });

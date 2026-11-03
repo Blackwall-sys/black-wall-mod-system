@@ -4,7 +4,7 @@
 @addField(inkWidget)
 public native let parentWidget: wref<inkWidget>;
 
-// Codeware 1.21.1: o mesh que um componente com esqueleto carregou e o gênero de uma fala. O script vanilla da 2.5 não declara estes tipos (o RTTI
+// O mesh que um componente com esqueleto carregou e o gênero de uma fala. O script vanilla da 2.5 não declara estes tipos (o RTTI
 // tem); `CResource` vem do vanilla.
 public importonly abstract class resStreamedResource extends CResource {}
 

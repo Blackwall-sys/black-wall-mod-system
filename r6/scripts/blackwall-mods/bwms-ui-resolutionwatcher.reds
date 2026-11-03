@@ -1,4 +1,4 @@
-// bwms-ui-resolutionwatcher.reds — reage a mudança de resolução (catálogo Codeware #113). Depende de `bwms-ui-screenhelper.reds`.
+// bwms-ui-resolutionwatcher.reds — reage a mudança de resolução. Depende de `bwms-ui-screenhelper.reds`.
 //
 // Os objetos ficam em `array<wref<T>>` no `ScriptableSystem`, nunca `array<ref<T>>`: com `ref`, o motor trata os objetos como posse
 // do sistema e, ao destruí-lo no world-swap do autocontinue (`phase=-1`), tenta liberá-los — crash em `red::memory::Free<PoolEngine>`,

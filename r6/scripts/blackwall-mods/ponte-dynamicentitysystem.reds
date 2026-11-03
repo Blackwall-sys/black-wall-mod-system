@@ -1,5 +1,5 @@
-// ponte-dynamicentitysystem.reds — o `DynamicEntitySystem` do Codeware (`World/DynamicEntitySystem.reds`, item #73): classe nativa
-// forjada pelo BWMS, `extends IGameSystem`, com os métodos do Codeware e 4 getters indexados do BWMS. Sem `module` de propósito:
+// ponte-dynamicentitysystem.reds — o `DynamicEntitySystem`: classe nativa
+// forjada pelo BWMS, `extends IGameSystem`, com os métodos que os mods chamam e 4 getters indexados do BWMS. Sem `module` de propósito:
 // declaração nativa dentro de `module X.Y` ganha o prefixo no `fullName`, o bind não casa com o nome registrado e o jogo trava no boot.
 //
 // As entidades saem do motor (`EntityStubSystem` + `PopulationSystem`); os ouvintes de tag recebem `DynamicEntityEvent` com
@@ -18,7 +18,7 @@ public native class DynamicEntitySystem extends IGameSystem {
     public native func UnassignTag(id: EntityID, tag: CName) -> Void
     public native func DeleteTagged(tag: CName) -> Void
 
-    // Getters indexados do BWMS, além dos arrays do Codeware abaixo. `GetTaggedID(tag)` devolve a entidade tagueada de menor id.
+    // Getters indexados do BWMS, além dos arrays abaixo. `GetTaggedID(tag)` devolve a entidade tagueada de menor id.
     public native func GetTaggedID(tag: CName) -> EntityID
     public native func GetTaggedCount(tag: CName) -> Int32
     public native func GetTaggedIDByIndex(tag: CName, index: Int32) -> EntityID
@@ -55,7 +55,7 @@ public enum DynamicEntityEventType {
     Dead = 4
 }
 
-// Evento dos ouvintes do `DynamicEntitySystem`. Classe de script do BWMS (a referência é nativa): mesmos 3 getters.
+// Evento dos ouvintes do `DynamicEntitySystem`. Classe de script do BWMS, não nativa: 3 getters.
 public class DynamicEntityEvent {
     private let bwmsTipo: Int32;
     private let bwmsId: EntityID;

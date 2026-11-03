@@ -10,7 +10,7 @@
 //!    ignorado; o core (console/cheats/Lua) segue intacto.
 //!
 //! O plugin recebe um `*const BwmsApi` (vtable C-ABI, ver `api.rs`): `log` + hook de vtable
-//! (motor RED4ext) + reflection (`field_ptr`/`call_method` = Codeware) + inline hook,
+//! (motor de hook do BWMS) + reflection (`field_ptr`/`call_method`) + inline hook,
 //! `register_native`, janela no terminal e o resto listado em `BWMS_PLUGIN_API` (campos novos só no FIM da
 //! struct, `abi_version` cresce).
 
@@ -26,37 +26,34 @@ const RTLD_NOW: c_int = 2;
 /// v4: + register_native_argful (nativa COM ARGS) + fire_event (emitir evento do CallbackSystem).
 /// v5: + prop_get_f32/prop_set_f32/prop_get_i32 (Reflection tipada por nome, sem ponteiro cru).
 /// v6: + call_method_args (call de método COM ARGS tipados, parity com o callf interno).
-/// v7: + register_method (método novo numa classe EXISTENTE, @addMethod-style — fecha
-/// `red4ext-register-method-api`, até aqui só register_native/função-global era exposto).
-/// v8: + tweakdb_get_flat/tweakdb_set_flat/tweakdb_clone_record (TweakDB — fecha
-/// `tweakxl-mod-api`; expõe SetFlat escalar + clone-com-herança, já provados internamente,
-/// como API C-ABI pra plugins/mods de 3os).
-/// v9: + log_level (logger por-nível) + semver_satisfies (comparação de versão) — parte de
-/// `red4ext-sdk-plumbing`. O resto do gap (`PluginInfo` via `bwms_plugin_query`, entry OPCIONAL
+/// v7: + register_method (método novo numa classe EXISTENTE, @addMethod-style — até aqui só
+/// register_native/função-global era exposto).
+/// v8: + tweakdb_get_flat/tweakdb_set_flat/tweakdb_clone_record (TweakDB — expõe SetFlat escalar
+/// + clone-com-herança, já provados internamente, como API C-ABI pra plugins/mods de 3os).
+/// v9: + log_level (logger por-nível) + semver_satisfies (comparação de versão). O resto do gap (`PluginInfo` via `bwms_plugin_query`, entry OPCIONAL
 /// e ADITIVO — não muda `BwmsApi`/`abi_version`) fechado logo abaixo, mesma versão v9.
 /// v10: + register_draw_callback/janela_abrir/janela_texto/janela_fechar — plugin desenha a
 /// PRÓPRIA janela no terminal, sem linkar nada. Callback chamado 1x/quadro com o terminal BWMS
 /// aberto (`overlay::desenhar_terminal`); os slots `janela_*` abrem, escrevem e fecham a janela nos
 /// widgets do terminal (`api::api_janela_*`).
 /// v12: + add_game_state — callbacks de ciclo de vida (Running.OnEnter/Update/Exit + Shutdown.OnEnter)
-/// mapeados nos sinais de presença do player já detectados (red4ext-gamestates-add).
+/// mapeados nos sinais de presença do player já detectados.
 /// v13: + `my_handle`/`inline_hook_owned`/`inline_detach`/`vtable_hook_owned`/`vtable_detach` —
-/// `PluginHandle` REAL (RED4ext.SDK `#31`, `Hooking::Detach`). Cada plugin recebe uma CÓPIA
+/// handle de plugin e posse de hook. Cada plugin recebe uma CÓPIA
 /// pessoal da API (`load_one` clona `BWMS_API` com um `my_handle` sequencial único) e as versões
 /// `_owned`/`_detach` registram+checam o dono antes de desfazer: um plugin não derruba o hook de
 /// outro. `inline_hook`/`inline_revert`/`trocar_slot_da_vtable`/`restaurar_slot_da_vtable` (sem
 /// dono) seguem idênticos ao lado, pra compat.
 /// v14: + `compare_semver_prerelease` (precedência SemVer 2.0 completa).
-/// v15: + `launch_arg` — argumentos de lançamento do processo (RED4ext `#458`).
+/// v15: + `launch_arg` — argumentos de lançamento do processo.
 /// v16: + valor de campo de qualquer tipo pelo IType (`prop_type_name`, `prop_to_string`, `prop_get_string`, `prop_set_string`, `prop_copy`,
-/// `prop_is_equal`; RED4ext `#168`/`#169`/`#232`/`#236`) e genealogia e nome dos records de mod (`tweak_is_original`, `tweak_original_parent`,
-/// `tweak_descendants`, `tweak_name`, `tweak_register_name`; TweakXL `#22`/`#8`).
-/// v17: + `class_create` e `class_add_property` — classe e propriedade nativas novas no carregamento do plugin, antes do bind (RED4ext `#77`,
-/// `#159`/`#160`); + `take_screenshot` (RED4ext `#473`).
+/// `prop_is_equal`) e genealogia e nome dos records de mod (`tweak_is_original`, `tweak_original_parent`,
+/// `tweak_descendants`, `tweak_name`, `tweak_register_name`).
+/// v17: + `class_create` e `class_add_property` — classe e propriedade nativas novas no carregamento do plugin, antes do bind; + `take_screenshot`.
 pub const BWMS_PLUGIN_API: u32 = 17;
 type PluginEntry = unsafe extern "C" fn(api: *const BwmsApi) -> i32;
 
-/// RED4ext.SDK `#45` (`EMainReason::Unload`) — plugin recebe sinal ANTES do processo morrer.
+/// Descarga do plugin — plugin recebe sinal ANTES do processo morrer.
 /// Entry OPCIONAL `bwms_plugin_unload() -> Void`: se exportada, o handle+ponteiro são persistidos
 /// aqui e `unload_all_plugins()` (chamada de `selfboot::exit_replacement`, ANTES do exit syscall —
 /// motor ainda intacto, mesmo timing de `Session/End`/`BwmsOnGameShutdown`) invoca cada um, isolado
@@ -79,14 +76,13 @@ pub fn unload_all_plugins() {
 }
 
 /// Descrição do plugin (nome/autor/versão), preenchida pelo PRÓPRIO plugin via
-/// `bwms_plugin_query` (OPCIONAL — completa o resto de `red4ext-sdk-plumbing`, a parte
-/// "PluginHandle/PluginInfo" que faltava do v9). Buffers de tamanho fixo (não C-string
+/// `bwms_plugin_query` (OPCIONAL — a parte "PluginInfo" que faltava do v9). Buffers de tamanho fixo (não C-string
 /// alocada) — evita qualquer questão de ownership/free cruzando a fronteira do ABI; o
 /// plugin escreve os bytes UTF-8 + `\0` final, o loader lê até o primeiro `\0`.
 ///
-/// `runtime` (PENDENCIAS-UNIFICADAS.md #40/#48, RED4ext.SDK `FileVer`/`CompareFileVer`,
+/// `runtime` (PENDENCIAS-UNIFICADAS.md,
 /// 2026-08-09): versão do JOGO que o plugin foi escrito pra suportar (`[major,minor,build,
-/// revision]`, mesma forma de `CreateFileVer` real) — campo NOVO no FIM da struct (aditivo,
+/// revision]`) — campo NOVO no FIM da struct (aditivo,
 /// mesma convenção já usada em `BwmsApi`/`abi_version`). `[0,0,0,0]` = não declarado (plugins
 /// v9-anteriores continuam carregando idêntico, `PluginInfo::zeroed()` já garante isso antes
 /// da `query()` escrever só os campos que conhece). Comparação via `compare_file_ver`, log
@@ -102,10 +98,10 @@ pub struct PluginInfo {
 }
 
 /// Versão do jogo que o BWMS suporta hoje (Steam 2.5.0, o `CFBundleShortVersionString` do `.app`) — a mesma que o gate do `on_load`
-/// (`build_supported`) confere pelos bytes do executor. Representada como `FileVer` (major.minor.build.revision) só pra esta comparação.
+/// (`build_supported`) confere pelos bytes do executor. Representada como `[major, minor, build, revision]` só pra esta comparação.
 const BWMS_GAME_FILEVER: [u32; 4] = [2, 5, 0, 0];
 
-/// `CompareFileVer(lhs,rhs) -> int32`: comparação lexicográfica major→minor→build→revision.
+/// `compare_file_ver(lhs,rhs) -> int32`: comparação lexicográfica major→minor→build→revision.
 /// -1 = lhs < rhs, 0 = igual, 1 = lhs > rhs (convenção padrão de comparador 3-way).
 fn compare_file_ver(lhs: [u32; 4], rhs: [u32; 4]) -> i32 {
     for i in 0..4 {
@@ -230,7 +226,7 @@ fn load_one(path: &Path) -> bool {
             return Ok(0i32);
         }
         let entry: PluginEntry = std::mem::transmute(p);
-        // RED4ext.SDK `#31` (`Hooking::Detach`): cada plugin recebe uma CÓPIA PESSOAL da API,
+        // Posse de hook: cada plugin recebe uma CÓPIA PESSOAL da API,
         // idêntica em tudo exceto `my_handle` (sequencial, único) — a peça que faltava pra
         // `inline_hook_owned`/`vtable_hook_owned` saberem de quem é cada hook instalado, e
         // `inline_detach`/`vtable_detach` recusarem um plugin tentando soltar o hook de outro.
@@ -239,7 +235,7 @@ fn load_one(path: &Path) -> bool {
         let handle = crate::mods_do_usuario::api::next_plugin_handle();
         let my_api: &'static crate::mods_do_usuario::api::BwmsApi =
             Box::leak(Box::new(crate::mods_do_usuario::api::BwmsApi { my_handle: handle, ..crate::mods_do_usuario::api::BWMS_API }));
-        // CET item #46 (`PENDENCIAS-UNIFICADAS.md`): janela de registro restrita ao load —
+        // `PENDENCIAS-UNIFICADAS.md`: janela de registro restrita ao load —
         // as funções de registro do BwmsApi (register_native/register_method/
         // register_native_argful/add_game_state/register_draw_callback) só aceitam chamadas
         // DENTRO desta chamada síncrona. RAII (não par manual abre/fecha): fecha na saída do

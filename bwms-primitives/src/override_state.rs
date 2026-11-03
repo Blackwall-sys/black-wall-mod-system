@@ -1,45 +1,41 @@
-//! `ComponentState` — combinação de overrides de MÚLTIPLAS FONTES (ArchiveXL `A#22`).
-//!
-//! **O que o item pede e por que é aqui.** Cada `ComponentState` guarda dois mapas
-//! `hash → chunkMask` (um de *hiding*, outro de *showing*), onde **cada hash é uma FONTE/mod
-//! distinta**. É isso que permite dois mods esconderem partes diferentes do mesmo componente sem
-//! um apagar o outro. O cálculo do resultado final é lógica pura — e é a parte do item que dá pra
-//! provar sem o jogo, separada da aplicação em objeto vivo (que é campo cru, já provada).
-//!
-//! **Ordem da aplicação real**, a de `App::EntityState::ApplyChunkMaskOverride`
-//! (`enablers/ArchiveXL/src/App/Extensions/Garment/States.cpp:717-731`), que junta o estado do
-//! componente e o do prefixo do nome:
-//!
-//! ```text
-//! final = original
-//! para cada showing: final |= showing
-//! para cada hiding:  final &= hiding
-//! ```
-//!
-//! Duas propriedades que essa ordem impõe, e que os testes fixam:
-//! - **`hiding` vence `showing`**: todos os OR acontecem antes de qualquer AND, então uma fonte
-//!   que esconde um chunk sobrepõe outra que o mostra. O `GetOverriddenChunkMask` da referência
-//!   (`States.cpp:64-75`) faz o contrário, mas não tem chamador; o porte seguia ele até
-//!   2026-09-13, e a máscara aplicada ao vivo sairia invertida.
-//! - **A ordem DENTRO de cada grupo não importa**: AND e OR são associativos e comutativos, então
-//!   o mapa desordenado do C++ e o nosso vetor ordenado dão o mesmo resultado. Isso é o que
-//!   permite portar um `Core::Map` para qualquer container sem mudar semântica.
+//! `ComponentState` — overrides de máscara de chunks e de aparência de um componente, por fonte (mod).
 
-use std::collections::HashMap;
-
-/// Estado de override de UM componente, acumulando fontes.
+/// Estado de override de UM componente, acumulando fontes. Cada tabela é SoA ordenada pela fonte: a igualdade não depende da ordem de
+/// chegada (a guarda de teste compara estados) e a aparência de menor fonte é a 1ª da tabela.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComponentState {
-    /// fonte → máscara de esconder. Bit 0 = chunk escondido por essa fonte.
-    hiding: HashMap<u64, u64>,
-    /// fonte → máscara de mostrar. Bit 1 = chunk forçado a aparecer por essa fonte.
-    showing: HashMap<u64, u64>,
-    /// `m_chunkMaskChanged`: liga no 1º override e não desliga na remoção — voltar à original também é mudança a aplicar.
-    mudou: bool,
-    /// fonte → aparência (`CName`), em ordem de fonte.
-    aparencias: std::collections::BTreeMap<u64, u64>,
-    /// `m_appearanceChanged`, com a mesma regra da flag de máscara.
+    fontes_esconder: Vec<u64>,
+    mascaras_esconder: Vec<u64>,
+    fontes_mostrar: Vec<u64>,
+    mascaras_mostrar: Vec<u64>,
+    fontes_aparencia: Vec<u64>,
+    aparencias: Vec<u64>,
+    /// Fica ligado depois da 1ª máscara: sem fonte, a aplicação devolve a original ao componente.
+    mudou_mascara: bool,
+    /// Fica ligado depois da 1ª aparência: sem fonte, a aplicação restaura a original.
     mudou_aparencia: bool,
+}
+
+/// Grava `valor` da `fonte`; a fonte já presente combina o valor guardado com o novo por `juntar`.
+fn gravar_por_fonte(fontes: &mut Vec<u64>, valores: &mut Vec<u64>, fonte: u64, valor: u64, juntar: fn(u64, u64) -> u64) {
+    match fontes.binary_search(&fonte) {
+        Ok(i) => valores[i] = juntar(valores[i], valor),
+        Err(i) => {
+            fontes.insert(i, fonte);
+            valores.insert(i, valor);
+        }
+    }
+}
+
+fn tirar_fonte(fontes: &mut Vec<u64>, valores: &mut Vec<u64>, fonte: u64) -> bool {
+    match fontes.binary_search(&fonte) {
+        Ok(i) => {
+            fontes.remove(i);
+            valores.remove(i);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 impl ComponentState {
@@ -47,146 +43,109 @@ impl ComponentState {
         Self::default()
     }
 
-    /// `AddHidingChunkMaskOverride`: AND no valor da fonte, partindo de `~0` — a 2ª máscara da mesma fonte soma à 1ª.
+    /// A mesma fonte acumula por interseção: duas chamadas escondem os chunks das duas máscaras.
     pub fn esconder(&mut self, fonte: u64, mascara: u64) {
-        *self.hiding.entry(fonte).or_insert(u64::MAX) &= mascara;
-        self.mudou = true;
+        gravar_por_fonte(&mut self.fontes_esconder, &mut self.mascaras_esconder, fonte, mascara, |a, b| a & b);
+        self.mudou_mascara = true;
     }
 
-    /// `AddShowingChunkMaskOverride`: OR no valor da fonte, partindo de 0.
     pub fn mostrar(&mut self, fonte: u64, mascara: u64) {
-        *self.showing.entry(fonte).or_insert(0) |= mascara;
-        self.mudou = true;
+        gravar_por_fonte(&mut self.fontes_mostrar, &mut self.mascaras_mostrar, fonte, mascara, |a, b| a | b);
+        self.mudou_mascara = true;
     }
 
-    /// `RemoveChunkMaskOverride`: tira o esconder e o mostrar da fonte; a aparência sai por `remover_aparencia`. `true` se a fonte tinha
-    /// máscara (a referência devolve sempre `true`).
+    /// Tira o esconder e o mostrar da fonte; a aparência dela fica.
     pub fn remover_fonte(&mut self, fonte: u64) -> bool {
-        let h = self.hiding.remove(&fonte).is_some();
-        let s = self.showing.remove(&fonte).is_some();
-        h || s
+        let escondia = tirar_fonte(&mut self.fontes_esconder, &mut self.mascaras_esconder, fonte);
+        let mostrava = tirar_fonte(&mut self.fontes_mostrar, &mut self.mascaras_mostrar, fonte);
+        escondia || mostrava
     }
 
-    /// Fontes com override de máscara (esconder ou mostrar); a aparência fica de fora, no mesmo escopo do `remover_fonte`.
+    /// Fontes distintas com máscara (esconder ou mostrar).
     pub fn fontes(&self) -> usize {
-        let mut set: std::collections::HashSet<u64> = self.hiding.keys().copied().collect();
-        set.extend(self.showing.keys().copied());
-        set.len()
+        let so_mostram = self.fontes_mostrar.iter().filter(|f| self.fontes_esconder.binary_search(f).is_err()).count();
+        self.fontes_esconder.len() + so_mostram
     }
 
-    /// O resultado final, combinando TODAS as fontes sobre a máscara original: OR de todos os
-    /// showing, depois AND de todos os hiding (a ordem do `ApplyChunkMaskOverride`).
     pub fn mascara_final(&self, original: u64) -> u64 {
         combinar_mascara(original, self.mascara_de_mostrar(), self.mascara_de_esconder())
     }
 
-    /// `GetShowingChunkMask` — a união de todas as máscaras de mostrar, partindo de zero.
     pub fn mascara_de_mostrar(&self) -> u64 {
-        self.showing.values().fold(0, |acc, m| acc | m)
+        self.mascaras_mostrar.iter().fold(0, |a, m| a | m)
     }
 
-    /// `ChangesChunkMask`: algum override já entrou, mesmo que removido depois.
     pub fn muda_mascara(&self) -> bool {
-        self.mudou
+        self.mudou_mascara
     }
 
-    /// `GetHidingChunkMask` — a interseção de todas as máscaras de esconder, partindo de tudo-ligado.
-    /// Sem nenhuma fonte devolve `!0`, que é "não esconde nada" e não "esconde tudo".
+    /// `!0` sem fonte: nada escondido.
     pub fn mascara_de_esconder(&self) -> u64 {
-        self.hiding.values().fold(u64::MAX, |acc, m| acc & m)
+        self.mascaras_esconder.iter().fold(u64::MAX, |a, m| a & m)
     }
 
-    /// `AddAppearanceOverride`: a aparência da fonte (substitui a anterior da mesma fonte).
     pub fn sobrescrever_aparencia(&mut self, fonte: u64, aparencia: u64) {
-        self.aparencias.insert(fonte, aparencia);
+        gravar_por_fonte(&mut self.fontes_aparencia, &mut self.aparencias, fonte, aparencia, |_, nova| nova);
         self.mudou_aparencia = true;
     }
 
-    /// `RemoveAppearanceOverride`. `true` se a fonte tinha aparência.
     pub fn remover_aparencia(&mut self, fonte: u64) -> bool {
-        self.aparencias.remove(&fonte).is_some()
+        tirar_fonte(&mut self.fontes_aparencia, &mut self.aparencias, fonte)
     }
 
-    /// `GetAppearanceOverridde` com override presente (`HasAppearanceOverriddes`): vence o menor hash de fonte, o 1º do `BTreeMap` de `aparencias`,
-    /// qualquer que seja a ordem de inserção. A referência devolve o `begin()` de um `Core::Map` = `tsl::hopscotch_map` (`Stl.hpp:40`), sem
-    /// ordem, então não tem regra; esta é a escolha determinística, e vale para as natives de `BwmsAparencia` e para o es20, que usam esta mesma loja.
+    /// A da fonte de menor hash: a escolha não depende da ordem em que os mods registram.
     pub fn aparencia_sobrescrita(&self) -> Option<u64> {
-        self.aparencias.values().next().copied()
+        self.aparencias.first().copied()
     }
 
-    /// `ChangesAppearance`: algum override de aparência já entrou, mesmo que removido depois.
     pub fn muda_aparencia(&self) -> bool {
         self.mudou_aparencia
     }
 }
 
-/// A álgebra única da máscara de chunks (`ApplyChunkMaskOverride`, `States.cpp:717-731`): `(original | mostrar) & esconder`. Todo OR antes de
-/// qualquer AND, então o esconder vence o mostrar. `mostrar` é a união das fontes (`0` sem fonte); `esconder`, a interseção (`!0` sem fonte).
+/// Esconder vence mostrar no mesmo chunk.
 pub fn combinar_mascara(original: u64, mostrar: u64, esconder: u64) -> u64 {
     (original | mostrar) & esconder
 }
 
-/// `ChunkMask::Set` (`Garment/ChunkMask.hpp:53-67`): lista de chunks → máscara, para a tabela de tags do runtime e o parser do `.xl`. OR de
-/// `1 << chunk`, e esconder com lista inverte (`if (!set && mask)`, `:63-66`). Esconder sem lista fica `0`, que no AND de `combinar_mascara`
-/// esconde tudo; mostrar sem lista fica `0` e não mostra nada. Shift em `u64`: na referência o `1` é `int` (C++20, `xmake.lua:7`), então o
-/// chunk 31 sai com extensão de sinal (`0xFFFFFFFF80000000`) e de 32 em diante é UB. `None` com chunk > 63: tirar só o item mudaria o pedido
-/// (`[64]` viraria a lista vazia, o esconder-tudo), então quem chama recusa a entrada inteira.
+/// `None` se algum chunk passa de 63: tirar só o inválido mudaria o sentido da lista (esconder sem chunk = esconder tudo).
 pub const fn mascara_de_chunks(mostrar: bool, chunks: &[u8]) -> Option<u64> {
-    let mut mascara = 0u64;
+    let mut bits = 0u64;
     let mut i = 0;
-    // `for` sobre iterador não roda em `const fn`
     while i < chunks.len() {
         if chunks[i] > 63 {
             return None;
         }
-        mascara |= 1u64 << chunks[i];
+        bits |= 1u64 << chunks[i];
         i += 1;
     }
-    Some(mascara_de_bits(mostrar, mascara))
+    Some(mascara_de_bits(mostrar, bits))
 }
 
-/// `ChunkMask(op, bits)`: `hide` inverte os bits dos chunks, menos a máscara vazia.
+/// Esconder com `bits == 0` dá 0: a lista vazia de esconder é "esconder tudo" na interseção.
 pub const fn mascara_de_bits(mostrar: bool, bits: u64) -> u64 {
-    if !mostrar && bits != 0 {
-        !bits
-    } else {
-        bits
-    }
+    if mostrar || bits == 0 { bits } else { !bits }
 }
 
-/// `EntityState::ApplyAppearanceOverride` sem a resolução de nome dinâmico: o override do componente, senão o do prefixo, senão a original quando algum
-/// dos dois já mudou a aparência (restauração). `None` = a referência sai sem escrever. `original` só roda no ramo de restauração, como o
-/// `GetOriginalAppearance` da referência (`States.cpp:684-686`): a 1ª leitura grava o cache de original, e componente sem mudança não pode gravá-lo.
+/// Aparência a gravar: override do componente, senão do prefixo, senão a original se algum dos dois já mudou. `original` só é lida na
+/// restauração: a 1ª leitura fica no cache de originais. Aparência 0 não é gravada.
 pub fn aparencia_aplicada(original: impl FnOnce() -> u64, componente: Option<&ComponentState>, prefixo: Option<&ComponentState>) -> Option<u64> {
-    let mudou = componente.is_some_and(ComponentState::muda_aparencia) || prefixo.is_some_and(ComponentState::muda_aparencia);
-    // TODO(A#22 22E, original 0): original `0` (CName None) dá `None`, como a referência (`States.cpp:689-690`), e o override removido fica na
-    // tela. Escrever 0 + `RefreshAppearance` só restaura se o motor tratar `meshAppearance` None no refresh, e isso não está provado: falta a
-    // variante do [a22e] com componente de mesh do V de aparência 0 (gravar X, gravar 0, slot 81 `0x101991450`, ler de volta, conferir a tela,
-    // prova em `proofs/`). A prova do boot 147 usou original "default" e não cobre este caso. Com a prova, os 2 pontos juntos (cp77-console):
-    // 1. `es20_original` e `es20_original_da_aparencia` devolvem `Option<u64>`: lock envenenado, leitura que falha ou `Es20Malhas` sem resolver
-    //    (a closure de `aplicar_aparencia_texto`) = `None`, sem escrita. Hoje dão 0 nesses casos, e sem o filtro esse 0 viraria CName None
-    //    escrito no componente.
-    // 2. Aqui: `original: impl FnOnce() -> Option<u64>` e `.filter(|a| *a != 0).or_else(|| mudou.then(original).flatten())`, com o filtro só nos
-    //    overrides. `es20_aplicar_aparencia`, `aplicar_aparencia_composta` e `aplicar_aparencia_texto` passam por aqui e só trocam a closure.
-    // No dylib público o ramo de restaurar é inalcançável: `BwmsAparencia` não tem `RemoveAppearanceOverride`.
-    componente
-        .and_then(ComponentState::aparencia_sobrescrita)
-        .or_else(|| prefixo.and_then(ComponentState::aparencia_sobrescrita))
-        .or_else(|| mudou.then(original))
-        .filter(|a| *a != 0)
+    let sobrescrita = componente.and_then(ComponentState::aparencia_sobrescrita).or_else(|| prefixo.and_then(ComponentState::aparencia_sobrescrita));
+    let valor = match sobrescrita {
+        Some(a) => a,
+        None if componente.is_some_and(ComponentState::muda_aparencia) || prefixo.is_some_and(ComponentState::muda_aparencia) => original(),
+        None => return None,
+    };
+    (valor != 0).then_some(valor)
 }
 
-/// `EntityState::ApplyChunkMaskOverride` com o estado do prefixo: OR do mostrar do componente e do
-/// prefixo, depois AND do esconder dos dois. `None` quando nenhum dos dois muda a máscara — a
-/// referência sai sem escrever nada nesse caso. `original` só roda depois desse teste, como o
-/// `GetOriginalChunkMask` da referência (`States.cpp:713-717`).
+/// Máscara a gravar, com o componente e o prefixo como uma fonte só; `None` (sem ler `original`) se nenhum dos dois mudou máscara.
 pub fn mascara_aplicada(original: impl FnOnce() -> u64, componente: Option<&ComponentState>, prefixo: Option<&ComponentState>) -> Option<u64> {
     if !componente.is_some_and(ComponentState::muda_mascara) && !prefixo.is_some_and(ComponentState::muda_mascara) {
         return None;
     }
-    let estados = [componente, prefixo];
-    let mostrar = estados.iter().flatten().fold(0, |acc, s| acc | s.mascara_de_mostrar());
-    let esconder = estados.iter().flatten().fold(u64::MAX, |acc, s| acc & s.mascara_de_esconder());
+    let mostrar = componente.map_or(0, ComponentState::mascara_de_mostrar) | prefixo.map_or(0, ComponentState::mascara_de_mostrar);
+    let esconder = componente.map_or(u64::MAX, ComponentState::mascara_de_esconder) & prefixo.map_or(u64::MAX, ComponentState::mascara_de_esconder);
     Some(combinar_mascara(original(), mostrar, esconder))
 }
 
@@ -225,8 +184,8 @@ mod tests {
 
     #[test]
     fn hiding_vence_showing() {
-        // Todos os OR antes de qualquer AND, como no `ApplyChunkMaskOverride`; a ordem do
-        // `GetOverriddenChunkMask` (sem chamador) daria 0b1111.
+        // Todos os OR antes de qualquer AND: aplicar fonte a fonte na ordem de chegada deixaria o
+        // mostrar de B religar o chunk 1 (0b1111).
         let mut s = ComponentState::novo();
         s.esconder(A, !0b0010);
         s.mostrar(B, 0b0010);
@@ -243,10 +202,10 @@ mod tests {
     }
 
     #[test]
-    fn mascara_de_chunks_bate_com_o_full_body_e_a_lista_vazia() {
-        // `chunkMask` de `t0_000_pwa_fpp__01_ca_pale` = `hide: [5, 6, 7]`, avaliada em `const` (a primitiva serve tabela `static`).
-        const FULL_BODY: Option<u64> = mascara_de_chunks(false, &[5, 6, 7]);
-        assert_eq!(FULL_BODY, Some(0xFFFF_FFFF_FFFF_FF1F));
+    fn mascara_de_chunks_esconde_os_listados_e_a_lista_vazia_esconde_tudo() {
+        // Esconder os chunks 5, 6 e 7 do torso (panturrilhas, tornozelos, pés). Em `const`: a primitiva serve tabela `static`.
+        const PERNAS_DO_TORSO: Option<u64> = mascara_de_chunks(false, &[5, 6, 7]);
+        assert_eq!(PERNAS_DO_TORSO, Some(0xFFFF_FFFF_FFFF_FF1F));
         assert_eq!(mascara_de_chunks(true, &[0, 1, 2]), Some(0b111), "mostrar não inverte");
         assert_eq!(mascara_de_chunks(false, &[]), Some(0), "esconder sem lista = esconde tudo no AND");
         assert_eq!(mascara_de_chunks(true, &[]), Some(0), "mostrar sem lista não mostra nada");
@@ -256,7 +215,7 @@ mod tests {
     #[test]
     fn mascara_de_chunks_vai_ate_o_63_e_recusa_a_lista_com_64() {
         assert_eq!(mascara_de_chunks(true, &[63]), Some(1u64 << 63));
-        // Na referência o `1` é `int`: o chunk 31 sairia `0xFFFFFFFF80000000`, e o 32 é UB.
+        // Com `1` do tipo `int` o chunk 31 sairia `0xFFFFFFFF80000000`, e o 32 é UB.
         assert_eq!(mascara_de_chunks(true, &[31]), Some(0x8000_0000));
         assert_eq!(mascara_de_chunks(true, &[32]), Some(1u64 << 32));
         assert_eq!(mascara_de_chunks(false, &[63]), Some(!(1u64 << 63)));
@@ -275,7 +234,7 @@ mod tests {
 
     #[test]
     fn ordem_dentro_do_grupo_nao_importa() {
-        // É o que permite portar `Core::Map` (desordenado) pra qualquer container.
+        // A ordem de chegada das fontes não entra no resultado: a tabela por fonte pode ser qualquer container.
         let mut x = ComponentState::novo();
         x.esconder(A, !0b0010);
         x.esconder(B, !0b0100);
@@ -289,7 +248,7 @@ mod tests {
 
     #[test]
     fn mesma_fonte_registrando_de_novo_ACUMULA() {
-        // `AddHidingChunkMaskOverride` faz AND no valor da chave (partindo de `~0`): a 2ª máscara da mesma fonte soma à 1ª.
+        // Esconder da mesma fonte faz AND no valor guardado (partindo de `!0`): a 2ª máscara da mesma fonte soma à 1ª.
         let mut s = ComponentState::novo();
         s.esconder(A, !0b0010);
         s.esconder(A, !0b0100);
@@ -299,7 +258,7 @@ mod tests {
 
     #[test]
     fn mesma_fonte_mostrando_de_novo_acumula_por_or() {
-        // `AddShowingChunkMaskOverride` faz OR no valor da chave (partindo de 0): a 2ª máscara da mesma fonte soma à 1ª.
+        // Mostrar da mesma fonte faz OR no valor guardado (partindo de 0): a 2ª máscara da mesma fonte soma à 1ª.
         let mut s = ComponentState::novo();
         s.mostrar(A, 0b0001);
         s.mostrar(A, 0b0100);
@@ -348,7 +307,7 @@ mod tests {
 
     #[test]
     fn remover_tudo_ainda_muda_e_aplica_a_original() {
-        // `ChangesChunkMask` não desliga: sem fonte nenhuma, a aplicação devolve a original e restaura o componente.
+        // `muda_mascara` não desliga: sem fonte nenhuma, a aplicação devolve a original e restaura o componente.
         let mut s = ComponentState::novo();
         s.esconder(A, !0b0010);
         assert!(s.remover_fonte(A));
@@ -378,7 +337,7 @@ mod tests {
 
     #[test]
     fn remover_fonte_e_fontes_ficam_so_na_mascara() {
-        // 1:1 com `RemoveChunkMaskOverride` (`States.cpp:56-62`); a aparência é o par separado `RemoveAppearanceOverride` (`:119-122`).
+        // `remover_fonte` só mexe na máscara; a aparência sai pelo `remover_aparencia`.
         let mut s = ComponentState::novo();
         s.sobrescrever_aparencia(A, 0x111);
         assert_eq!(s.fontes(), 0, "fonte só de aparência não conta");
@@ -395,7 +354,7 @@ mod tests {
 
     #[test]
     fn restaurar_com_aparencia_original_zero_nao_escreve() {
-        // Fixa o comportamento atual (o da referência): original `0` = sem escrita, e o override removido fica na tela. Ver o TODO em `aparencia_aplicada`.
+        // Fixa o comportamento atual: original `0` = sem escrita, e o override removido fica na tela. Ver o TODO em `aparencia_aplicada`.
         let mut c = ComponentState::novo();
         c.sobrescrever_aparencia(A, 0x111);
         assert_eq!(aparencia_aplicada(|| 0, Some(&c), None), Some(0x111));
@@ -480,21 +439,88 @@ mod tests {
 
     #[test]
     fn cenario_de_dois_mods_reais() {
-        // full-body esconde o torso; um mod de jaqueta força o ombro a aparecer.
+        // Um mod de corpo esconde o torso; um mod de jaqueta força o ombro a aparecer.
         const TORSO: u64 = 1 << 3;
         const OMBRO: u64 = 1 << 7;
-        const FULLBODY: u64 = 0x1111;
+        const CORPO: u64 = 0x1111;
         const JAQUETA: u64 = 0x2222;
         let mut s = ComponentState::novo();
-        s.esconder(FULLBODY, !TORSO);
+        s.esconder(CORPO, !TORSO);
         s.mostrar(JAQUETA, OMBRO);
         let final_ = s.mascara_final(u64::MAX);
-        assert_eq!(final_ & TORSO, 0, "torso escondido pelo full-body");
+        assert_eq!(final_ & TORSO, 0, "torso escondido pelo mod de corpo");
         assert_ne!(final_ & OMBRO, 0, "ombro forçado pela jaqueta");
-        // e desligar o full-body devolve o torso sem mexer na jaqueta
-        s.remover_fonte(FULLBODY);
+        // Desligar o mod de corpo devolve o torso sem mexer na jaqueta.
+        s.remover_fonte(CORPO);
         let depois = s.mascara_final(u64::MAX);
         assert_ne!(depois & TORSO, 0);
         assert_ne!(depois & OMBRO, 0);
+    }
+
+    /// A sequência de máscara e aparência dos vetores V01/V02 numa instância só.
+    #[test]
+    fn sequencia_de_mascara_e_aparencia_dos_vetores() {
+        let mut s = ComponentState::novo();
+        s.esconder(A, !0xF);
+        s.esconder(B, !0xF0);
+        s.esconder(A, !0x100);
+        assert_eq!((s.fontes(), s.mascara_de_esconder()), (2, 0xffff_ffff_ffff_fe00));
+        assert!(s.remover_fonte(A));
+        assert_eq!(s.mascara_final(!0), 0xffff_ffff_ffff_ff0f);
+        assert!(!s.remover_fonte(0xDEAD));
+        assert!(s.remover_fonte(B));
+        assert_eq!((s.fontes(), s.muda_mascara(), s.mascara_final(0x1234)), (0, true, 0x1234));
+        s.mostrar(A, 1);
+        s.mostrar(B, 2);
+        s.mostrar(A, 4);
+        assert_eq!((s.fontes(), s.mascara_de_mostrar()), (2, 7));
+        s.esconder(C, !1);
+        assert_eq!(s.mascara_final(0), 6);
+        s.esconder(A, !2);
+        assert_eq!((s.fontes(), s.mascara_final(0)), (3, 4));
+        assert!(s.remover_fonte(A));
+        assert_eq!(s.mascara_final(0), 2);
+        let mut zero = ComponentState::novo();
+        zero.esconder(A, 0);
+        assert_eq!(zero.mascara_final(!0), 0);
+        let mut nada = ComponentState::novo();
+        nada.esconder(A, !0);
+        assert!(nada.muda_mascara());
+        assert_eq!(nada.mascara_final(0x55), 0x55);
+
+        let mut ap = ComponentState::novo();
+        assert_eq!((ap.aparencia_sobrescrita(), ap.muda_aparencia()), (None, false));
+        ap.sobrescrever_aparencia(0xBB, 0x222);
+        ap.sobrescrever_aparencia(0xAA, 0x111);
+        assert_eq!(ap.aparencia_sobrescrita(), Some(0x111));
+        ap.sobrescrever_aparencia(0xAA, 0x333);
+        assert_eq!(ap.aparencia_sobrescrita(), Some(0x333));
+        assert!(ap.remover_aparencia(0xAA));
+        assert!(!ap.remover_aparencia(0xAA));
+        assert!(ap.remover_aparencia(0xBB));
+        assert_eq!((ap.aparencia_sobrescrita(), ap.muda_aparencia()), (None, true));
+        ap.esconder(7, !1);
+        ap.sobrescrever_aparencia(7, 0x700);
+        assert!(ap.remover_fonte(7));
+        assert_eq!(ap.aparencia_sobrescrita(), Some(0x700));
+    }
+
+    /// V03b e V04: as primitivas puras e a combinação componente + prefixo.
+    #[test]
+    fn mascaras_e_aplicacao_dos_vetores() {
+        assert_eq!(mascara_de_chunks(true, &[2, 2, 2]), Some(4));
+        assert_eq!(mascara_de_chunks(false, &[0, 1, 2, 3]), Some(0xffff_ffff_ffff_fff0));
+        assert_eq!(mascara_de_bits(false, 5), 0xffff_ffff_ffff_fffa);
+        assert_eq!(mascara_de_bits(false, !0), 0);
+        assert_eq!(combinar_mascara(0xf0, 1, !1), 0xf0);
+        let mut c = ComponentState::novo();
+        c.esconder(A, !3);
+        let mut p = ComponentState::novo();
+        p.mostrar(B, 0xC);
+        assert_eq!(mascara_aplicada(|| 0x11, Some(&c), Some(&p)), Some(0x1c));
+        let mut p8 = ComponentState::novo();
+        p8.esconder(B, !8);
+        assert_eq!(mascara_aplicada(|| 0xFF, Some(&c), Some(&p8)), Some(0xf4));
+        assert_eq!(mascara_aplicada(|| 0xFF, None, Some(&p8)), Some(0xf7));
     }
 }

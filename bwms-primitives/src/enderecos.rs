@@ -1,4 +1,4 @@
-//! Endereços do jogo achados em qualquer build pelas instruções em volta (RED4ext `#447`, sobreviver a patch do jogo).
+//! Endereços do jogo achados em qualquer build pelas instruções em volta (para sobreviver a patch do jogo).
 //!
 //! Os endereços que o BWMS usa são do build Steam 2.5.0. Num binário com outro layout (o GOG 2.3.1, ou um patch) cada um é
 //! achado por uma assinatura: as palavras ARM64 a partir dele com as partes que dependem do layout zeradas (página do `ADRP`, alvo de

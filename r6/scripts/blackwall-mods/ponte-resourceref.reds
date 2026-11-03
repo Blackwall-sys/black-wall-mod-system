@@ -1,10 +1,10 @@
-// ponte-resourceref.reds — Codeware `#17` (`ResourceRef`/`ResourceAsyncRef`) com nomes BWMS, sobre `ResRef` (2026-09-12).
+// ponte-resourceref.reds — `ResourceRef`/`ResourceAsyncRef` com nomes BWMS, sobre `ResRef` (2026-09-12).
 //
 // A referência forja duas structs nativas (`ResourceRef` = caminho + token, `ResourceAsyncRef` = só caminho). O BWMS não forja struct: aqui são
 // classes de script em cima do que já está provado — hash do `ResRef` (`BwmsResRefToHash`), carga por token-id do `#18`
 // (`BwmsDepotLoadResourceToken`, status 0 carregando / 1 carregado / 2 falhou, recurso pelo token) e duas natives novas: hash → `ResRef` e o texto do
 // caminho registrado. O `ResourcePath` guarda só o hash; `ResRefToString` devolve o texto quando o caminho passou como texto por
-// `ResRefHashFromPath`/`BwmsResRefFromPath` (o mesmo limite do `ResourcePathRegistry` da referência) e vazio quando não passou.
+// `ResRefHashFromPath`/`BwmsResRefFromPath` (o limite de um `ResourcePathRegistry`) e vazio quando não passou.
 // Divergências: `GetToken` devolve o token-id (a API de token do BWMS é por id) e `ToVariant`/`FromVariant` carregam o `ResRef`.
 // `BwmsHashToResRef` é declarado em ponte-casts.reds.
 native func BwmsResourcePathPart(hash: Uint64, part: Int32) -> String

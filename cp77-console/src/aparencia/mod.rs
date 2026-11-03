@@ -9,21 +9,13 @@ mod testes_da_mescla;
 use crate::jogo::cstring::destroi_cstring_da_pilha;
 use crate::mods_do_usuario::tramp_require;
 use crate::mods_do_usuario::tramp_version;
-use crate::mods_do_usuario::PLUGUE_ARCHIVEXL;
-use crate::jogo::travas::TRAVA_TENTAR_ESCRITA_VM;
-use crate::jogo::recursos::hash_do_caminho_do_recurso;
-use crate::jogo::recursos::token_do_path;
-use crate::jogo::objetos::handle_forte_de;
-use crate::jogo::objetos::gravar_handle_fraco;
+use crate::mods_do_usuario::PLUGUE_RECURSOS;
 use crate::jogo::objetos::destravar_fraco;
 use crate::jogo::objetos::travar_fraco;
-use crate::jogo::aparencia::APPDEF_NAME_OFF;
-use crate::jogo::aparencia::APPDEF_PARTSVALUES_OFF;
-use crate::jogo::aparencia::APPDEF_VISUALTAGS_OFF;
 use crate::jogo::listas::MOVER_HANDLES_VM;
-use crate::jogo::listas::dynarray_no_campo;
 use crate::marcador_individual;
 use crate::tweakdb::natives::a9_registro;
+use crate::jogo::aparencia::{APPDEF_NAME_OFF, APPDEF_PARTSVALUES_OFF, APPDEF_VISUALTAGS_OFF};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicPtr;
 use crate::ganchos::original_publicado;
@@ -31,11 +23,7 @@ use crate::ganchos::instalar_conferindo_prologo;
 use crate::mundo::*;
 use crate::ganchos::*;
 use crate::diagnostico::{
-    a11_alias, a11_anotar, a11_descritores, a11_pares_gravados, a17_classes, a17_garment_observar, a17e_alvos_de_skin, a17e_amostrar,
-    a51f_teste_hashes, A51fAmostra, A11_PRE, A11_TESTE, A17_CHAMADAS, A17_GARMENT_APLICADOS, A17_OBSERVAR, A17_PATCHES_NAO_PRONTOS, A17_VISTAS,
-    A48_ESTADOS_CRIADOS, A48_PATCHES_REGISTRADOS, A48_TRAVA_OCUPADA, A51B_TESTE_ALVO, A51F2_AMOSTRAS, A51F2_RECURSOS, A51F2_TESTE, A51F2_TESTE_NONE,
-    A51F3_AMOSTRAS, A51F3_COM_TAG, A51F3_DEFINICOES, A51F3_INCLUSOES, A51F3_LOGADAS, A51F3_NAO_PRONTAS, A51F3_PARTES, A51F3_SCHEMAS_COM_TAG,
-    A51F3_SEM_PACOTE, A51F3_TESTE, A51F_AMOSTRAS, C130D_ANOTOU, C130D_ATUAL, C130D_CONGELADO, C130D_DESPACHOS, C130D_NO_BUILDER, C130D_SEM_ANOTACAO,
+    a11_alias, a11_anotar, a11_descritores, a11_pares_gravados, a17_classes, A11_PRE, A11_TESTE, A17_CHAMADAS, A17_OBSERVAR, A17_VISTAS, C130D_ANOTOU, C130D_ATUAL, C130D_CONGELADO, C130D_DESPACHOS, C130D_NO_BUILDER, C130D_SEM_ANOTACAO,
     C130D_SOMADO, C130D_SOMADOS, C130D_TESTE, C134E_CONGELADO, C134E_REDESPACHANDO, C134E_REDESPACHAR, C134E_TOGGLE_POR_HOOK,
 };
 // Só os handlers de prova usam, e o `corpo_de_prova!` público não os cita.
@@ -44,8 +32,6 @@ use crate::diagnostico::{tramp_component_state_restore, tramp_component_state_sa
 use crate::tipos_do_motor::*;
 use crate::arquivos_do_jogo::*;
 use crate::texto_e_numeros::*;
-#[cfg(feature = "devtools")]
-use crate::tarefas::*;
 #[cfg(feature = "devtools")] use crate::camera::*; // aqui só os handlers de prova usam, e o `corpo_de_prova!` público não os cita
 use crate::corpo_e_rosto::*;
 use crate::roupas_e_armas::*;
@@ -119,7 +105,7 @@ pub(crate) unsafe extern "C" fn tramp_ebt_get_appearance_name(c: *mut c_void, _f
     write_uint_ret(out, ebw_com_builder(c, |b, _| eb_u64(eb_u64(b, EB_REQUEST), EBR_APARENCIA)).unwrap_or(0), 8);
 }
 
-/// Codeware `#25`: `EntityBuilderAppearanceWrapper` (pai `IScriptable`), sobre uma `EntityBuilderAppearance` do builder.
+/// `EntityBuilderAppearanceWrapper` (pai `IScriptable`), sobre uma `EntityBuilderAppearance` do builder.
 pub unsafe fn register_ebw_appearance(reg: &Registry) -> String {
     let iscriptable = reg.class_by_name("IScriptable");
     if !rtti::sane(iscriptable) || register_type_instantiable_with_parent(reg, "EntityBuilderAppearanceWrapper", "gameuiInGameMenuGameController", iscriptable).is_null() {
@@ -138,10 +124,9 @@ pub unsafe fn register_ebw_appearance(reg: &Registry) -> String {
     format!("[reg] EntityBuilderAppearanceWrapper: classe=OK métodos {r:?}")
 }
 
-// ===== Codeware `#33`/`#167` — `entVisualControllerComponent.reds`/`VisualControllerComponentEx.hpp`
+// ===== `entVisualControllerComponent`
 // ("possível pista pro full-body"): probes observe-only via a técnica NOVA descoberta
-// 2026-08-12 (aplicada hoje ao ArchiveXL pela 1ª vez neste projeto, aqui aplicada ao Codeware pela
-// PRIMEIRA vez) — minerar `cp77-symbols/symbols-demangled.txt` (68654 símbolos, binário macOS
+// 2026-08-12 — minerar `cp77-symbols/symbols-demangled.txt` (68654 símbolos, binário macOS
 // NÃO-stripado) pelo padrão `rtti::RegisterEventConnector<ClasseX, EventoY>`: o compilador emite um
 // símbolo demangled PRÓPRIO pro thunk `__invoke(void* closureData, ISerializable& receiver,
 // THandle<red::Event> const& event)` de cada par (classe, evento) que uma classe do motor escuta via
@@ -161,10 +146,9 @@ pub unsafe fn register_ebw_appearance(reg: &Registry) -> String {
 // torso/mesh existe, `enabled=0`, mas o consumidor que aplicaria o 2º gate de visibilidade nunca
 // foi achado NESSA família). `ent::VisualControllerComponent` é uma classe ARQUITETURALMENTE
 // DIFERENTE — não é o componente de mesh em si, é o gerenciador de DEPENDÊNCIAS VISUAIS que outros
-// componentes referenciam (item Codeware `#167`/`VisualControllerComponentEx.hpp`:
-// `Raw::VisualController::LoadDependencies` + `Raw::VisualControllerComponent::Controller@0xD8`,
+// componentes referenciam (`VisualController::LoadDependencies` + `VisualControllerComponent::Controller@0xD8`,
 // ponteiro pra uma struct interna SEPARADA `VisualController{dependencies[],looseDependencies[],
-// job,status,lock}@0x80`, offsets confirmados no header vendorizado real, item `#213` ✅). NUNCA
+// job,status,lock}@0x80`, offsets confirmados, item `#213` ✅). NUNCA
 // cogitada como candidata ao "2º gate" hipotetizado na saga do full-body — groundwork novo, não
 // retestе do que já foi refutado.
 //
@@ -299,7 +283,7 @@ pub(crate) unsafe fn install_visualcontroller_event_probes() {
     }
 }
 
-// ===== Codeware `#213` (`Red/VisualController.hpp`) — leitura de campo DIRETA da struct
+// ===== `VisualController` (`#213`) — leitura de campo DIRETA da struct
 // `VisualController` via um `entVisualControllerComponent*` já obtido pelo PRÓPRIO redscript
 // (não mais o `receiver` aproximado do thunk `__invoke` de `#167`/`#33` acima — aqui o alvo é o
 // componente que o mod já tem em mãos, ex. via `entity.FindComponentByType(n"
@@ -315,7 +299,7 @@ pub(crate) unsafe fn install_visualcontroller_event_probes() {
 // (`entries(ptr)@+0x00, capacity(u32)@+0x08, size(u32)@+0x0C`).
 //
 // **ZERO risco de tipo novo**: parâmetro é `ref<IComponent>` (tipo vanilla já seguro, mesmo
-// padrão do `#168`/`ComponentWrapper`), NÃO `entVisualControllerComponent` (que é `native class`
+// padrão do `#168`), NÃO `entVisualControllerComponent` (que é `native class`
 // sem NENHUMA ocorrência em `redscript-src` — mesma categoria CMesh-trap já corretamente
 // flagada pro item irmão `#33`/`entVisualControllerComponent.reds`, NÃO declarada aqui nem em
 // nenhum outro lugar do projeto). O caller passa qualquer `ref<IComponent>` (idealmente um
@@ -423,7 +407,7 @@ pub(crate) unsafe fn register_visualcontroller_213_natives(reg: &Registry, proto
     );
 }
 
-// ===== Codeware `#33` (`entVisualControllerComponent.reds`) — leitura PURA dos campos de TOPO
+// ===== `entVisualControllerComponent` (`#33`) — leitura PURA dos campos de TOPO
 // do componente (distinto do `#213` acima, que lê a sub-struct C++ interna `VisualController`
 // apontada por `Controller@0xD8`; aqui são os campos DECLARADOS DIRETO na classe RTTI real,
 // offsets 0x90-0xF3).
@@ -431,21 +415,19 @@ pub(crate) unsafe fn register_visualcontroller_213_natives(reg: &Registry, proto
 // **CORREÇÃO DE RISCO 2026-08-18 (offline, mesma técnica que destravou o item `#107` nesta
 // sessão) — a nota de risco de 2026-08-12 pra este item ("declarar a classe arriscaria o crash de
 // bind RTTI, precisa de RE de endereço via hook, tipo possivelmente ausente da RTTI") checou só
-// `redscript-src` (grep, zero hits pro nome da classe) e NUNCA cruzou contra o header GERADO da
-// reflection real do próprio jogo (`RED4ext.SDK/include/RED4ext/Scripting/Natives/Generated/ent/
-// VisualControllerComponent.hpp`, comentário "This file is generated from the Game's Reflection
-// data" — confiança máxima, mesma categoria já usada pra fechar `#107`/`#197`/`#160`). Esse header
+// `redscript-src` (grep, zero hits pro nome da classe) e NUNCA cruzou contra o layout GERADO da
+// reflection real do próprio jogo (confiança máxima, mesma categoria já usada pra fechar
+// `#107`/`#197`/`#160`). Esse layout
 // confirma os 4 campos citados na nota original do item com offsets EXATOS e AUTO-CONSISTENTES —
-// cross-referenciados contra 2 headers vendorizados INDEPENDENTES (`ent/IComponent.hpp` pro
-// tamanho do parent, `ResourceReference.hpp` pro tamanho de `Ref<T>`/`RaRef<T>`, `ent/
-// VisualControllerDependency.hpp` pro stride de cada entry do array):
-//   `IComponent` = 0x90 bytes exato (RED4EXT_ASSERT_SIZE, header separado) → `meshProxy` começa
+// cross-referenciados contra o tamanho do parent, o tamanho de `Ref<T>`/`RaRef<T>` e o stride de
+// cada entry do array:
+//   `IComponent` = 0x90 bytes exato → `meshProxy` começa
 //   em 0x90 (bate); `Ref<CMesh>` = `ResourcePath path@+0x00` + `SharedPtr<...> token@+0x08` =
-//   0x18 bytes (RED4EXT_ASSERT_SIZE(ResourceReference<>,0x18)) → 0x90+0x18=0xA8 bate com
+//   0x18 bytes → 0x90+0x18=0xA8 bate com
 //   `appearanceDependency`; `DynArray<T>` = 0x10 bytes (`entries*@+0x00/capacity(u32)@+0x08/
 //   size(u32)@+0x0C`, mesmo layout já batalha-testado em dezenas de itens deste projeto) →
 //   0xA8+0x10=0xB8 bate com `cookedAppearanceData`; `RaRef<T>` = `ResourcePath path@+0x00` = 0x8
-//   bytes (RED4EXT_ASSERT_SIZE(ResourceAsyncReference<>,0x8)) → 0xB8+0x8=0xC0 bate com o filler
+//   bytes → 0xB8+0x8=0xC0 bate com o filler
 //   documentado antes de `forcedLodDistance@0xF0`. NENHUMA lacuna, NENHUMA sobreposição — layout
 //   genuinamente confirmado por 4 fontes cruzadas, não candidato de RE.
 //
@@ -455,7 +437,7 @@ pub(crate) unsafe fn register_visualcontroller_213_natives(reg: &Registry, proto
 // não sabemos se o bind aceita a ancestralidade `IComponent` sem crashar; risco não-testado,
 // não-assumido). **Mas os CAMPOS não precisam da classe declarada** — mesma técnica já usada
 // pelo item irmão `#213` (`visualcontroller_ptr`, leitura via `Controller@0xD8`) e por `#71`
-// (VehicleObject)/`#168` (ComponentWrapper): o parâmetro é sempre `ref<IComponent>` (tipo vanilla
+// (VehicleObject)/`#168`: o parâmetro é sempre `ref<IComponent>` (tipo vanilla
 // 100% seguro, já usado em dezenas de itens), obtido via `Entity.FindComponentByType(
 // n"entVisualControllerComponent")` (item `#24`, PROVADO AO VIVO desde 2026-08-10 — usa só o
 // CName pra busca, nunca declara a classe) — `entVisualControllerComponent` NUNCA é declarada em
@@ -468,16 +450,16 @@ pub(crate) unsafe fn register_visualcontroller_213_natives(reg: &Registry, proto
 //     resource em vez do handle carregado (ex. `ResourceEvent.GetPath`).
 //   - `appearanceDependency: DynArray<VisualControllerDependency>` (0xA8, cada entry 0x18 bytes:
 //     `mesh: RaRef<CMesh>@+0x00`/`appearanceName: CName@+0x08`/`componentName: CName@+0x10`,
-//     header GERADO `ent/VisualControllerDependency.hpp`) — count + 3 getters indexados (mesmo
+//     layout GERADO) — count + 3 getters indexados (mesmo
 //     padrão `GetX(i)`/`GetXCount()` já usado em dezenas de arrays deste projeto, evita o risco de
-//     `array<T>`-retorno que já causou crash real noutro item — ver `TweakXL #43`).
+//     `array<T>`-retorno que já causou crash real noutro item — ver `GetRecordsArray`).
 //   - `cookedAppearanceData: RaRef<appearance::CookedAppearanceData>` (0xB8) → hash do
 //     `ResourcePath` embutido.
 //   - `forcedLodDistance: ent::ForcedLodDistance` (0xF0, enum C++ de 1 byte, valores 0-8) →
 //     `Int32` cru (sem declarar enum redscript-facing novo, evita mais um tipo).
 //
-// `LoadAppearanceDependencies()` (o único MÉTODO do item real) fica no bloco
-// `Codeware #33 — LoadAppearanceDependencies`, abaixo.
+// `LoadAppearanceDependencies()` (o único MÉTODO do item real) não tem implementação: a native fica
+// registrada com corpo vazio (`register_vcc_33_carga_natives`).
 pub(crate) unsafe fn vcc_ptr(component: *mut c_void) -> Option<*mut c_void> {
     if component.is_null() || !crate::memoria::is_readable(component, 0xF4) {
         return None;
@@ -601,40 +583,15 @@ pub(crate) unsafe extern "C" fn tramp_vcc_forced_lod_distance(_c: *mut c_void, f
     write_uint_ret(out, val as u32 as u64, 4);
 }
 
-// ===== Codeware `#43` (`Mesh/CMaterialInstance.reds`/`CMeshMaterialEntry.reds`/
-// `meshMeshAppearance.reds`) — correção de risco 2026-08-18, mesma técnica que destravou
-// `#107`/`#33`/`#11` hoje: a nota antiga (2026-08-12) dizia CMesh-trap pros 3 nomes porque
-// `grep redscript-src` = zero hits — CONFIRMADO de novo aqui contra os headers `Generated/`
-// (`CMaterialInstance.hpp`/`CMeshMaterialEntry.hpp`/`mesh/MeshAppearance.hpp`, "confiança
-// máxima"): os 3 tipos SÃO genuínos (offsets exatos documentados), mas a cadeia de ancestrais
-// inteira é CMesh-trap de verdade — `CMaterialInstance extends IMaterial extends CResource
-// extends ISerializable` e `meshMeshAppearance extends ISerializable` (direto) têm ZERO
-// ocorrências em `redscript-src` em CADA elo (`IMaterial`/`CResource`/`CMaterialInstance`
-// checados agora, nenhum hit). Diferente de `#33`, aqui NÃO existe declarar-nada e usar
-// `IComponent` widened — o único "dono" nativo de `CMeshMaterialEntry`/`CMaterialInstance`/
-// `meshMeshAppearance` é o próprio `CMesh` (`materialEntries@0xE0`/`localMaterialInstances@0x100`/
-// `appearances@0x1E0`, `CMesh.hpp`), e não existe atalho pra chegar num `CMesh*` VIVO: o único
-// campo que aponta pra lá (`entVisualControllerComponent.meshProxy: Ref<CMesh>@0x90`, o mesmo
-// já lido pelo `#33` acima) é um `Ref<T>` = `{path:ResourcePath@0x00, token:SharedPtr<
-// ResourceToken<CMesh>>@0x08}` (`ResourceReference.hpp`) — o `token` só existe se ALGUÉM (o
-// motor) já chamou `LoadAsync`/`Load` nesse `Ref` antes; nada neste projeto dispara isso.
+// ===== `CMaterialInstance`/`CMeshMaterialEntry`/`meshMeshAppearance` pelo `CMesh` do controller =====
+// Nenhum dos 3 tipos (nem a cadeia de ancestrais) aparece em `redscript-src`: declará-los no script arrisca o bind RTTI. O único dono nativo
+// deles é o `CMesh` (`materialEntries` `0xE0`, `localMaterialInstances` `0x100`, `appearances` `0x1E0`, `DATABASE.md`), e o único campo que
+// leva a um `CMesh` vivo é `entVisualControllerComponent.meshProxy` (`Ref<CMesh>` em `0x90` = `{path +0x00, token +0x08}`). O token só
+// existe se o motor já carregou esse `Ref`; nada aqui dispara a carga.
 //
-// Implementado MESMO ASSIM, de forma 100% observe-only e sem NUNCA declarar `CMesh`/
-// `CMaterialInstance`/`CMeshMaterialEntry`/`meshMeshAppearance`: se o `token` ACONTECER de já
-// estar populado (carregado por outro caminho do motor, fora do nosso controle) e
-// `ResourceToken::IsLoaded()` (`finished!=0 && error==0`, offsets `+0x58`/`+0x5C`,
-// `ResourceLoader.hpp`, "confiança máxima") for `true`, seguimos até `resource: Handle<CMesh>@
-// +0x28` → `.instance@+0x00` (`Handle<T>` = `SharedPtrBase<T>{instance*,refCount*}`,
-// `Handle.hpp`/`SharedPtr.hpp`, MESMO layout já usado em toda `rtti::make_handle` deste
-// projeto) → `CMesh*` genuíno. Com isso, lemos os 2 arrays que seguram os 3 tipos do item:
-// `materialEntries: DynArray<CMeshMaterialEntry>@0xE0` (stride 0x30, `name:CName@+0x20`/
-// `index:Uint16@+0x28`; o 4º campo do `.reds` real, `material`, NÃO aparece no dump de
-// reflection — 5 bytes de `unk` sobram até 0x30, sem espaço documentado pra um ponteiro,
-// então NÃO lido, evita chute) e `appearances: DynArray<Handle<mesh::MeshAppearance>>@0x1E0`
-// (stride 0x10, cada slot é outro `Handle<T>.instance` → `MeshAppearance*` → `name:CName@+0x30`
-// do próprio objeto). `CMaterialInstance` (a partir de `localMaterialInstances@0x100`, mesmo
-// padrão `Handle<T>` stride 0x10) fica de fora desta rodada por escopo (o array já demonstra o
-// mesmo mecanismo; ver nota de fechamento no catálogo).
+// Só leitura: com o token carregado (`finished` `+0x58` ≠ 0 e `error` `+0x5C` = 0), `resource` `+0x28` → instância → `CMesh*`. Dali,
+// `materialEntries` (passo 0x30, `name` `+0x20`, `index` u16 `+0x28`; o `material` não é lido) e `appearances` (passo 0x10, cada instância
+// com `name` `+0x30`). `localMaterialInstances` fica de fora.
 //
 // Toda a cadeia (7 saltos de ponteiro no pior caso: componente→meshProxy→token→
 // finished/error→resource.instance→CMesh→array→entry/Handle→objeto) é guardada por
@@ -765,7 +722,7 @@ pub(crate) unsafe extern "C" fn tramp_vcc_mesh_appearance_count(_c: *mut c_void,
 
 /// Resolve `MeshAppearance*` vivo em `appearances[idx]@0x1E0` (stride 0x10, `Handle<T>.instance@
 /// +0x00`), bound-check duplo (cap@0x1E8/size@0x1EC) + `ganchos::is_readable` no objeto apontado
-/// (`RED4EXT_ASSERT_SIZE(MeshAppearance,0xA8)`).
+/// (`MeshAppearance` de 0xA8 bytes).
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn vcc_mesh_appearance_ptr(mesh: *mut c_void, idx: i32) -> Option<*mut c_void> {
     if idx < 0 {
@@ -789,7 +746,7 @@ pub(crate) unsafe fn vcc_mesh_appearance_ptr(mesh: *mut c_void, idx: i32) -> Opt
 }
 
 /// `BwmsVccMeshAppearanceNameHash(component, idx) -> Uint64` — `appearances[idx].name@+0x30`
-/// (CName, `mesh::MeshAppearance` real, `Generated/mesh/MeshAppearance.hpp`).
+/// (CName da `mesh::MeshAppearance`, `DATABASE.md`).
 #[cfg(feature = "devtools")]
 pub(crate) unsafe extern "C" fn tramp_vcc_mesh_appearance_name_hash(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
@@ -911,14 +868,6 @@ pub(crate) unsafe fn register_vcc_33_natives(reg: &Registry, proto: *mut c_void)
     register_vcc_33_carga_natives(reg, proto);
 }
 
-// ===== Codeware `#33` — `LoadAppearanceDependencies` (2026-09-13) =====
-// O `LoadDependencies` do Mac é `0x10199e498` (`proofs/20260911-codeware-213-visualcontroller-loaddependencies.log`): `x0` controller, `w1` flag,
-// `x8` = JobHandle de 8 B, que ele mesmo constrói (`0x104ddf648`). A ordem é a da referência: sem controller, falso; cada `appearanceDependency` do
-// componente (passo 0x18: mesh@0, appearanceName@8) cujo mesh não está em `controller.dependencies` (passo 0x30: mesh@0x20, appearanceName@0x28)
-// ganha uma entrada. A entrada nasce pelo Resize do próprio motor (`0x10199e36c`, o que o agendador `0x10199deac` usa: realoca com o mover do tipo e
-// constrói zerado), com a trava exclusiva `lock@7C` pegada (`0x1000015f0`; soltar é limpar o bit 0x80, como o motor faz). A trava é solta antes do
-// `LoadDependencies`, que trava de novo. A espera usa o `IsDone` do JobHandle (`0x104ddf8e8`: contador de pendentes do job zerado), com teto de 5 s,
-// e o handle é destruído por `0x104ddf828`.
 #[cfg(feature = "devtools")]
 pub(crate) const VCC_LOADDEPENDENCIES_VM: u64 = 0x1_0199_e498;
 
@@ -934,98 +883,7 @@ pub(crate) const VCC_DEPENDENCIA_PASSO: usize = 0x18;
 #[cfg(feature = "devtools")]
 pub(crate) const VC_DEPENDENCIA_PASSO: usize = 0x30;
 
-#[cfg(feature = "devtools")]
-pub(crate) type VcDependenciasResizeFn = unsafe extern "C" fn(*mut u8, u32);
-
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn vc_travar(ctrl: *mut u8) {
-    crate::jogo::travas::travar_escrita((ctrl.add(0x7C)) as *mut u8);
-}
-
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn vc_destravar(ctrl: *mut u8) {
-    crate::jogo::travas::soltar_escrita((ctrl.add(0x7C)) as *mut u8);
-}
-
-/// `controller.dependencies`: (entradas, tamanho); `None` se ilegível.
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn vc_dependencias(ctrl: *const u8) -> Option<(*mut u8, u32)> {
-    let entradas = ctrl.add(0x10).cast::<u64>().read_unaligned() as *mut u8;
-    let tam = ctrl.add(0x1C).cast::<u32>().read_unaligned();
-    if tam > 4096 || (tam != 0 && (entradas.is_null() || !crate::memoria::is_readable(entradas as *const c_void, tam as usize * VC_DEPENDENCIA_PASSO))) {
-        return None;
-    }
-    Some((entradas, tam))
-}
-
-/// Tamanho de `controller.dependencies` e `status`; `None` sem controller.
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn vcc_controller_estado(comp: *mut c_void) -> Option<(u32, i32)> {
-    vcc_ptr(comp)?;
-    let ctrl = visualcontroller_ptr(comp)? as *const u8;
-    let (_, tam) = vc_dependencias(ctrl)?;
-    Some((tam, ctrl.add(0x78).cast::<i32>().read_unaligned()))
-}
-
-/// Entrada `idx` de `controller.dependencies`: (token, instância da aparência, mesh, appearanceName).
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn vcc_controller_dependencia(comp: *mut c_void, idx: u32) -> Option<(u64, u64, u64, u64)> {
-    vcc_ptr(comp)?;
-    let ctrl = visualcontroller_ptr(comp)? as *const u8;
-    let (entradas, tam) = vc_dependencias(ctrl)?;
-    if idx >= tam {
-        return None;
-    }
-    let e = entradas.add(idx as usize * VC_DEPENDENCIA_PASSO) as *const u64;
-    Some((e.read_unaligned(), e.add(2).read_unaligned(), e.add(4).read_unaligned(), e.add(5).read_unaligned()))
-}
-
-/// `LoadAppearanceDependencies` sem a espera: (entradas acrescentadas, JobHandle vivo ou 0, que fica com quem chamou); `None` sem controller.
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn vcc_carregar_dependencias(comp: *mut c_void) -> Option<(u32, u64)> {
-    vcc_ptr(comp)?;
-    let ctrl = visualcontroller_ptr(comp)? as *mut u8;
-    let lista = (comp as *const u64).add(0xA8 / 8).read_unaligned() as *const u64;
-    let n = (comp as *const u32).add(0xB4 / 4).read_unaligned();
-    if n > 4096 || (n != 0 && (lista.is_null() || !crate::memoria::is_readable(lista as *const c_void, n as usize * VCC_DEPENDENCIA_PASSO))) {
-        return None;
-    }
-    let redimensionar: VcDependenciasResizeFn = std::mem::transmute(crate::rebase(VCC_DEPENDENCIAS_RESIZE_VM));
-    let mut novas = 0u32;
-    vc_travar(ctrl);
-    for i in 0..n as usize {
-        let (mesh, aparencia) = (lista.add(i * 3).read_unaligned(), lista.add(i * 3 + 1).read_unaligned());
-        let Some((entradas, tam)) = vc_dependencias(ctrl) else { break };
-        if (0..tam as usize).any(|j| (entradas.add(j * VC_DEPENDENCIA_PASSO + 0x20) as *const u64).read_unaligned() == mesh) {
-            continue;
-        }
-        redimensionar(ctrl.add(0x10), tam + 1);
-        let Some((entradas, tam_novo)) = vc_dependencias(ctrl) else { break };
-        if tam_novo != tam + 1 {
-            break;
-        }
-        let nova = entradas.add(tam as usize * VC_DEPENDENCIA_PASSO) as *mut u64;
-        nova.add(4).write_unaligned(mesh);
-        nova.add(5).write_unaligned(aparencia);
-        novas += 1;
-    }
-    vc_destravar(ctrl);
-    if novas == 0 {
-        return Some((0, 0));
-    }
-    let mut job = 0u64;
-    core::arch::asm!(
-        "blr {f}",
-        f = in(reg) crate::rebase(VCC_LOADDEPENDENCIES_VM),
-        in("x0") ctrl as u64,
-        in("x1") 0u64,
-        in("x8") &mut job as *mut u64,
-        clobber_abi("C"),
-    );
-    Some((novas, job))
-}
-
-/// Acrescenta `{mesh, appearanceName}` em `appearanceDependency` do componente (o campo que a referência expõe ao script); devolve o índice.
+/// Acrescenta `{mesh, appearanceName}` em `appearanceDependency` do componente (o campo que o script lê); devolve o índice.
 /// Com folga escreve no lugar; sem folga cresce pelo reserve do motor com mover nulo, que realoca pelo alocador copiando os bytes e zera o
 /// resto (`0x1000287a0`) — certo aqui, porque a entrada é só dado simples (dois hashes e um CName).
 #[cfg(feature = "devtools")]
@@ -1053,72 +911,10 @@ pub(crate) unsafe fn vcc_acrescentar_dependencia(comp: *mut c_void, mesh: u64, a
     Some(tam)
 }
 
-/// Tira a última entrada de `controller.dependencies` se o mesh for `mesh`, pelo Resize do motor (destrói a entrada e solta o token).
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn vcc_remover_ultima_do_controller(comp: *mut c_void, mesh: u64) -> bool {
-    if vcc_ptr(comp).is_none() {
-        return false;
-    }
-    let Some(ctrl) = visualcontroller_ptr(comp) else { return false };
-    let ctrl = ctrl as *mut u8;
-    let redimensionar: VcDependenciasResizeFn = std::mem::transmute(crate::rebase(VCC_DEPENDENCIAS_RESIZE_VM));
-    vc_travar(ctrl);
-    let removeu = match vc_dependencias(ctrl) {
-        Some((entradas, tam)) if tam > 0 && (entradas.add((tam as usize - 1) * VC_DEPENDENCIA_PASSO + 0x20) as *const u64).read_unaligned() == mesh => {
-            redimensionar(ctrl.add(0x10), tam - 1);
-            true
-        }
-        _ => false,
-    };
-    vc_destravar(ctrl);
-    removeu
-}
-
-/// Tira a última entrada de `appearanceDependency` do componente se o mesh for `mesh` (dados simples: só o tamanho volta).
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn vcc_remover_ultima_do_componente(comp: *mut c_void, mesh: u64) -> bool {
-    if vcc_ptr(comp).is_none() {
-        return false;
-    }
-    let arr = (comp as *mut u8).add(0xA8);
-    let entradas = arr.cast::<u64>().read_unaligned() as *const u64;
-    let tam = arr.add(0x0C).cast::<u32>().read_unaligned();
-    if tam == 0 || entradas.is_null() || !crate::memoria::is_readable(entradas as *const c_void, tam as usize * VCC_DEPENDENCIA_PASSO) {
-        return false;
-    }
-    if entradas.add((tam as usize - 1) * 3).read_unaligned() != mesh {
-        return false;
-    }
-    arr.add(0x0C).cast::<u32>().write_unaligned(tam - 1);
-    true
-}
-
 /// `entVisualControllerComponent` do V, ou nulo.
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn vcc_do_jogador(reg: &Registry) -> *mut c_void {
     componente_do_jogador(reg, "entVisualControllerComponent")
-}
-
-/// `BwmsVccLoadAppearanceDependencies(component: ref<IComponent>, wait: Bool) -> Bool` — verdadeiro se acrescentou dependência ao controller.
-#[cfg(feature = "devtools")]
-pub(crate) unsafe extern "C" fn tramp_vcc_load_appearance_dependencies(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
-    let args = rtti::read_params_consuming(current_native_func(), frame);
-    let inst = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
-    let esperar = args.get(1).map(|(v, _)| rtti::bool_do_script(*v)).unwrap_or(false);
-    let carga = if rtti::sane(inst) { vcc_carregar_dependencias(inst) } else { None };
-    let mut espera = None;
-    if let Some((_, mut job)) = carga {
-        if esperar && job != 0 {
-            espera = Some(jobhandle_esperar(job, VCC_ESPERA_MS));
-        }
-        jobhandle_soltar(&mut job);
-    }
-    let novas = carga.map_or(0, |c| c.0);
-    crate::log_dev!(
-        "[cw-vcc-33] BwmsVccLoadAppearanceDependencies(component={inst:p}, wait={esperar}) -> controller={} novas={novas} concluiu={espera:?}",
-        carga.is_some()
-    );
-    write_bool_ret(out, novas > 0);
 }
 
 /// `BwmsVccAddAppearanceDependency(component: ref<IComponent>, mesh: ResRef, appearanceName: CName) -> Int32` — índice novo, -1 se não coube.
@@ -1134,13 +930,10 @@ pub(crate) unsafe extern "C" fn tramp_vcc_add_appearance_dependency(_c: *mut c_v
 }
 
 pub(crate) unsafe fn register_vcc_33_carga_natives(reg: &Registry, proto: *mut c_void) {
-    let p1 = compose_params_from_types(reg, &["handle:IComponent", "Bool"]);
-    let ok1 = params_compostos(p1)
-        && registro_de_prova!(register_global_composed(reg, proto, p1, "BwmsVccLoadAppearanceDependencies", "BwmsVccLoadAppearanceDependencies", corpo_de_prova!(tramp_vcc_load_appearance_dependencies)));
     let p2 = compose_params_from_types(reg, &["handle:IComponent", "ResRef", "CName"]);
     let ok2 = params_compostos(p2)
         && registro_de_prova!(register_global_composed(reg, proto, p2, "BwmsVccAddAppearanceDependency", "BwmsVccAddAppearanceDependency", corpo_de_prova!(tramp_vcc_add_appearance_dependency)));
-    crate::log_dev!("[reg] register_all: cw-vcc-33 LoadAppearanceDependencies={ok1} AddAppearanceDependency={ok2}");
+    crate::log_dev!("[reg] register_all: vcc-33 AddAppearanceDependency={ok2}");
 }
 
 /// `(entries, size)` de um `DynArray` num offset de propriedade do objeto.
@@ -1473,14 +1266,11 @@ pub(crate) unsafe extern "C" fn tramp_mesh_appearance_chunk_count(_c: *mut c_voi
     write_i32_ret(out, r);
 }
 
-/// `BwmsMeshRefScan(obj, ate) -> Int32`/// `BwmsMeshRefScan(obj, ate) -> Int32` — loga TODO `u64` alinhado em `[0, ate)` do objeto.
+/// `BwmsMeshRefScan(obj, ate) -> Int32` — loga TODO `u64` alinhado em `[0, ate)` do objeto.
 ///
-/// Existe porque o `0x228` do header oficial **não** entregou um `ResourcePath` no
-/// `entSkinnedMeshComponent` desta build: o valor lido (`0xebada5168620c5fe`) não corresponde a
-/// nenhum dos **663.364** paths do install (`bwms-catalog::hash_para_path`, ferramenta validada
-/// contra 2 hashes que o próprio motor produziu no `#18`). O header declara
-/// `uint8_t unk1E0[0x228-0x1E0]` — ou seja, o próprio SDK não conhece essa faixa, então o layout
-/// pode divergir aqui.
+/// Existe porque o `0x228` não entregou um `ResourcePath` no `entSkinnedMeshComponent` desta build: o valor lido (`0xebada5168620c5fe`)
+/// não corresponde a nenhum dos **663.364** paths do install (`bwms-catalog::hash_para_path`, validada contra 2 hashes que o próprio
+/// motor produziu no `#18`), e a faixa `0x1E0..0x228` não tem campo conhecido.
 ///
 /// Em vez de tentar outro offset no palpite, despeja os candidatos e deixa a REVERSÃO OFFLINE
 /// decidir: um `u64` que reverte pra um path real do dump é o campo; os outros não são. Mesmo
@@ -1518,10 +1308,8 @@ pub(crate) unsafe extern "C" fn tramp_mesh_ref_scan(_c: *mut c_void, frame: *mut
     write_i32_ret(out, n);
 }
 
-/// Codeware `#30` (`MeshComponent.meshResource: ref<CMesh>`) — 2026-08-10 (cont.192). Achado de
-/// pesquisa (agente background): `enablers/Codeware/src/App/Entity/MeshComponentEx.hpp` —
-/// `RTTI_EXPAND_CLASS(Red::entMeshComponent, {RTTI_PROPERTY(Red::Handle<Red::CMesh>, 0x158,
-/// "meshResource")})` — offset REAL do C++ vendorizado, campo Handle já existente (16 bytes,
+/// `MeshComponent.meshResource: ref<CMesh>` — 2026-08-10 (cont.192): `Handle<CMesh>` em `0x158` do
+/// `entMeshComponent`, campo Handle já existente (16 bytes,
 /// `{instance,refCount}`, mesmo layout já lido/escrito dezenas de vezes neste projeto). Genérico
 /// (aceita QUALQUER `ref<IComponent>`, não resolve classe por nome — evita a categoria de risco
 /// "alias vs CNAME real" já achada pra PlayerSystem/gamePlayerSystem, cont.185): o caller decide
@@ -1545,10 +1333,10 @@ pub(crate) unsafe extern "C" fn tramp_meshcomponent_get_mesh_resource(_c: *mut c
     write_handle_ret(out, inst);
 }
 
-/// axl-fullbody-torso (2026-08-07, cont.41): em vez de esperar um evento disparar pra um
+/// Corpo inteiro/torso (2026-08-07, cont.41): em vez de esperar um evento disparar pra um
 /// componente de torso (3 candidatos já testados, todos silenciosos ou só-mundo — ver
 /// `notes/GARMENT-APPEARANCE-COMPONENT-FACTS.md` §3), ENUMERA DIRETO os componentes reais do
-/// player AGORA — mesmo offset GROUND-TRUTH já usado em `cw-entity-builder`
+/// player AGORA — mesmo offset GROUND-TRUTH já usado no construtor de entidade
 /// (`Entity+0x70(ComponentsStorage)+0x30(components) = Entity+0xA0`, `DynArray<Handle<
 /// IComponent>>`: entries@+0x00/cap@+0x08/size@+0x0C, stride 16B `{instance,refcount}`).
 /// Resolve a CClass* de `SkinnedMeshComponent` 1x via RTTI e compara por IGUALDADE DE PONTEIRO
@@ -1645,8 +1433,7 @@ pub(crate) fn nome_prop_chunk_mask(kind: GarmentComponentKind) -> Option<&'stati
     (kind != GarmentComponentKind::Unsupported).then_some("chunkMask")
 }
 
-/// `ComponentWrapper::GetResourcePath` (`Wrapper.cpp:149-165`) — campo cru de 8 bytes (o
-/// `RaRef<T>` inteiro É o `ResourcePath`, ver `garment_mesh_path_offset`).
+/// Caminho do recurso do componente: campo cru de 8 bytes (o `RaRef<T>` inteiro É o `ResourcePath`, ver `garment_mesh_path_offset`).
 pub(crate) unsafe fn component_get_resource_path(inst: *mut c_void, kind: GarmentComponentKind) -> Option<u64> {
     let off = garment_mesh_path_offset(inst, kind)?;
     if !crate::memoria::is_readable((inst as *const u8).add(off) as *const c_void, 8) {
@@ -1655,8 +1442,7 @@ pub(crate) unsafe fn component_get_resource_path(inst: *mut c_void, kind: Garmen
     Some(rd_u64(inst, off))
 }
 
-/// `ComponentWrapper::SetResourcePath` (`Wrapper.cpp:167-183`) — `aComponent->mesh = aPath;
-/// return true;` (ou `morphResource` pro kind `MorphTarget`). Campo cru, fiel à fonte real.
+/// Grava o caminho do recurso (`mesh`, ou `morphResource` no `MorphTarget`). Campo cru: a recarga é de quem chama.
 pub(crate) unsafe fn component_set_resource_path(inst: *mut c_void, kind: GarmentComponentKind, value: u64) -> bool {
     let off = match garment_mesh_path_offset(inst, kind) {
         Some(o) => o,
@@ -1669,7 +1455,7 @@ pub(crate) unsafe fn component_set_resource_path(inst: *mut c_void, kind: Garmen
     true
 }
 
-/// `ComponentWrapper::GetChunkMask` (Wrapper.cpp:350-366) — campo cru, sem native nenhuma.
+/// `chunkMask` do componente: campo cru, sem native nenhuma.
 pub(crate) unsafe fn component_get_chunk_mask(inst: *mut c_void, kind: GarmentComponentKind) -> Option<u64> {
     let off = garment_chunk_mask_offset(inst, kind)?;
     if !crate::memoria::is_readable((inst as *const u8).add(off) as *const c_void, 8) {
@@ -1678,11 +1464,8 @@ pub(crate) unsafe fn component_get_chunk_mask(inst: *mut c_void, kind: GarmentCo
     Some(rd_u64(inst, off))
 }
 
-/// `ComponentWrapper::SetChunkMask` (Wrapper.cpp:368-384) — `aComponent->chunkMask = X;
-/// return true;`, fielmente replicado: NÃO chama `RefreshAppearance`/nenhuma outra nativa
-/// sozinho (quem orquestra o refresh + a combinação multi-mod de qual valor final aplicar
-/// é `aplicar_mascara_composta`, sobre o `ComponentState` de `bwms_primitives::override_state` —
-/// esta função Rust é deliberadamente só a ponta "componente vivo").
+/// Grava o `chunkMask`. Não chama `RefreshAppearance`: a combinação das fontes é da loja de override (`es20_aplicar_mascara`) e a
+/// recarga visual é de quem chama.
 pub(crate) unsafe fn component_set_chunk_mask(inst: *mut c_void, kind: GarmentComponentKind, value: u64) -> bool {
     let off = match garment_chunk_mask_offset(inst, kind) {
         Some(o) => o,
@@ -1695,10 +1478,8 @@ pub(crate) unsafe fn component_set_chunk_mask(inst: *mut c_void, kind: GarmentCo
     true
 }
 
-/// `ComponentWrapper::GetAppearanceName`/`SetAppearanceName` (Wrapper.cpp:276-310) — mesma
-/// categoria (campo cru, `CName` = `uint64_t` hash puro, mesmo formato já usado em toda a
-/// codebase pra CName). Expostas ao redscript pelas natives `BwmsComponentGetMeshAppearanceName`/
-/// `BwmsComponentSetAppearanceName` (seção Codeware `#168`, abaixo).
+/// `meshAppearance` do componente (campo cru, `CName`). Expostas ao redscript pelas natives `BwmsComponentGetMeshAppearanceName`/
+/// `BwmsComponentSetAppearanceName` (abaixo).
 pub(crate) unsafe fn component_get_appearance_name(inst: *mut c_void, kind: GarmentComponentKind) -> Option<u64> {
     let off = garment_mesh_appearance_offset(inst, kind)?;
     if !crate::memoria::is_readable((inst as *const u8).add(off) as *const c_void, 8) {
@@ -1719,43 +1500,6 @@ pub(crate) unsafe fn component_set_appearance_name(inst: *mut c_void, kind: Garm
     true
 }
 
-/// Nome da aparência (`meshAppearance`) do componente de mesh; `None` fora de mesh.
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn componente_aparencia(reg: &crate::rtti::Registry, inst: *mut c_void) -> Option<u64> {
-    let kind = detect_garment_component_kind(reg, inst);
-    if kind == GarmentComponentKind::Unsupported {
-        return None;
-    }
-    component_get_appearance_name(inst, kind)
-}
-
-/// A#22 22E — `EntityState::ApplyAppearanceOverride` composto, sem a resolução de nome dinâmico: os 2 retornos cedo da referência, a aparência do
-/// componente, senão a do prefixo, senão a original (`override_state::aparencia_aplicada`), `SetAppearanceName` e `RefreshAppearance`. O refresh só roda
-/// com vtable e slot 81 iguais a um par medido (`es20_refresh_medido`); fora disso volta `None` com o nome já gravado, como o `false` da referência
-/// quando o refresh falha.
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn aplicar_aparencia_composta(
-    reg: &crate::rtti::Registry,
-    inst: *mut c_void,
-    original: u64,
-    componente: Option<&bwms_primitives::override_state::ComponentState>,
-    prefixo: Option<&bwms_primitives::override_state::ComponentState>,
-) -> Option<u64> {
-    if inst.is_null() || (inst as *const u8).add(0x8b).read_unaligned() == 0 {
-        return None;
-    }
-    let kind = detect_garment_component_kind(reg, inst);
-    if kind == GarmentComponentKind::Unsupported {
-        return None;
-    }
-    let fim = bwms_primitives::override_state::aparencia_aplicada(|| original, componente, prefixo)?;
-    if !component_set_appearance_name(inst, kind, fim) {
-        return None;
-    }
-    let refresh = es20_refresh_medido(inst)?;
-    refresh(inst);
-    Some(fim)
-}
 
 /// `BwmsAparencia.GetVisualTagOverrideCount(entity: wref<Entity>, tag: String) -> Int32`: quantos componentes batem com a tabela da tag pelo nome base
 /// ou pelo prefixo do nome (`componentes_da_tag`), sem mudar nada. Conta também os que o apply não escreve (desligados ou fora de mesh).
@@ -1867,20 +1611,10 @@ pub(crate) unsafe extern "C" fn tramp_remover_tag_visual_do_mod_com_refresh(_c: 
     write_uint_ret(out, rewritten as u64, 4);
 }
 
-// ===== Codeware `#168` (`App::ComponentWrapper.GetChunkMask`/`SetChunkMask`), 2026-08-12
-// (round 2 do sweep de Codeware) — expõe pro REDSCRIPT o MESMO mecanismo do ArchiveXL `#22`
-// (funções acima) — ZERO RE nova, reusa `detect_garment_component_kind`/
-// `component_get_chunk_mask`/`component_set_chunk_mask` byte-a-byte (mesmos offsets
-// confirmados contra o header RTTI oficial gerado da Reflection do jogo real, ver comentário
-// grande no topo desta seção). O alvo é o `this` que o PRÓPRIO redscript já tem em mãos (ex.
-// de dentro de um `@wrapMethod`/evento de componente), como na API real
-// `ComponentWrapper::GetChunkMask (const)`/`SetChunkMask` (`Wrapper.cpp:316-350`), que opera
-// sobre UM componente já identificado, não sobre uma busca por nome.
+// ===== `BwmsComponentGetChunkMask`/`SetChunkMask`: o `chunkMask` de UM componente que o script já tem em mãos (de um `@wrapMethod` ou evento
+// de componente), pelos mesmos acessores dos componentes condicionais (`component_get_chunk_mask`/`component_set_chunk_mask`, offset pelo RTTI).
 //
-// **Achado de bookkeeping que acompanha esta implementação**: a OUTRA metade do item #168
-// (`ComponentWrapper::IsEnabled`/`SetEnabled`) não precisa de NENHUM código novo — são
-// `m_component->isEnabled` puro no C++ real (`Wrapper.cpp:138-147`), e o redscript já tem
-// exatamente essa capacidade como NATIVA VANILLA REAL em `IComponent` (não forjada por nós):
+// `IsEnabled`/`Toggle` não precisam de native nossa: o `isEnabled` do componente já é exposto como native vanilla em `IComponent`:
 // `redscript-src/orphans.script:16667` (`IsEnabled() -> Bool`) e `:16668`
 // (`Toggle(on: Bool) -> Void`, native, dispara `Component/Toggle` — mesmo mecanismo já
 // catalogado no item `#127`). Qualquer mod real já pode chamar `component.IsEnabled()`/
@@ -1922,15 +1656,13 @@ pub(crate) unsafe extern "C" fn tramp_componentwrapper_set_chunk_mask(_c: *mut c
     write_bool_ret(out, ok);
 }
 
-/// `BwmsComponentRefreshAppearance(component: ref<IComponent>) -> Bool` — `ComponentWrapper::
-/// RefreshAppearance` (`Wrapper.cpp:352-359`): `if (!IsMeshComponent()) return false;
-/// Raw::MeshComponent::RefreshAppearance(m_component); return true;`, chamada virtual pelo slot 0x280
-/// (Codeware `Red/Mesh.hpp:37-39`, `RawVFunc`). Aqui o alvo é fixo: `0x101991450`, o slot 81 de
+/// `BwmsComponentRefreshAppearance(component: ref<IComponent>) -> Bool`: recarga visual do componente de mesh; fora das classes de mesh,
+/// `false`. O alvo é fixo: `0x101991450`, o slot 81 de
 /// `entSkinnedMeshComponent`, provado ao vivo 2x (`APPEARANCE_REBUILD_PROXY_VM`,
 /// `crate::selftest::run_toggle_and_rebuild`/comando `togglerebuild`, 2026-08-07), chamado em toda a
 /// `SkinnedFamily`; `MeshComponent` e `MorphTarget` devolvem `false` sem chamar nada. O
 /// `entGarmentSkinnedMeshComponent` tem slot 81 próprio, `0x10198860c` (`ES20_REFRESH_MEDIDOS`, boot 201): no garment esta
-/// native chama a implementação do `entSkinnedMeshComponent`, não a da classe, e diverge da referência. O desmonte dos dois
+/// native chama a implementação do `entSkinnedMeshComponent`, não a da classe. O desmonte dos dois
 /// (DATABASE.md, 2026-09-14) dá a mesma soltura do proxy em `+0x1d8` e os mesmos virtuais `+0x2d0`/`+0x2d8`.
 // TODO(C#168, portão de refresh único): trocar o alvo fixo por `es20_refresh_medido(inst)`, o portão das natives de tag e do
 // `ApplyAppearanceOverride`. Muda o que a native chama no garment (`0x10198860c`) e passa a cobrir o morph (`0x101983030`); pede
@@ -2015,14 +1747,12 @@ pub(crate) unsafe extern "C" fn tramp_componentwrapper_set_appearance_name(_c: *
 /// appearance_offset`). **ACHADO REAL desta rodada (não bookkeeping — confirmado ao vivo por um
 /// negativo real)**: `meshAppearance` (campo do SUBTIPO `entMeshComponent`/`entSkinnedMeshComponent`/
 /// etc.) é um campo GENUINAMENTE DIFERENTE de `IComponent::appearanceName` (campo da CLASSE BASE,
-/// usado por `ComponentWrapper::GetUniqueId()` — `Wrapper.cpp:125-136` — junto com `appearancePath`,
-/// TAMBÉM da base). A native VANILLA `IComponent.GetAppearanceName()` (`orphans.script:16659`) lê
+/// que entra na identidade do componente, `es20_id_do_componente`, junto com `appearancePath`, TAMBÉM da base). A native VANILLA `IComponent.GetAppearanceName()` (`orphans.script:16659`) lê
 /// o campo da BASE, não `meshAppearance` do subtipo — confirmado ao vivo: escrever em
 /// `meshAppearance` via `SetAppearanceName` e reler via `GetAppearanceName()` (vanilla) sempre
 /// deu `None`/`matchesExpected=false`, mesmo com `wroteOk=true` (a escrita em si funcionou,
-/// só não é observável pela native errada). Por isso este getter tem nome DIFERENTE da fonte
-/// real (`ComponentWrapper::GetAppearanceName`, que colide com o native vanilla de `IComponent`
-/// — nunca declarável via `@addMethod` sem sombrear um `final` já existente).
+/// só não é observável pela native errada). Por isso este getter não se chama `GetAppearanceName`: o nome colide com o native vanilla de
+/// `IComponent`, nunca declarável via `@addMethod` sem sombrear um `final` já existente.
 pub(crate) unsafe extern "C" fn tramp_componentwrapper_get_mesh_appearance_name(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let inst = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -2037,8 +1767,7 @@ pub(crate) unsafe extern "C" fn tramp_componentwrapper_get_mesh_appearance_name(
     write_uint_ret(out, hash, 8);
 }
 
-/// `BwmsComponentIsMeshComponent(component: ref<IComponent>) -> Bool` — `ComponentWrapper::
-/// IsMeshComponent` (`Wrapper.hpp:20`, `m_componentType != ComponentType::Unsupported`).
+/// `BwmsComponentIsMeshComponent(component: ref<IComponent>) -> Bool`: o componente é de uma das 4 classes de mesh.
 /// Zero-custo: `detect_garment_component_kind` já roda em toda chamada das outras funções
 /// desta seção — expor o resultado do gate como método próprio evita qualquer `.reds` futuro
 /// ter que replicar a lógica de classificação (que só existe em Rust).
@@ -2056,12 +1785,10 @@ pub(crate) unsafe extern "C" fn tramp_componentwrapper_is_mesh_component(_c: *mu
     write_bool_ret(out, is_mesh);
 }
 
-/// `BwmsComponentLoadResource(component: ref<IComponent>) -> Bool` — `ComponentWrapper::LoadResource` (Codeware `#168`,
-/// `ComponentWrapper.cpp:185-209`): fila de jobs + `MeshComponent::LoadResource(component, fila)` + destrutor. O slot
-/// `0x268` é `0x10198f864` (lido em 2026-09-11: `LoadAsync` da referência do mesh em `+0x220`, `Wait` no job do token pela
-/// fila e despacho do closure de conclusão). Só chama se o slot da vtable do componente for exatamente essa função.
-/// Divergência honesta: sem o `aRefresh` (closure de `RefreshAppearance` na fila — chame `BwmsComponentRefreshAppearance`
-/// depois) e sem o `aWait` (espera bloqueante de até 5 s na thread do jogo).
+/// `BwmsComponentLoadResource(component: ref<IComponent>) -> Bool`: fila de jobs + `MeshComponent::LoadResource(component, fila)` +
+/// destrutor. O slot `0x268` é `0x10198f864` (lido em 2026-09-11: `LoadAsync` do `Ref` do mesh em `+0x220`, `Wait` no job do token pela
+/// fila e despacho do closure de conclusão). Só chama se o slot da vtable do componente for exatamente essa função. Não recarrega o
+/// visual (chame `BwmsComponentRefreshAppearance` depois) nem espera: uma espera de segundos travaria a thread do jogo.
 pub(crate) const MESH_LOADRESOURCE_VM: u64 = 0x1_0198_f864;
 
 pub(crate) const MESH_LOADRESOURCE_SLOT: usize = 0x268;
@@ -2134,46 +1861,46 @@ pub(crate) unsafe fn cache_de_material(app: *mut c_void) -> (u64, u32, u8) {
     )
 }
 
-/// `MeshAppearanceEx::ResetMaterialCache` do Codeware, na mesma ordem: espera o job de material (até 5 s, e segue depois do teto
-/// como o `WaitForJob` dele), lock exclusivo, solta os dados de render e zera o ponteiro, esvazia o mapa soltando cada
-/// `Handle<IMaterial>` do jeito do destrutor do mapa (`0x100ff5a10`), marca o cache como não pronto e destrava. Os buffers do mapa
-/// ficam (é `Clear`, não destrutor).
+/// Teto da espera pelo job de material antes de esvaziar o cache: passado ele, segue assim mesmo (a native não pode travar o jogo).
+const ESPERA_DO_JOB_DE_MATERIAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Deixa o cache de material da `MeshAppearance` vazio e não pronto, para o motor recarregar os materiais na próxima aplicação da aparência.
+/// O mapa é esvaziado (cada material perde a referência forte), não destruído: os buffers ficam para o motor reusar.
 pub(crate) unsafe fn resetar_cache_de_material(app: *mut c_void) -> bool {
-    if !crate::memoria::is_readable(app as *const c_void, 0xa8) {
+    if app.is_null() || !crate::memoria::is_readable(app as *const c_void, 0xa8) {
         return false;
     }
-    let a = app as usize;
-    let terminou: extern "C" fn(*const c_void) -> u32 = std::mem::transmute(crate::rebase(crate::jogo::fila::TAREFA_TERMINOU_VM));
-    let inicio = std::time::Instant::now();
-    while terminou((a + MESHAPP_JOB) as *const c_void) == 0 {
-        if inicio.elapsed() >= std::time::Duration::from_millis(5000) {
-            break;
-        }
+    let a = app as *mut u8;
+    let job = a.add(MESHAPP_JOB) as *const u64;
+    let terminou: unsafe extern "C" fn(*const u64) -> bool = std::mem::transmute(crate::rebase(crate::jogo::fila::TAREFA_TERMINOU_VM));
+    let fim = std::time::Instant::now() + ESPERA_DO_JOB_DE_MATERIAL;
+    while job.read_unaligned() != 0 && !terminou(job) && std::time::Instant::now() < fim {
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
-    crate::jogo::travas::travar_escrita(((a + MESHAPP_LOCK) as *mut c_void) as *mut u8);
-    let dados = ((a + MESHAPP_MATERIAL_DATA) as *const u64).read_unaligned();
-    if dados != 0 {
-        let soltar: extern "C" fn(u64) = std::mem::transmute(crate::rebase(RENDERDATA_RELEASE_VM));
-        soltar(dados);
-        ((a + MESHAPP_MATERIAL_DATA) as *mut u64).write_unaligned(0);
+    let trava = a.add(MESHAPP_LOCK);
+    crate::jogo::travas::travar_escrita(trava);
+    let dados = a.add(MESHAPP_MATERIAL_DATA) as *mut u64;
+    let d = dados.read_unaligned();
+    if d != 0 {
+        let soltar: unsafe extern "C" fn(u64) = std::mem::transmute(crate::rebase(RENDERDATA_RELEASE_VM));
+        soltar(d);
+        dados.write_unaligned(0);
     }
-    let valores = ((a + MESHAPP_MAPA_VALORES) as *const u64).read_unaligned() as *mut [u64; 2];
-    let n = ((a + MESHAPP_MAPA_VALORES_N) as *const u32).read_unaligned();
-    if !valores.is_null() {
-        for i in (0..n as usize).rev() {
+    let valores = (a.add(MESHAPP_MAPA_VALORES) as *const u64).read_unaligned() as *mut [u64; 2];
+    let n = (a.add(MESHAPP_MAPA_VALORES_N) as *const u32).read_unaligned() as usize;
+    if !valores.is_null() && n > 0 && crate::memoria::is_readable(valores as *const c_void, n * 16) {
+        for i in 0..n {
             crate::jogo::objetos::soltar_handle(&mut *valores.add(i));
         }
     }
-    ((a + MESHAPP_MAPA_VALORES_N) as *mut u32).write_unaligned(0);
-    ((a + MESHAPP_MAPA_CHAVES_N) as *mut u32).write_unaligned(0);
-    ((a + MESHAPP_CACHE_PRONTO) as *mut u8).write(0);
-    crate::jogo::travas::soltar_escrita(((a + MESHAPP_LOCK)) as *mut u8);
+    (a.add(MESHAPP_MAPA_VALORES_N) as *mut u32).write_unaligned(0);
+    (a.add(MESHAPP_MAPA_CHAVES_N) as *mut u32).write_unaligned(0);
+    a.add(MESHAPP_CACHE_PRONTO).write(0);
+    crate::jogo::travas::soltar_escrita(trava);
     true
 }
 
-/// Aparência do mesh de um componente pelo nome (`CMesh::appearances`), como o `ComponentWrapper::ResetMaterialCache` do Codeware
-/// acha. `None` = tipo fora do escopo (o MorphTarget usa o `baseMesh` do handle, não coberto), sem mesh ou nome não achado.
+/// Aparência do mesh de um componente pelo nome (`CMesh::appearances`). `None` = tipo fora do escopo (o MorphTarget usa o `baseMesh` do handle, não coberto), sem mesh ou nome não achado.
 pub(crate) unsafe fn aparencia_do_componente(inst: *mut c_void) -> Result<*mut c_void, String> {
     if !rtti::sane(inst) {
         return Err("componente inválido".into());
@@ -2190,8 +1917,7 @@ pub(crate) unsafe fn aparencia_do_componente(inst: *mut c_void) -> Result<*mut c
     })
 }
 
-/// `BwmsComponentResetMaterialCache(component: ref<IComponent>) -> Bool` — Codeware `ComponentWrapper::ResetMaterialCache` (item
-/// `#168`, 2026-09-11): reseta o cache de material da aparência do mesh do componente. O motor reconstrói na próxima aplicação.
+/// `BwmsComponentResetMaterialCache(component: ref<IComponent>) -> Bool`: reseta o cache de material da aparência do mesh do componente. O motor reconstrói na próxima aplicação.
 pub(crate) unsafe extern "C" fn tramp_componentwrapper_reset_material_cache(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let inst = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -2231,9 +1957,8 @@ pub(crate) unsafe extern "C" fn tramp_componentwrapper_material_cache_count(_c: 
     write_i32_ret(out, n);
 }
 
-/// `BwmsComponentLoadResourceToken(component: ref<IComponent>) -> Uint64` — Codeware `ComponentWrapper::LoadResourceToken` (item
-/// `#168`, 2026-09-11): pede a carga do path do mesh do componente (offset pelo RTTI) ao loader do motor e devolve o id do token
-/// guardado (0 = tipo fora do escopo, path vazio ou sem loader). Sem o `aWait` de 5 s do Codeware: `ResourceToken.WaitForJob()` espera.
+/// `BwmsComponentLoadResourceToken(component: ref<IComponent>) -> Uint64`: pede a carga do path do mesh do componente (offset pelo RTTI) ao loader do motor e devolve o id do token
+/// guardado (0 = tipo fora do escopo, path vazio ou sem loader). Não espera: `ResourceToken.WaitForJob()` espera.
 pub(crate) unsafe extern "C" fn tramp_componentwrapper_load_resource_token(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let inst = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -2475,15 +2200,14 @@ pub(crate) unsafe fn register_componentwrapper_extra_natives(reg: &Registry, pro
         crate::log_dev!("[reg] register_componentwrapper_extra_natives: compose falhou (handle:IComponent, ResRef) [set-path]");
         false
     };
-    // `BwmsComponentGetAppearanceName` (nome real do `ComponentWrapper.hpp`) NÃO é declarado —
-    // achado desta rodada (`redscript-src/orphans.script:16659`): `IComponent.GetAppearanceName()
+    // `BwmsComponentGetAppearanceName` NÃO é declarado (`redscript-src/orphans.script:16659`): `IComponent.GetAppearanceName()
     // -> CName` já é `final native const` VANILLA REAL (usado por código de jogo genuíno,
     // `weapon.script:642`) — mas confirmado AO VIVO nesta mesma rodada que ela lê um campo
     // DIFERENTE (`IComponent::appearanceName`, da classe BASE) do que `SetAppearanceName`
     // escreve (`meshAppearance`, do SUBTIPO) — ver nota grande em
     // `tramp_componentwrapper_get_mesh_appearance_name`. Por isso o getter do campo que
     // `SetAppearanceName` realmente usa é exposto sob um nome PRÓPRIO (`GetMeshAppearanceName`,
-    // sem colisão), não o nome real (que colidiria com o `final` vanilla).
+    // sem colisão com o `final` vanilla).
     let p3 = compose_params_from_types(reg, &["handle:IComponent"]);
     let ok3 = if params_compostos(p3) {
         register_global_composed(reg, proto, p3, "BwmsComponentGetMeshAppearanceName", "BwmsComponentGetMeshAppearanceName", tramp_componentwrapper_get_mesh_appearance_name)
@@ -2594,27 +2318,17 @@ pub(crate) unsafe fn register_componentwrapper_chunkmask_natives(reg: &Registry,
     );
 }
 
-/// Nome completo (`value`) da aparência ligada à parte da entidade.
-pub(crate) fn es22_aparencia_da_parte(entidade: u64, parte: u64) -> Option<u64> {
-    ES22_RESOURCE_STATE.lock().ok()?.iter().find(|(k, _)| *k == (entidade, parte)).map(|(_, s)| s.value)
-}
 
-// ===== ArchiveXL `#20` 20b — overrides de um item no estado da entidade (2026-09-14) =====
-// Porte de `Extension.cpp:679-737` sobre `States.cpp:329-381`. `RegisterComponentOverrides(estado, hash, definição)`: cada `partsOverrides` sem
-// `partResource` registra, pra cada componente, a máscara como esconder (o `aShow = false` padrão) e a aparência (vazio e `default` não entram); cada tag
-// de `visualTags` que o gerenciador de tags conhece registra as máscaras dela, mostrar ou esconder conforme a tag. `RegisterOffsetOverrides`: cada parte de
-// `partsValues` recebe o deslocamento do item. `UpdatePartAttributes`: cada parte fica ligada à aparência de nome igual ao da definição. Tudo sob o hash do
-// item; os `Unregister*` tiram só o dele. O estado por componente é o `ComponentState` do 22D/22E, por `(entidade, nome do componente)`.
+/// Loja de override por `(entidade, nome do componente)`.
 pub(crate) type Es20Estados = std::collections::HashMap<(u64, u64), bwms_primitives::override_state::ComponentState>;
 
-/// `EntityState::AddAppearanceOverride(hash, nome, aparência)`: vazio e `default` não entram. `true` se registrou.
+/// Aparência `aparencia` da fonte `hash` na chave `nome`. Recusa nome 0, aparência 0 e `default` (pedir `default` é não pedir override).
 pub(crate) fn es20_adicionar_aparencia(entidade: u64, hash: u64, nome: CName, aparencia: CName) -> bool {
-    let (nome, aparencia) = (nome.valor(), aparencia.valor());
-    if nome == 0 || aparencia == 0 || aparencia == crate::cname::cname("default") {
+    if nome.valor() == 0 || aparencia.valor() == 0 || aparencia.valor() == CNAME_DEFAULT {
         return false;
     }
     let Ok(mut m) = es20_componentes().lock() else { return false };
-    m.entry((entidade, nome)).or_default().sobrescrever_aparencia(hash, aparencia);
+    m.entry((entidade, nome.valor())).or_default().sobrescrever_aparencia(hash, aparencia.valor());
     true
 }
 
@@ -2630,77 +2344,11 @@ pub(crate) const ES20_REFRESH_MEDIDOS: [(u64, u64); 5] = [
     (0x1_078c_2ab8, 0x1_0198_3030),
 ];
 
-/// `EntityState::ApplyAppearanceOverride`: `Some(aparência escrita)` com o `RefreshAppearance` feito. O override do componente, senão o do prefixo,
-/// senão a original quando algum dos dois já mudou. A referência lê a parte do estado do componente sem checar; aqui ela tem que existir (a mesma
-/// divergência do 22E). O refresh só roda com vtable e slot 81 medidos (`es20_refresh_medido`); fora disso o nome fica escrito e volta `None`.
-pub(crate) unsafe fn es20_aplicar_aparencia(m: &Es20Malhas, entidade: u64, inst: *mut c_void) -> Option<u64> {
-    if inst.is_null() || (inst as *const u8).add(0x8b).read_unaligned() == 0 {
-        return None;
-    }
-    let tipo = es20_tipo(m, inst)?;
-    let (base, componente, prefixo) = es20_estados_do_componente(entidade, inst as *const u8);
-    let campo = (inst as *mut u8).add(m.campos[tipo].1) as *mut u64;
-    let original = || es20_original(entidade, es20_id_do_componente(m.base, inst as *const u8), 1, || campo.read_unaligned());
-    let fim = bwms_primitives::override_state::aparencia_aplicada(original, componente.as_ref(), prefixo.as_ref())?;
-    // A parte só depois do nome final, na ordem de `States.cpp:689-692`.
-    es22_parte_do_componente(entidade, base)?;
-    campo.write_unaligned(fim);
-    let refresh = es20_refresh_medido(inst)?;
-    refresh(inst);
-    Some(fim)
-}
-
-pub(crate) const ES20_CAMINHO_VAZIO: &str = "base\\characters\\appearances\\player\\items\\empty_appearance.app";
-
-/// Tag visual do template → marca no texto do seletor.
-pub(crate) const ES20_TAGS_DE_VAZIA: [(&str, &str); 3] = [("EmptyAppearance:FPP", "&FPP"), ("EmptyAppearance:Male", "&Male"), ("EmptyAppearance:Female", "&Female")];
-
-/// A `TemplateAppearance` vazia (0x18 B: `name`, `appearanceResource`, `appearanceName` `default`), com vida de processo.
-pub(crate) fn es20_aparencia_vazia() -> *mut u8 {
-    static VAZIA: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-    *VAZIA.get_or_init(|| {
-        let v: &'static mut [u64; 3] =
-            Box::leak(Box::new([crate::cname::cname(ES20_APARENCIA_VAZIA), bwms_primitives::resource_path_hash(ES20_CAMINHO_VAZIO), crate::cname::cname("default")]));
-        v.as_mut_ptr() as usize
-    }) as *mut u8
-}
-
-/// `FindResourceState(parte)`: a aparência ativa ligada à parte ou, com só deslocamento registrado, a vazia; `None` sem estado de recurso.
-pub(crate) fn es20_aparencia_da_parte(entidade: u64, parte: u64) -> Option<DynamicAppearanceName> {
-    let ligada = ES22_RESOURCE_STATE.lock().ok()?.iter().find(|(k, _)| *k == (entidade, parte)).map(|(_, s)| s.clone());
-    ligada.or_else(|| ES67_RESOURCE_OFFSET.lock().ok()?.iter().any(|(k, _)| *k == (entidade, parte)).then(DynamicAppearanceName::default))
-}
-
-/// Aparência ativa da parte ligada ao nome base (`FindComponentState` com `IsFromAppearancePart` e `FindResourceState`).
-pub(crate) fn es20_aparencia_do_componente(entidade: u64, base: u64) -> Option<DynamicAppearanceName> {
-    es22_parte_do_componente(entidade, base).and_then(|p| es20_aparencia_da_parte(entidade, p))
-}
-
-/// `EmptyAppearanceTags`: alguma tag do template com a marca dela no texto do seletor.
-pub(crate) fn es20_pede_aparencia_vazia(tags: &[u64], seletor: &str) -> bool {
-    ES20_TAGS_DE_VAZIA.iter().any(|(tag, marca)| tags.contains(&crate::cname::cname(tag)) && seletor.contains(marca))
-}
-
-/// `appearances.EmplaceBack(*s_emptyAppearance)` com `name` = seletor: a entrada nova.
-pub(crate) unsafe fn es20_anexar_aparencia_vazia(tpl: *mut u8, seletor: u64) -> Option<*mut u8> {
-    let arr = tpl.add(ES22_TEMPLATE_APARENCIAS);
-    let tam = (arr.add(0x0c) as *const u32).read_unaligned();
-    let nova = es22_vaga_no_fim(arr, ES22_TEMPLATE_ENTRADA)?;
-    std::ptr::copy_nonoverlapping(es20_aparencia_vazia(), nova, ES22_TEMPLATE_ENTRADA);
-    (nova as *mut u64).write_unaligned(seletor);
-    (arr.add(0x0c) as *mut u32).write_unaligned(tam + 1);
-    Some(nova)
-}
 
 /// `BwmsAparencia.LinkComponentToPart(entity: wref<Entity>, component: ref<IComponent>,
-/// resourcePath: Uint64) -> Bool` — porte de `EntityState::LinkComponentToPart` (`States.cpp:
-/// 390-399`), simplificado pra 1 entidade EXPLÍCITA em vez do loop `OverrideStateManager::
-/// LinkComponentToPart` sobre TODAS as entidades rastreadas (divergência de escopo consciente,
-/// documentada — este projeto não tem um `OverrideStateManager` multi-entidade, só o registry
-/// key-by-entity-pointer desta seção). Setup necessário ANTES de `ApplyAppearanceOverride`/
-/// `ToggleConditionalComponents` — sem isso o nome base fica sem parte em `ES22_COMPONENT_APPEARANCE`
-/// (`IsFromAppearancePart()==false`), e os 2 métodos abaixo recusam aplicar (early-return fiel,
-/// nunca crash).
+/// resourcePath: Uint64) -> Bool`: liga o nome base do componente à parte, numa entidade EXPLÍCITA (a loja é por ponteiro de entidade).
+/// Setup necessário ANTES de `ApplyAppearanceOverride`/`ToggleConditionalComponents`: sem parte em `ES22_COMPONENT_APPEARANCE`, os 2
+/// recusam aplicar.
 pub(crate) unsafe extern "C" fn tramp_ligar_componente_a_parte(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let args = rtti::read_params_consuming(func, frame);
@@ -2721,11 +2369,8 @@ pub(crate) unsafe fn es22_ligar_componente_vivo(entity: *mut c_void, component: 
 }
 
 /// `BwmsAparencia.LinkPartToAppearanceName(entity: wref<Entity>, resourcePath: Uint64, appearance:
-/// String) -> Bool` — porte de `EntityState::LinkPartToAppearance(Red::ResourcePath,
-/// Red::CName)` (`States.cpp:409-415`), a via que recebe uma STRING crua e parseia via
-/// `DynamicAppearanceController::ParseAppearance` (item `#23`, `DynamicAppearanceName::parse`,
-/// já portado/provado). Setup necessário pra `ToggleConditionalComponents`
-/// (`ResourceState::GetActiveAppearance()`) e pro safety-net de `ApplyAppearanceOverride`.
+/// String) -> Bool`: liga a parte à aparência ativa, lida do texto por `DynamicAppearanceName::parse`. Setup necessário pra
+/// `ToggleConditionalComponents` (a aparência ativa da parte) e pra guarda de `ApplyAppearanceOverride`.
 pub(crate) unsafe extern "C" fn tramp_ligar_parte_a_aparencia(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let (args, strings) = rtti::read_params_consuming_with_strings(func, frame);
@@ -2751,13 +2396,9 @@ pub(crate) unsafe extern "C" fn tramp_ligar_parte_a_aparencia(_c: *mut c_void, f
 }
 
 /// `BwmsAparencia.AddAppearanceOverrideForComponent(entity: wref<Entity>, component: ref<IComponent>,
-/// modHash: Uint64, appearance: CName) -> Bool` — porte de `EntityState::AddAppearanceOverride
-/// (uint64_t aHash, Red::CName aComponentName, Red::CName aAppearance)` (`States.cpp:348-357`),
-/// divergência de forma: recebe o COMPONENTE vivo (não o `CName` do nome) — parseia
-/// `componentRef.name` internamente, mesma disciplina das outras funções desta seção. Grava no
-/// `ComponentState` de `es20_componentes` pela chave `(entidade, nome base)`, a mesma loja que o es20 usa, então
-/// os dois caminhos decidem a aparência igual. Fiel ao guard real: `aAppearance` vazio ou == `"default"` não registra
-/// nada (`if (aAppearance && aAppearance != DefaultAppearanceName)`).
+/// modHash: Uint64, appearance: CName) -> Bool`: recebe o COMPONENTE vivo e grava no `ComponentState` de `es20_componentes` pela chave
+/// `(entidade, nome base)`, a mesma loja do registro de item, então os dois caminhos decidem a aparência igual. Aparência vazia ou
+/// `default` não registra nada (`es20_adicionar_aparencia`).
 pub(crate) unsafe extern "C" fn tramp_adicionar_aparencia_do_componente(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let args = rtti::read_params_consuming(func, frame);
@@ -2780,100 +2421,80 @@ pub(crate) unsafe fn es22_adicionar_aparencia_do_componente_vivo(entity: *mut c_
         && es20_adicionar_aparencia(entity as u64, mod_hash, CName::lido_do_motor(es20_nome_base(component as *const u8)), CName::lido_do_motor(aparencia))
 }
 
-/// `EntityState::ApplyAppearanceOverride` (`States.cpp:659-697`) — a composição alvo desta
-/// rodada. Réplica fiel dos 2 early-returns (`!isEnabled`/`!IsMeshComponent()`), da decisão de
-/// `finalAppearance` pela regra única `override_state::aparencia_aplicada` sobre o estado do nome base e o do prefixo em
-/// `es20_componentes` (com 2 mods vence o menor hash) e a original em `es20_originais`, lida só na restauração, e do
-/// composto final `SetAppearanceName + RefreshAppearance` (ambos já provados ao vivo, rodada
-/// 14/`#168`). **Divergência de segurança consciente**: a fonte real dereferencia
-/// `componentState->GetAppearancePart()` SEM checar null nesse ponto (`States.cpp:692`) — se
-/// `componentState` for null ali (chegou só via `prefixState`), a fonte real teria UB/crash.
-/// Nosso safety net EXIGE o nome base com parte ligada (via `LinkComponentToPart`) antes
-/// de prosseguir, devolvendo `false` em vez de arriscar — nunca reproduzimos um crash da fonte
-/// original de propósito. `ResolveName` (`Dynamic.cpp:341-360`): nome com `*` passa pelo estado da
-/// entidade calculado na hora (`selftest::resolver_nome_da_entidade`, `#23`), nome comum volta igual.
-/// Devolve o texto do log e se a aparência foi escrita — o retorno da native sai do bool, nunca da redação do log.
+/// Corpo do `BwmsAparencia.ApplyAppearanceOverride`: `(log, escreveu)`. O Bool da native é o `escreveu`, nunca derivado do texto.
 pub unsafe fn run_apply_appearance_override(reg: &crate::rtti::Registry, entity: *mut c_void, inst: *mut c_void) -> (String, bool) {
     let mut escreveu = false;
     let texto = aplicar_aparencia_texto(reg, entity, inst, &mut escreveu);
     (texto, escreveu)
 }
 
-/// O que o `BwmsAparencia.ApplyAppearanceOverride` lê da loja do es20 antes de escrever (`States.cpp:670-692`).
+/// O que o `BwmsAparencia.ApplyAppearanceOverride` decide antes de escrever.
 pub(crate) struct Es22DecisaoDeAparencia {
     /// Override do nome base e do prefixo, para o log.
     pub(crate) fontes: (Option<u64>, Option<u64>),
-    /// `aparencia_aplicada` sobre o estado do nome base e o do prefixo; `None` = sai sem escrever.
+    /// Aparência a escrever; `None` = sai sem escrever.
     pub(crate) aparencia: Option<u64>,
-    /// Parte ligada ao nome base (`LinkComponentToPart`).
+    /// Parte ligada ao nome base.
     pub(crate) parte: Option<u64>,
 }
 
-/// A decisão do `BwmsAparencia.ApplyAppearanceOverride` sobre o componente vivo, com a mesma loja e a mesma regra do `es20_aplicar_aparencia`.
-/// `original` só roda no ramo de restauração.
+/// `original` só é chamada no ramo de restauração.
 pub(crate) unsafe fn es22_decidir_aparencia(entidade: u64, inst: *const u8, original: impl FnOnce() -> u64) -> Es22DecisaoDeAparencia {
-    let (base, componente, prefixo) = es20_estados_do_componente(entidade, inst);
+    let (base, estado, prefixo) = es20_estados_do_componente(entidade, inst);
     Es22DecisaoDeAparencia {
-        fontes: (componente.as_ref().and_then(|s| s.aparencia_sobrescrita()), prefixo.as_ref().and_then(|s| s.aparencia_sobrescrita())),
-        aparencia: bwms_primitives::override_state::aparencia_aplicada(original, componente.as_ref(), prefixo.as_ref()),
+        fontes: (estado.as_ref().and_then(|s| s.aparencia_sobrescrita()), prefixo.as_ref().and_then(|s| s.aparencia_sobrescrita())),
+        aparencia: bwms_primitives::override_state::aparencia_aplicada(original, estado.as_ref(), prefixo.as_ref()),
         parte: es22_parte_do_componente(entidade, base),
     }
 }
 
+/// Grava só com componente de mesh ligado, aparência decidida e o nome base ligado a uma parte que tem aparência ligada: sem o
+/// `LinkComponentToPart`/`LinkPartToAppearanceName`, o override não tem a quem pertencer e o componente fica como o jogo deixou.
 unsafe fn aplicar_aparencia_texto(reg: &crate::rtti::Registry, entity: *mut c_void, inst: *mut c_void, escreveu: &mut bool) -> String {
-    if !rtti::sane(inst) {
-        return "[applyappearance] component ptr insano".to_string();
+    *escreveu = false;
+    if !rtti::sane(entity) || !rtti::sane(inst) {
+        return format!("[aparencia] entidade {entity:p} ou componente {inst:p} insano");
     }
-    let enabled = (inst as *const u8).add(0x8b).read_unaligned() != 0;
-    if !enabled {
-        return format!("[applyappearance] component={inst:p} isEnabled=false -> ApplyAppearanceOverride retornaria false (early-return fiel, States.cpp:661-662)");
+    if (inst as *const u8).add(0x8b).read() == 0 {
+        return "[aparencia] componente desligado".to_string();
     }
     let kind = detect_garment_component_kind(reg, inst);
     if kind == GarmentComponentKind::Unsupported {
-        return format!("[applyappearance] component={inst:p} IsMeshComponent()==false -> ApplyAppearanceOverride retornaria false (States.cpp:666-667)");
+        return "[aparencia] componente não é de mesh".to_string();
     }
-    let name_hash = (inst as *const u8).add(0x40).cast::<u64>().read_unaligned();
-    let name_str = crate::cname::resolve_cname(name_hash);
-    let entity_key = entity as u64;
-    // Sem `Es20Malhas` não há `GetUniqueId` para a chave da original: 0, que a regra trata como recusa.
-    let original = || es20_malhas(reg).map_or(0, |m| es20_original_da_aparencia(m.base(), entity_key, inst, kind));
-    let decisao = es22_decidir_aparencia(entity_key, inst as *const u8, original);
-    let fontes = format!("override do componente {:#x?}, do prefixo {:#x?}", decisao.fontes.0, decisao.fontes.1);
-    let Some(final_appearance) = decisao.aparencia else {
-        return format!(
-            "[applyappearance] component={inst:p} kind={kind:?} nome='{name_str}' nada a aplicar ({fontes}; sem ChangesAppearance ou original 0) -> retornaria false"
-        );
+    let entidade = entity as u64;
+    let base = es20_malhas(reg).map(Es20Malhas::base);
+    let d = es22_decidir_aparencia(entidade, inst as *const u8, || base.map_or(0, |b| es20_original_da_aparencia(b, entidade, inst, kind)));
+    let Some(aparencia) = d.aparencia else {
+        return format!("[aparencia] fontes {:x?}: nada a gravar", d.fontes);
     };
-
-    let Some(part) = decisao.parte else {
-        return format!(
-            "[applyappearance] component={inst:p} finalAppearance={final_appearance:#018x} ({fontes}) MAS o nome base sem parte ligada (LinkComponentToPart nunca chamado) -> a fonte real dereferenciaria null aqui (States.cpp:692); nosso safety net devolve false em vez de arriscar"
-        );
+    let Some(parte) = d.parte else {
+        return format!("[aparencia] fontes {:x?}: nome base sem parte ligada", d.fontes);
     };
-    let has_resource_state = ES22_RESOURCE_STATE
-        .lock()
-        .map(|g| g.iter().any(|((e, r), _)| *e == entity_key && *r == part))
-        .unwrap_or(false);
-    if !has_resource_state {
-        return format!(
-            "[applyappearance] component={inst:p} finalAppearance={final_appearance:#018x} ({fontes}) part={part:#018x} MAS nenhum ResourceState vinculado (LinkPartToAppearanceName nunca chamado) -> nosso safety net devolve false"
-        );
+    let ligada = ES22_RESOURCE_STATE.lock().map(|g| g.iter().any(|(k, _)| *k == (entidade, parte))).unwrap_or(false);
+    if !ligada {
+        return format!("[aparencia] parte {parte:#x} sem aparência ligada");
     }
-    // ResolveName: nome dinâmico (`*...`) troca os atributos pelo estado da entidade (`#23`); nome comum passa igual.
-    let nome_final = crate::cname::resolve_cname(final_appearance);
-    let resolved = if nome_final.starts_with('*') {
-        crate::cname::cname(&crate::aparencia::resolver_nome_da_entidade(reg, entity, &nome_final))
-    } else {
-        final_appearance
+    let valor = match crate::cname::name_of(aparencia) {
+        Some(texto) if is_dynamic_value(&texto) => {
+            let resolvido = resolver_nome_da_entidade(reg, entity, &texto);
+            if resolvido.is_empty() { 0 } else { crate::cname::registrar_no_pool(&resolvido) }
+        }
+        _ => aparencia,
     };
-
-    let before = component_get_appearance_name(inst, kind);
-    let wrote = component_set_appearance_name(inst, kind, resolved);
-    *escreveu = wrote;
-    let refreshed = es20_refresh_medido(inst).map(|refresh| refresh(inst)).is_some();
-    let after = component_get_appearance_name(inst, kind);
+    if valor == 0 {
+        return format!("[aparencia] nome dinâmico {aparencia:#x} resolveu vazio");
+    }
+    *escreveu = component_set_appearance_name(inst, kind, valor);
+    let recarga = if *escreveu { es20_refresh_medido(inst) } else { None };
+    if let Some(recarregar) = recarga {
+        recarregar(inst);
+    }
     format!(
-        "[applyappearance] component={inst:p} kind={kind:?} nome='{name_str}' ({fontes}) finalAppearance={resolved:#018x} antes={before:#018x?} escrita_ok={wrote} refresh_ok={refreshed} depois={after:#018x?}"
+        "[aparencia] fontes {:x?} parte {parte:#x} aparência {valor:#x} escreveu={} recarga={}",
+        d.fontes,
+        *escreveu,
+        recarga.is_some()
     )
 }
 
@@ -2891,18 +2512,7 @@ pub(crate) unsafe extern "C" fn tramp_aplicar_aparencia_do_componente(_c: *mut c
     write_bool_ret(out, ok);
 }
 
-/// `EntityState::ToggleConditionalComponents` (`States.cpp:535-592`) — a 2ª composição alvo
-/// desta rodada. **Divergência de forma consciente, documentada**: a fonte real recebe
-/// `Red::DynArray<Red::Handle<Red::IComponent>>&` POR PARÂMETRO (uma técnica de marshalling —
-/// array de handles como ENTRADA de uma native — nunca exercitada nesta codebase, categoria de
-/// risco genuinamente nova); em vez disso, esta função lê `Entity+0xA0` DIRETO (o mesmo
-/// `ComponentsStorage.components` que `Entity.GetComponents()`/item Codeware `#24`, já fechado,
-/// e `componentes_da_tag` abaixo já leem com sucesso) — semanticamente idêntico (a
-/// fonte real É chamada com TODOS os componentes da entidade na prática, via
-/// `GarmentAssembler`), sem inventar marshalling novo. Réplica fiel do 1º loop (classifica cada
-/// componente via `ParseReference` em condicional/não-condicional, escreve `isEnabled =
-/// MatchReference(...)` pros condicionais com estado vinculado) + o 2º loop de desempate
-/// (`toggle_conditional_group_disable_indices` acima).
+/// Corpo do `BwmsAparencia.ToggleConditionalComponents`: a native não passa estado da entidade, então critério com condição não casa.
 pub unsafe fn run_toggle_conditional_components(reg: &crate::rtti::Registry, entity: *mut c_void) -> (String, i32) {
     run_toggle_conditional_components_com(reg, entity, None)
 }
@@ -2919,7 +2529,7 @@ pub(crate) unsafe extern "C" fn tramp_alternar_componentes_condicionais(_c: *mut
     write_uint_ret(out, total.max(0) as u64, 4);
 }
 
-/// axl-fullbody-torso (2026-08-07, cont.42, continuação): 2º agente de RE offline achou que
+/// Corpo inteiro/torso (2026-08-07, cont.42, continuação): 2º agente de RE offline achou que
 /// `+0x24a` é um ENUM de estado (0/1/2, tipo "fase de dissolve"), não um bool — `+0x24a==1`
 /// satisfaz o gate de `vtable+0x2d0` mas BLOQUEIA explicitamente o de `vtable+0x2d8`
 /// (`cmp w8,#2` em `0x1019911a4`, dentro de `0x1019910f4`). O manager pra onde o registro vai
@@ -2995,7 +2605,7 @@ pub unsafe fn run_toggle_dissolve_sequence(
     format!("[dissolve] '{wanted_name}' (hash={hash_wanted:#x}) NÃO achado")
 }
 
-// ===== Codeware `#254` (`Rendering.hpp` / `RenderProxy`, 2026-09-11) =====
+// ===== `RenderProxy` (2026-09-11) =====
 // RE offline (DATABASE, seção `RenderProxy`): o proxy é o 1º qword de um SharedPtr no componente, num offset que depende da classe, e
 // as funções do motor recebem o proxy em x0 (retorno tratado como void). `SetMaterialOverride` (`0x104fe59bc`) vem no fim do bloco,
 // com o material de fallback do motor.
@@ -3183,7 +2793,7 @@ pub(crate) unsafe extern "C" fn tramp_renderproxy_find_component(_c: *mut c_void
     write_uint_ret(out, achado, 8);
 }
 
-// `SetMaterialOverride` (Codeware `#254` parte 3, 2026-09-11; RE em `proofs/20260911-codeware-254-setmaterialoverride-parte2-caminho-render-offline.log`):
+// `SetMaterialOverride` (parte 3, 2026-09-11; RE em `proofs/20260911-*-254-setmaterialoverride-parte2-caminho-render-offline.log`):
 // o motor enfileira o comando "SetMeshMaterialOverlay" e a thread de render grava o material na extensão
 // `RenderProxyCustomData_MiscMeshParams` do objeto de render (`ro = [proxy+0x10]`, lista em `[ro+0x48]`, próximo nó em `+0x8`):
 // `+0xd0` material, `+0xd8` alternativo (igual ao `+0xd0` quando o 2º `RenderDataPtr` vai nulo), `+0xe1` bit1 replace e bit0
@@ -3395,8 +3005,8 @@ pub(crate) unsafe fn register_renderproxy_natives(reg: &Registry, proto: *mut c_
     );
 }
 
-/// `ArchiveXL.RegisterArchive(path: String) -> Bool` (`PENDENCIAS-UNIFICADAS.md`, Facade.hpp) —
-/// achado de 2026-07-13 nunca implementado até agora: generaliza `axl-pathb-injection-arbitrary`
+/// `RegisterArchive(path: String) -> Bool` da fachada de recursos (`PENDENCIAS-UNIFICADAS.md`) —
+/// achado de 2026-07-13 nunca implementado até agora: generaliza a injeção de archive arbitrário (rota B)
 /// (já PROVADO ao vivo, `lib.rs::load_archive_into_group`) numa API chamável por QUALQUER mod em
 /// runtime (ex. `OnAttach`), sem precisar que o nome do `.archive` bata o glob nativo.
 pub(crate) unsafe extern "C" fn tramp_registrar_archive(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -3404,26 +3014,26 @@ pub(crate) unsafe extern "C" fn tramp_registrar_archive(_c: *mut c_void, frame: 
     let (_args, strings) = rtti::read_params_consuming_with_strings(func, frame);
     let path = strings.first().cloned().flatten().unwrap_or_default();
     let ok = crate::arquivos_do_jogo::facade_register_archive(&path);
-    crate::log_dev!("[reg] >>> ArchiveXL.RegisterArchive('{path}') -> {ok}");
+    crate::log_dev!("[reg] >>> RegisterArchive('{path}') -> {ok}");
     write_bool_ret(out, ok);
 }
 
-/// `ArchiveXL.RegisterDir(path: String) -> Bool` — registra todos os `.archive` de um diretório
+/// `RegisterDir(path: String) -> Bool` da fachada de recursos — registra todos os `.archive` de um diretório
 /// (não-recursivo) via `facade_register_archive` um por um.
 pub(crate) unsafe extern "C" fn tramp_registrar_pasta_de_archives(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let (_args, strings) = rtti::read_params_consuming_with_strings(func, frame);
     let path = strings.first().cloned().flatten().unwrap_or_default();
     let ok = crate::arquivos_do_jogo::facade_register_dir(&path);
-    crate::log_dev!("[reg] >>> ArchiveXL.RegisterDir('{path}') -> {ok}");
+    crate::log_dev!("[reg] >>> RegisterDir('{path}') -> {ok}");
     write_bool_ret(out, ok);
 }
 
-/// ArchiveXL `#27` (`PENDENCIAS-UNIFICADAS.md`, 2026-08-11) — `RegisterLink(path, link) -> Bool`:
+/// `RegisterLink(path, link) -> Bool` (`PENDENCIAS-UNIFICADAS.md`, 2026-08-11):
 /// via "oficial" redscript-callable de registrar 1 par de `resource.link` em runtime, mesma
 /// tabela (`RESLINK_MAP`) que `resource.link`/`InitializeArchives` já usam — reusa
-/// `selftest::reslink_path` (mecanismo PROVADO ao vivo desde 2026-07-13, `axl-localization-
-/// apply`/etc.), zero RE nova. `path` = o alias que um mod quer que resolva pra `link` (o
+/// `selftest::reslink_path` (mecanismo PROVADO ao vivo desde 2026-07-13, aplicação de
+/// localização/etc.), zero RE nova. `path` = o alias que um mod quer que resolva pra `link` (o
 /// recurso REAL). Sempre devolve `true` se os 2 argumentos forem strings válidas (mesma
 /// convenção de `tweakdb_clone_record` — aceito pra processamento, não confirmação de troca
 /// real; ver `reslinkstat` pra confirmar swaps de verdade acontecendo).
@@ -3437,11 +3047,11 @@ pub(crate) unsafe extern "C" fn tramp_registrar_alias(_c: *mut c_void, frame: *m
     write_bool_ret(out, true);
 }
 
-/// ArchiveXL `#27`, metade leitura: `GetAliasCount(path) -> Int32` — quantos caminhos são o mesmo
+/// Metade leitura dos aliases: `GetAliasCount(path) -> Int32` — quantos caminhos são o mesmo
 /// recurso que `path`, nos dois sentidos, por `resource.link`/`RegisterLink` e por `resource.copy`
 /// (`reslink_aliases_of`). Composto com `GetAliasHash` abaixo pra enumerar sem precisar de um
 /// `array<T>`-retorno-de-native (a
-/// categoria de risco que já CROU este projeto — `TweakXL #43`/`GetRecordsArray`, 2026-08-10 —
+/// categoria de risco que já CROU este projeto — `GetRecordsArray`, 2026-08-10 —
 /// evitada de propósito aqui: 2 natives escalares em vez de 1 native com array de saída).
 pub(crate) unsafe extern "C" fn tramp_contar_aliases(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
@@ -3453,7 +3063,7 @@ pub(crate) unsafe extern "C" fn tramp_contar_aliases(_c: *mut c_void, frame: *mu
     write_uint_ret(out, n as u64, 4);
 }
 
-/// ArchiveXL `#27`, `GetAliasHash(path, index) -> Uint64` — devolve o HASH (não o path decodificado
+/// `GetAliasHash(path, index) -> Uint64` — devolve o HASH (não o path decodificado
 /// — `ResourcePath` é hash-only, mesma divergência já aceita em `BwmsHashToResRef`/etc.) do
 /// alias no índice `index` (0-based) dentre os de `GetAliasCount`, em ordem crescente de hash.
 /// `index` fora do alcance devolve `0`.
@@ -3469,24 +3079,21 @@ pub(crate) unsafe extern "C" fn tramp_hash_do_alias(_c: *mut c_void, frame: *mut
     write_uint_ret(out, v, 8);
 }
 
-/// `ArchiveXL.Reload() -> Void` — re-lê `bwms-reslink.txt`/`bwms-factories.txt` e as outras tabelas
+/// `Reload() -> Void` da fachada de recursos — re-lê `bwms-reslink.txt`/`bwms-factories.txt` e as outras tabelas
 /// geradas por `bwms install` a partir dos `.xl` ativos (`recarregar_tabelas_de_runtime`) sem precisar rebootar,
-/// mesmo padrão já fechado de `TweakXL.Reload` (reusa `apply_mod_tweaks()`). Útil depois de editar
+/// mesmo padrão já fechado do `Reload` dos tweaks (reusa `apply_mod_tweaks()`). Útil depois de editar
 /// um `.xl` de mod ativo em disco + regerar as tabelas via `bwms install`. As tabelas em memória viram as dos arquivos
-/// (`substituir`): o par de `RegisterLink` sai, como no `Configure` da referência.
+/// (`substituir`): o par de `RegisterLink` sai.
 pub(crate) unsafe extern "C" fn tramp_recarregar_tabelas_de_runtime(_c: *mut c_void, _f: *mut c_void, _out: *mut c_void, _rt: i64) {
-    crate::log_dev!("[reg] >>> ArchiveXL.Reload chamado — recarregando reslink/factory/patch");
+    crate::log_dev!("[reg] >>> Reload chamado — recarregando reslink/factory/patch");
     crate::mods_do_usuario::pipeline::recarregar_tabelas_de_runtime(true);
 }
 
-/// ArchiveXL #97 (2026-08-11, achado direto após fechar #32): `Facade::GetBodyType(aPuppet)` —
-/// fonte real (`App/Facade.cpp:18-21`) é um repasse de 1 linha pra
-/// `PuppetStateExtension::GetBodyType(aPuppet)`, A MESMA função já lida por completo pra fechar
-/// o item #32 (`PuppetStateSystem`). Já confirmado por leitura de `Extension.cpp:142-190`:
-/// `if (!aPuppet || s_bodyTags.empty()) return s_baseBodyType;` — `s_bodyTags` só é populado pelo
+/// `GetBodyType(puppet)` da fachada de recursos (2026-08-11, achado direto após fechar #32):
+/// sem tags de corpo devolve o corpo base — as tags só vêm do
 /// `.xl` `player.bodyTypes`, nunca wired num runtime consumido por este projeto, logo SEMPRE
-/// vazio aqui — `GetBodyType` é DETERMINÍSTICO, sempre devolve `s_baseBodyType` = `"BaseBody"`
-/// (`BaseBodyName`, `Extension.hpp:18`), independente do puppet passado. Zero endereço nativo
+/// vazias aqui — `GetBodyType` é DETERMINÍSTICO, sempre devolve `"BaseBody"`,
+/// independente do puppet passado. Zero endereço nativo
 /// novo, zero RE — mesma bookkeeping-closure category já usada váras vezes nesta sessão.
 /// `puppet` (arg) é ignorado de propósito (a precondição do projeto já garante o resultado).
 pub(crate) unsafe extern "C" fn tramp_tipo_de_corpo(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -3495,12 +3102,11 @@ pub(crate) unsafe extern "C" fn tramp_tipo_de_corpo(_c: *mut c_void, frame: *mut
     let func = current_native_func();
     let _ = rtti::read_params_consuming(func, frame);
     let h = crate::cname::intern("BaseBody");
-    crate::log_dev!("[reg] >>> ArchiveXL.GetBodyType chamado -> 'BaseBody' (determinístico, s_bodyTags sempre vazio neste projeto)");
+    crate::log_dev!("[reg] >>> GetBodyType chamado -> 'BaseBody' (determinístico, tags de corpo sempre vazias neste projeto)");
     write_uint_ret(out, h, 8);
 }
 
-/// `BwmsAparencia.IsDynamicValue(value: String) -> Bool` — checagem trivial (marcador `*` inicial),
-/// mesma semântica das 5 sobrecargas C++ reais (todas colapsam pra isso, `Dynamic.cpp:674-697`).
+/// `BwmsAparencia.IsDynamicValue(value: String) -> Bool`: o texto começa com o marcador `*`.
 pub(crate) unsafe extern "C" fn tramp_valor_e_dinamico(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let (_args, strings) = rtti::read_params_consuming_with_strings(func, frame);
@@ -3536,10 +3142,10 @@ pub(crate) unsafe extern "C" fn tramp_processar_texto_dinamico(_c: *mut c_void, 
     );
 }
 
-/// ArchiveXL `#23` (`DynamicAppearanceController::ResolveName`/`ResolvePath`, `Dynamic.cpp:341-398`) pro redscript, com assinatura reduzida
-/// `(entity, valor)`: o estado dinâmico da entidade (sufixos pelo `#9`, customização e cor do cabelo) é calculado na hora por
-/// `selftest::resolver_nome_da_entidade`, e o `ProcessString` troca os atributos (`*t_{gender}_{camera}`). Divergências: sem o `aVariant` da
-/// referência (locais vazios) e sem item equipado no estado — a referência guarda o último `UpdateState` da entidade, feito por item de roupa.
+/// `DynamicAppearanceController::ResolveName`/`ResolvePath` pro redscript, com assinatura reduzida
+/// `(entity, valor)`: o estado dinâmico da entidade (sufixos, customização e cor do cabelo) é calculado na hora por
+/// `selftest::resolver_nome_da_entidade`, e o `ProcessString` troca os atributos (`*t_{gender}_{camera}`). Sem variante
+/// (locais vazios) e sem item equipado no estado.
 pub(crate) unsafe extern "C" fn tramp_resolver_nome_dinamico(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let (args, strings) = rtti::read_params_consuming_with_strings(func, frame);
@@ -3566,21 +3172,15 @@ pub(crate) unsafe extern "C" fn tramp_resolver_caminho_dinamico(_c: *mut c_void,
     crate::log_dev!("[reg] >>> BwmsAparencia.ResolvePath(entity={entity:p}, path='{path_str}') -> '{resolvido}' (escrito={ok})");
 }
 
-/// ArchiveXL `#20` (`GarmentExtension::IsUniqueAppearanceName`, `Garment/Extension.cpp:909`,
-/// `PENDENCIAS-UNIFICADAS.md` item `#20`, 2026-08-12 round 3) — porte 1:1, ZERO RE/ZERO endereço
-/// nativo: `return aName && aName != DefaultAppearanceName && aName != RandomAppearanceName &&
-/// aName != EmptyAppearanceName;`. As 3 constantes (`Red::CName("default")`/`Red::CName("random")`/
-/// `Red::CName("empty_appearance_default")`) confirmadas por grep no C++ real — o MESMO sentinela
-/// `EmptyAppearanceName` aparece idêntico em `Extension.cpp:15`/`Attachment/Extension.cpp:23`/
-/// `PuppetState/Handler.cpp:34` (3 arquivos diferentes, mesma constante). Decide se um nome de
-/// aparência é "único" (vale consultar Dynamic Appearance pra ele) vs. um dos 3 placeholders —
-/// usado nos 2 call-sites reais de `SelectDynamicAppearance`/`MarkDynamicAppearanceName`
-/// (`Extension.cpp:186`/`762`) como guarda de entrada.
+/// Nomes que o motor reserva na troca de aparência: quem pede um deles não pede uma aparência própria.
+const NOMES_DE_APARENCIA_RESERVADOS: [u64; 3] = [
+    crate::cname::cname("default"),
+    crate::cname::cname("random"),
+    crate::cname::cname("empty_appearance_default"),
+];
+
 pub(crate) fn is_unique_appearance_name(hash: u64) -> bool {
-    hash != 0
-        && hash != crate::cname::cname("default")
-        && hash != crate::cname::cname("random")
-        && hash != crate::cname::cname("empty_appearance_default")
+    hash != 0 && !NOMES_DE_APARENCIA_RESERVADOS.contains(&hash)
 }
 
 /// `BwmsAparencia.IsUniqueAppearanceName(name: CName) -> Bool`.
@@ -3593,14 +3193,8 @@ pub(crate) unsafe extern "C" fn tramp_aparencia_e_unica(_c: *mut c_void, frame: 
     write_bool_ret(out, unique);
 }
 
-/// `DynamicAppearanceController::GetBaseAppearanceName` (`Dynamic.cpp:768-779`) — substring ANTES
-/// do primeiro marcador de QUALQUER tipo (`!`/`%`/`&`) — mais amplo que só `!` (o campo `name` de
-/// `DynamicAppearanceName::parse` só corta no `!`). Implementação genuinamente nova (item `#23`).
 pub(crate) fn get_base_appearance_name(name: &str) -> &str {
-    match name.find(['!', '%', '&']) {
-        Some(pos) => &name[..pos],
-        None => name,
-    }
+    name.find(['!', '%', '&']).map_or(name, |i| &name[..i])
 }
 
 /// `BwmsAparencia.GetBaseAppearanceName(name: String) -> String`.
@@ -3613,20 +3207,11 @@ pub(crate) unsafe extern "C" fn tramp_nome_base_da_aparencia(_c: *mut c_void, fr
     crate::log_dev!("[reg] >>> BwmsAparencia.GetBaseAppearanceName('{name}') -> '{base}' (escrito={ok})");
 }
 
-/// `DynamicAppearanceController::MatchReference` (`Dynamic.cpp:316-339`) — composição PURA:
-/// `entity_conditions=None` reproduz fielmente o ramo `m_states.find(aEntity)==m_states.end()`
-/// da fonte real (entidade sem estado registrado) — sempre `false` se a referência tiver
-/// condições, independente da variante bater. Decisão de escopo consciente: a via
-/// redscript-facing abaixo (`AppearanceMatchesReference`) usa SEMPRE este ramo (sem acoplar a
-/// `EntityState`/`#22`, que vive num registry global separado) — decisivo e 100% autocontido
-/// (não depende de nenhum estado de entidade/save real), mesmo sendo um subconjunto da API C++
-/// completa.
 pub(crate) fn appearance_matches_reference(reference: &DynamicAppearanceRef, appearance: &DynamicAppearanceName) -> bool {
     appearance_matches_reference_com(reference, appearance, None)
 }
 
-/// `MatchReference` com o estado da entidade (22F): as condições da referência precisam estar nas condições da entidade (`atributo=valor` do `#23`) ou
-/// nos overrides da aparência; `None` = entidade sem estado, e referência com condição não casa.
+/// O nome base não entra: o critério casa pela variante e pelas condições. Sem estado da entidade, critério com condição não casa.
 pub(crate) fn appearance_matches_reference_com(
     reference: &DynamicAppearanceRef,
     appearance: &DynamicAppearanceName,
@@ -3635,13 +3220,10 @@ pub(crate) fn appearance_matches_reference_com(
     if !reference.variants.is_empty() && !reference.matches_variant(appearance.variant) {
         return false;
     }
-    if !reference.conditions.is_empty() {
-        let Some(presentes) = condicoes else { return false };
-        if !reference.matches_conditions_with_overrides(presentes, &appearance.overrides) {
-            return false;
-        }
+    if reference.conditions.is_empty() {
+        return true;
     }
-    true
+    condicoes.is_some_and(|c| reference.matches_conditions_with_overrides(c, &appearance.overrides))
 }
 
 /// `BwmsAparencia.IsDynamicAppearanceName(name: String) -> Bool`.
@@ -3726,7 +3308,7 @@ pub(crate) unsafe extern "C" fn tramp_hash_do_nome_da_referencia(_c: *mut c_void
 }
 
 /// `BwmsAparencia.AppearanceRefWeight(reference: String) -> Int32` — peso de desempate (100 se tem
-/// variante, +1 por condição, truncado em `int8` como `Dynamic.cpp:263`) já usado internamente pelo ArchiveXL real pra escolher entre
+/// variante, +1 por condição, truncado em `int8`) usado pra escolher entre
 /// múltiplos `DynamicAppearanceRef` candidatos batendo o mesmo contexto.
 pub(crate) unsafe extern "C" fn tramp_peso_da_referencia(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
@@ -3749,22 +3331,17 @@ pub(crate) unsafe extern "C" fn tramp_referencia_casa_variante(_c: *mut c_void, 
     write_bool_ret(out, matched);
 }
 
-/// ArchiveXL `#48` (`MeshExtension::ExpandResourcePath`, `Mesh/Extension.cpp:900-925`, catálogo
-/// item `#48`, 2026-08-12 round 3) — reusa o núcleo `is_dynamic_value`/
-/// `process_dynamic_string_single_attr` (item `#21`/`#23`, já wired ao dylib mais cedo hoje) com
-/// o MESMO atributo LOCAL pré-computado que a fonte real injeta (`material`, `Red::CName
-/// ("material")`, `Mesh/Extension.cpp:15`, `MaterialAttr`). A referência chama o mesmo
-/// `ProcessString` do `#23` com esse atributo local (`Mesh/Extension.cpp:913`), então o núcleo
-/// é o de `process_dynamic_string_com`, sem cópia. Fiel ao par
-/// `(ResourcePath, bool)` real:
-/// - `pathStr` não-dinâmico → devolve `pathStr` inalterado (mesmo `{aPath, false}` da fonte);
+/// `ExpandResourcePath` do mesh (2026-08-12 round 3) — reusa o núcleo `is_dynamic_value`/
+/// `process_dynamic_string_single_attr` (já wired ao dylib mais cedo hoje) com
+/// o atributo LOCAL pré-computado `material`, então o núcleo
+/// é o de `process_dynamic_string_com`, sem cópia. Par
+/// `(ResourcePath, bool)`:
+/// - `pathStr` não-dinâmico → devolve `pathStr` inalterado (`{aPath, false}`);
 /// - processamento inválido (chave sem fechar/nenhum atributo na string) → devolve string vazia
 ///   (convenção "vazio = falhou" já usada em `ProcessDynamicString`);
 /// - atributo faltando (`missed`) → devolve string vazia (mesma convenção);
 /// - sucesso → devolve o path expandido.
-/// Divergência de escopo consciente:
-/// a fonte real interna o resultado via `ResourcePathRegistry::RegisterPath` (produz um
-/// `ResourcePath` hash novo, side-effect num registro global nativo); aqui devolvemos a STRING
+/// Escopo consciente: em vez de internar o resultado num registro global nativo de caminhos, devolvemos a STRING
 /// final — o chamador registra o hash pelo mecanismo já provado do BWMS (`resource.link`/
 /// `BwmsAparencia.RegisterLink`, ambos já expostos ao redscript).
 pub(crate) unsafe extern "C" fn tramp_expandir_caminho_do_recurso(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -3809,8 +3386,7 @@ pub(crate) unsafe extern "C" fn tramp_adicionar_offset_de_roupa(_c: *mut c_void,
 }
 
 /// `BwmsAparencia.RemoveOffsetOverrides(entity: wref<Entity>, modHash: Uint64) -> Uint32` — devolve a
-/// contagem de `ResourceState`s afetados (diagnóstico; a fonte real é `void`, expor a contagem é
-/// zero-custo e confirma o round-trip num teste ao vivo sem precisar de um 2º comando).
+/// contagem de recursos que tinham o mod: confirma o round-trip num teste ao vivo sem precisar de um 2º comando.
 pub(crate) unsafe extern "C" fn tramp_remover_offsets_de_roupa_do_mod(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let func = current_native_func();
     let args = rtti::read_params_consuming(func, frame);
@@ -3818,7 +3394,7 @@ pub(crate) unsafe extern "C" fn tramp_remover_offsets_de_roupa_do_mod(_c: *mut c
     let mod_hash = args.get(1).map(|(v, _)| *v).unwrap_or(0);
     let n = if rtti::sane(entity) { remove_offset_overrides(entity as u64, mod_hash) } else { 0 };
     crate::log_dev!(
-        "[reg] >>> BwmsAparencia.RemoveOffsetOverrides(entity={entity:p}, modHash={mod_hash:#018x}) -> resourceStates afetados={n}"
+        "[reg] >>> BwmsAparencia.RemoveOffsetOverrides(entity={entity:p}, modHash={mod_hash:#018x}) -> recursos afetados={n}"
     );
     write_uint_ret(out, n as u64, 4);
 }
@@ -3837,11 +3413,11 @@ pub(crate) unsafe extern "C" fn tramp_offset_de_roupa(_c: *mut c_void, frame: *m
     write_i32_ret(out, v);
 }
 
-/// Os 8 métodos da fachada de script do ArchiveXL (`Facade.hpp:25-32`), o nome que mod do Windows chama. Declarados em
+/// Os 8 métodos da fachada de recursos, o nome que mod do Windows chama. Declarados em
 /// `ponte-fachada-de-recursos.reds`.
-const METODOS_ARCHIVEXL: [(&str, NativeHandler); 8] = [
-    ("Version", tramp_version::<PLUGUE_ARCHIVEXL>),
-    ("Require", tramp_require::<PLUGUE_ARCHIVEXL>),
+const METODOS_DA_FACHADA_DE_RECURSOS: [(&str, NativeHandler); 8] = [
+    ("Version", tramp_version::<PLUGUE_RECURSOS>),
+    ("Require", tramp_require::<PLUGUE_RECURSOS>),
     ("RegisterArchive", tramp_registrar_archive),
     ("RegisterDir", tramp_registrar_pasta_de_archives),
     ("Reload", tramp_recarregar_tabelas_de_runtime),
@@ -3851,11 +3427,11 @@ const METODOS_ARCHIVEXL: [(&str, NativeHandler); 8] = [
 ];
 
 pub unsafe fn registrar_fachada_de_recursos(reg: &Registry) -> String {
-    register_facade_methods(reg, "ArchiveXL", &METODOS_ARCHIVEXL)
+    register_facade_methods(reg, "ArchiveXL", &METODOS_DA_FACHADA_DE_RECURSOS)
 }
 
 /// As funções de aparência que o BWMS criou (aliases de `resource.link`, aparência e caminho dinâmicos, tags visuais, override de
-/// aparência por componente e deslocamento de roupa). A referência não as expõe a script e nenhum mod do Windows as chama, então moram
+/// aparência por componente e deslocamento de roupa). Nenhum mod do Windows as chama, então moram
 /// numa classe própria, forjada pela linha dela em `CLASSES_FORJADAS`. Declaradas em `bwms-aparencia.reds`.
 const METODOS_BWMSAPARENCIA: [(&str, NativeHandler); 33] = [
     ("RegisterLink", tramp_registrar_alias),
@@ -3883,23 +3459,14 @@ const METODOS_BWMSAPARENCIA: [(&str, NativeHandler); 33] = [
     ("AppearanceNameContext", tramp_contexto_da_aparencia),
     ("AppearanceMatchesReference", tramp_aparencia_casa_referencia),
     ("GetBaseAppearanceName", tramp_nome_base_da_aparencia),
-    // Rodada 15 (2026-08-17), item `#22` — `EntityState::ApplyAppearanceOverride`/
-    // `ToggleConditionalComponents` (ver seção grande "ArchiveXL `#22`" acima neste
-    // arquivo, logo antes do Codeware `#58`). `LinkComponentToPart`/
-    // `LinkPartToAppearanceName`/`AddAppearanceOverrideForComponent` são o setup
-    // (equivalentes aos métodos públicos homônimos de `EntityState` que constroem o
-    // bookkeeping consumido pelos 2 métodos de aplicação).
+    // `#22`: `LinkComponentToPart`/`LinkPartToAppearanceName`/`AddAppearanceOverrideForComponent` montam as ligações e a loja que
+    // `ApplyAppearanceOverride`/`ToggleConditionalComponents` consomem.
     ("LinkComponentToPart", tramp_ligar_componente_a_parte),
     ("LinkPartToAppearanceName", tramp_ligar_parte_a_aparencia),
     ("AddAppearanceOverrideForComponent", tramp_adicionar_aparencia_do_componente),
     ("ApplyAppearanceOverride", tramp_aplicar_aparencia_do_componente),
     ("ToggleConditionalComponents", tramp_alternar_componentes_condicionais),
-    // Item `#67`/`ComputePlayerGarment` (2026-08-16) — `EntityState::AddOffsetOverride`/
-    // `RemoveOffsetOverrides`/`GetOffsetOverride` (ver seção grande "ArchiveXL #67" logo
-    // acima, imediatamente antes desta função). Zero mutação de memória nativa — só
-    // registry próprio do BWMS; a leitura de `ComputePlayerGarment.resources`/`.offsets`
-    // (via probe observe-only) e a ESCRITA de volta em `aOffsets` ficam pra rodada futura
-    // com boot ao vivo.
+    // `#67`: offsets de roupa por mod na loja do BWMS (`ES67_RESOURCE_OFFSET`); o gancho do `ComputePlayerGarment` lê dela.
     ("AddOffsetOverride", tramp_adicionar_offset_de_roupa),
     ("RemoveOffsetOverrides", tramp_remover_offsets_de_roupa_do_mod),
     ("GetOffsetOverride", tramp_offset_de_roupa),
@@ -3930,7 +3497,7 @@ mod testes_do_contexto_do_mesh {
 
 #[cfg(test)]
 mod testes_das_fachadas {
-    use super::{METODOS_ARCHIVEXL, METODOS_BWMSAPARENCIA};
+    use super::{METODOS_DA_FACHADA_DE_RECURSOS, METODOS_BWMSAPARENCIA};
     use std::collections::BTreeSet;
 
     /// Os `static native func` de `class <classe>` num `.reds` do bundle de dev. Uma classe por arquivo, sem `{` aninhado no corpo.
@@ -3954,18 +3521,18 @@ mod testes_das_fachadas {
         metodos.iter().map(|(n, _)| n.to_string()).collect()
     }
 
-    /// Sob `ArchiveXL` ficam só os 8 da fachada da referência (`Facade.hpp:25-32`); o que o BWMS criou vai para `BwmsAparencia`.
+    /// Na fachada de recursos ficam só os 8 métodos que mods chamam; o que o BWMS criou vai para `BwmsAparencia`.
     #[test]
-    fn archivexl_so_com_os_metodos_da_referencia() {
-        let referencia: BTreeSet<String> =
+    fn fachada_de_recursos_so_com_os_metodos_de_contrato() {
+        let contrato: BTreeSet<String> =
             ["Version", "Require", "RegisterArchive", "RegisterDir", "Reload", "EnableGarmentOffsets", "DisableGarmentOffsets", "GetBodyType"]
                 .iter()
                 .map(|n| n.to_string())
                 .collect();
-        assert_eq!(registradas(&METODOS_ARCHIVEXL), referencia);
+        assert_eq!(registradas(&METODOS_DA_FACHADA_DE_RECURSOS), contrato);
         let bwms = registradas(&METODOS_BWMSAPARENCIA);
         assert_eq!(bwms.len(), METODOS_BWMSAPARENCIA.len(), "nome repetido em `BwmsAparencia`");
-        assert!(bwms.is_disjoint(&referencia), "método da referência registrado em `BwmsAparencia`: {:?}", bwms.intersection(&referencia).collect::<Vec<_>>());
+        assert!(bwms.is_disjoint(&contrato), "método da fachada de recursos registrado em `BwmsAparencia`: {:?}", bwms.intersection(&contrato).collect::<Vec<_>>());
     }
 
     /// Native declarada no `.reds` e não registrada derruba o bind (SIGTRAP); registrada e não declarada fica inalcançável. Sem a pasta
@@ -3973,7 +3540,7 @@ mod testes_das_fachadas {
     #[test]
     fn declaradas_no_reds_batem_com_as_registradas() {
         for (arquivo, classe, metodos) in [
-            ("ponte-fachada-de-recursos.reds", "ArchiveXL", &METODOS_ARCHIVEXL[..]),
+            ("ponte-fachada-de-recursos.reds", "ArchiveXL", &METODOS_DA_FACHADA_DE_RECURSOS[..]),
             ("bwms-aparencia.reds", "BwmsAparencia", &METODOS_BWMSAPARENCIA[..]),
         ] {
             let Some(no_reds) = declaradas(arquivo, classe) else { return };
@@ -3985,7 +3552,7 @@ mod testes_das_fachadas {
 /// Alguém ouve `Component/Toggle`/`Vehicle/ToggleAuxLights`: os hooks do `Toggle` e do `ToggleLights` só leem estes atômicos.
 pub static COMPONENT_TOGGLE_ARMADO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Codeware `#127`: `Component/Toggle` com o componente e a entidade dona, só com dono, como o `ComponentToggleHook` da referência. O evento sai do
+/// `Component/Toggle` com o componente e a entidade dona, só com dono. O evento sai do
 /// estado e o handle é solto depois do despacho, como no ciclo de vida.
 pub unsafe fn disparar_toggle_de_componente(componente: *mut c_void) -> usize {
     let dono = dono_do_componente(componente);
@@ -4008,7 +3575,7 @@ pub unsafe fn disparar_toggle_de_componente(componente: *mut c_void) -> usize {
 
 // ===== `ComponentTarget extends CallbackSystemTarget` — fábricas STATIC =====
 //
-// Fonte real: `Callback/Targets/ComponentTarget.reds` — `public static native func ID(id: CRUID)
+// Forma: `public static native func ID(id: CRUID)
 // -> ref<ComponentTarget>` / `Name(name: CName) -> ref<ComponentTarget>`. Cada fábrica lê 1 arg
 // escalar (CRUID/CName = u64 puro, mesmo tratamento de `register_hash_wrapper_utils`) e devolve
 // uma instância NOVA da PRÓPRIA classe carregando o critério (consumido depois pelo filtro
@@ -4016,9 +3583,9 @@ pub unsafe fn disparar_toggle_de_componente(componente: *mut c_void) -> usize {
 //
 // Mecanismos que as fábricas reusam, cada um com prova própria:
 //   (1) `is_static=true` LENDO um arg via `read_params_consuming` dentro de um MÉTODO DE CLASSE
-//       real registrado por `register_method(..., true)` — `Codeware.Require(version: String)`
-//       (`tramp_require`, `registrar_fachada_de_versao`), PROVADO ao vivo (Facade fechada 2026-07-13,
-//       boot completo até GAMEPLAY REAL). MAS a classe "Codeware" ali vem do `.reds` (compilador
+//       real registrado por `register_method(..., true)` — `Require(version: String)` da fachada de versão
+//       (`tramp_require`, `registrar_fachada_de_versao`), PROVADO ao vivo (fachada fechada 2026-07-13,
+//       boot completo até GAMEPLAY REAL). MAS a classe da fachada de versão vem do `.reds` (compilador
 //       real cria a CClass) — NÃO é uma classe que NÓS forjamos via `register_type_instantiable_
 //       with_parent`.
 //   (2) uma trampolina que LÊ um arg, CONSTRÓI uma instância NOVA (`rtti::new_object`), guarda o
@@ -4034,7 +3601,7 @@ pub unsafe fn disparar_toggle_de_componente(componente: *mut c_void) -> usize {
 //       somado ANTES de chamar `dynarray_push_ptr`; a função de push em si não sabe/não liga se é
 //       0x48 ou 0x58. Push em 0x48 já rodou com sucesso em ~9 classes FORJADAS (KeyInputEvent,
 //       ResourceEvent, ScriptableServiceContainer, ...); push em 0x58 já rodou com sucesso 2x mas
-//       só na classe "Codeware" NÃO-forjada.
+//       só na classe da fachada de versão, NÃO-forjada.
 //
 // PROVADO (2026-08-05) para `is_static=true` + `new_object`/`make_handle` numa classe que NÓS
 // forjamos (`register_type_instantiable_with_parent`): `bwms-blindspot-tests.reds` chamou as 13
@@ -4046,8 +3613,8 @@ pub unsafe fn disparar_toggle_de_componente(componente: *mut c_void) -> usize {
 // ficou de fora — achado novo: o compilador redscript não tem NENHUM `Cast<T>` pra CRUID a partir
 // de tipo literal (`NO_MATCHING_OVERLOAD` testado com `Cast<CRUID>(777ul)`), então não há via de
 // SCRIPT pra construir um CRUID do zero — não é bug daqui, é limite do compilador (CRUID só existe
-// como campo já-populado lido de objetos reais). `cw-event-target-classes` fecha a família inteira.
-/// Codeware `#132` (`ComponentTarget::Matches`, 2026-08-12): TAG de qual das 2 factories construiu
+// como campo já-populado lido de objetos reais). As classes de evento-alvo fecham a família inteira.
+/// `ComponentTarget::Matches` (2026-08-12): TAG de qual das 2 factories construiu
 /// o alvo — `ID`(CRUID)/`Name`(CName) compartilhavam o mesmo slot `u64` cru sem distinguir a
 /// proveniência (mesmo achado já documentado pro `EntityTarget`/`EntityTargetCriterion`). Sem isso,
 /// um valor de `.ID(...)` poderia ser comparado por engano contra o NAME hash do componente real
@@ -4131,10 +3698,10 @@ pub unsafe fn register_componenttarget(reg: &Registry) -> String {
     format!("[reg] ComponentTarget: classe=OK (INSTANCIÁVEL, parent=CallbackSystemTarget real) ID={m1} Name={m2}")
 }
 
-/// `EntityComponentEvent extends EntityLifecycleEvent` — `cw-event-target-classes` (2026-07-24).
-/// Fonte real: `public native class EntityComponentEvent extends EntityLifecycleEvent {
-/// GetComponent()->wref<IComponent> }`. **Divergência FECHADA (2026-08-11, item Codeware `#9`)**:
-/// `wref<T>` agora usa `rtti::make_weak_handle` (mesma técnica do RED4ext.SDK `#387`), assinatura
+/// `EntityComponentEvent extends EntityLifecycleEvent` — classes de evento-alvo (2026-07-24).
+/// Forma: `public native class EntityComponentEvent extends EntityLifecycleEvent {
+/// GetComponent()->wref<IComponent> }`. **Divergência FECHADA (2026-08-11)**:
+/// `wref<T>` agora usa `rtti::make_weak_handle` (mesma técnica do `EntityLifecycleEvent.GetEntity()`), assinatura
 /// original restaurada — sem mais handle raw sem refcount. Estado: (evento, componente, entidade dona).
 pub(crate) static ENTITYCOMPONENT_STATES: Mutex<Vec<(usize, usize, usize)>> = Mutex::new(Vec::new());
 
@@ -4146,11 +3713,11 @@ pub(crate) unsafe extern "C" fn tramp_ece_get_component(c: *mut c_void, _f: *mut
         }
     }
     crate::log_dev!("[ece] EntityComponentEvent.GetComponent() on {c:p} -> {ptr:#x}");
-    // Codeware `#9` (2026-08-11): `wref<IComponent>` REAL via `rtti::make_weak_handle` — mesma
-    // técnica que fechou RED4ext.SDK `#387` pra `EntityLifecycleEvent.GetEntity()`. Substitui o
+    // 2026-08-11: `wref<IComponent>` REAL via `rtti::make_weak_handle` — mesma
+    // técnica que fechou `EntityLifecycleEvent.GetEntity()`. Substitui o
     // `write_uint_ret` cru (nem escrevia os 16 bytes completos de um Handle) documentado como
     // "ref forte" — na real nunca tinha refcount block nenhum, categoria de risco do mesmo tipo
-    // já corrigida pro `#387`.
+    // já corrigida no `GetEntity()`.
     rtti::make_weak_handle(out, ptr as *mut c_void);
 }
 
@@ -4171,7 +3738,7 @@ pub unsafe fn register_entitycomponentevent(reg: &Registry) -> String {
     format!("[reg] EntityComponentEvent: classe=OK (INSTANCIÁVEL, parent=EntityLifecycleEvent real, GetComponent devolve wref REAL via make_weak_handle) GetComponent={m1}")
 }
 
-/// Constrói um `EntityComponentEvent` com o componente e a entidade dona (`GetEntity` do evento), como o `ComponentToggleHook` da referência.
+/// Constrói um `EntityComponentEvent` com o componente e a entidade dona (`GetEntity` do evento): o ouvinte do evento de componente lê a entidade por ele.
 pub unsafe fn make_entitycomponentevent_arg(component_ptr: *mut c_void, entidade: usize) -> Option<rtti::Arg> {
     let reg = rtti::Registry::obtain()?;
     let obj = rtti::new_object(&reg, "EntityComponentEvent");
@@ -4215,9 +3782,6 @@ pub(crate) unsafe extern "C" fn tramp_eba_add_component(c: *mut c_void, frame: *
     crate::log_dev!("[ebw] EntityBuilderAppearanceWrapper.AddComponent em {c:p}: extrator {extrator:#x} -> {ok}");
 }
 
-#[cfg(feature = "devtools")]
-pub(crate) const VCC_ESPERA_MS: u64 = 5000;
-
 /// Componente do V com a classe exata `classe` (em `ComponentsStorage.components` = `Entity+0xA0`), ou nulo.
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn componente_do_jogador(reg: &Registry, classe: &str) -> *mut c_void {
@@ -4247,9 +3811,8 @@ pub(crate) unsafe fn entidade_num_componentes(entidade: *mut c_void) -> usize {
     core::ptr::read_unaligned((proprio as *const u8).add(0x0C) as *const u32) as usize
 }
 
-/// Codeware `#130` (`Entity/Reassemble`): copia pro array de componentes novos da troca de aparência os componentes que os ouvintes somaram em
-/// `entity+0xA0` durante o despacho (do índice `antes` em diante), cada um com referência forte própria — como o `OnRequestComponents` da
-/// referência. Devolve quantos copiou.
+/// `Entity/Reassemble`: copia pro array de componentes novos da troca de aparência os componentes que os ouvintes somaram em
+/// `entity+0xA0` durante o despacho (do índice `antes` em diante), cada um com referência forte própria. Devolve quantos copiou.
 pub(crate) unsafe fn entidade_propagar_componentes(entidade: *mut c_void, componentes: *mut c_void, antes: usize) -> usize {
     let proprio = (entidade as *const u8).add(0xA0) as *const c_void;
     if !crate::memoria::is_readable(proprio, 0x10) || !crate::memoria::is_readable(componentes as *const c_void, 0x10) {
@@ -4272,7 +3835,7 @@ pub(crate) unsafe fn entidade_propagar_componentes(entidade: *mut c_void, compon
     copiados
 }
 
-/// axl-fullbody-torso (2026-08-07, cont.41, continuação): `toggle` sozinho (escreve `enabled=1`)
+/// Corpo inteiro/torso (2026-08-07, cont.41, continuação): `toggle` sozinho (escreve `enabled=1`)
 /// PERSISTE mas NÃO muda o resultado visual (confirmado por screenshot real, câmera pitch=-60,
 /// antes/depois idênticos). Hipótese: o render proxy precisa ser RECONSTRUÍDO pra refletir o novo
 /// `enabled` — a mesma função virtual já mapeada e testada como `rebuild-proxy` neste projeto
@@ -4344,12 +3907,12 @@ pub(crate) enum GarmentComponentKind {
     SkinnedFamily,
     /// `entMorphTargetSkinnedMeshComponent`.
     MorphTarget,
-    /// Nenhum dos 4 tipos suportados — `ComponentWrapper::IsMeshComponent()` seria `false`.
+    /// Nenhum dos 4 tipos de mesh.
     Unsupported,
 }
 
 /// Nome da property RTTI de cada campo por tipo. O offset vem do `CProperty::valueOffset` da classe real
-/// (`prop_value_offset`), nunca de tabela: a tabela antiga copiava o header do RED4ext.SDK, que erra a família skinned
+/// (`prop_value_offset`), nunca de tabela: a tabela antiga copiava um header gerado de layout, que erra a família skinned
 /// inteira por 8 bytes nesta build — `mesh` `0x220` (header `0x228`), `meshAppearance` `0x228` (header `0x230`), `chunkMask`
 /// `0x240` (header `0x248`). Medido pelo RTTI e pelo `MeshComponent::LoadResource` (`0x10198f864`), que carrega `+0x220`.
 pub(crate) fn nome_prop_path(kind: GarmentComponentKind) -> Option<&'static str> {
@@ -4387,204 +3950,156 @@ pub(crate) unsafe fn componente_mascara(reg: &crate::rtti::Registry, inst: *mut 
     (mascara, (inst as *const u8).add(0x8b).read_unaligned() != 0, malha)
 }
 
-/// Grava o `chunkMask` do componente de mesh (offset do RTTI); falso fora dos tipos de mesh.
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn componente_mascara_gravar(reg: &crate::rtti::Registry, inst: *mut c_void, valor: u64) -> bool {
-    let kind = detect_garment_component_kind(reg, inst);
-    kind != GarmentComponentKind::Unsupported && component_set_chunk_mask(inst, kind, valor)
-}
 
-/// A#22 22D — `EntityState::ApplyChunkMaskOverride` composto: os 2 retornos cedo da referência (`isEnabled` em `+0x8b`, componente de mesh), a máscara
-/// do componente e a do prefixo na ordem da aplicação real (`override_state::mascara_aplicada`: OR do mostrar, depois AND do esconder) sobre a original,
-/// e a escrita no `chunkMask`. `None` = a referência voltaria falso sem escrever (desligado, fora de mesh, sem mudança de máscara ou escrita recusada).
-#[cfg(feature = "devtools")]
-pub(crate) unsafe fn aplicar_mascara_composta(
-    reg: &crate::rtti::Registry,
-    inst: *mut c_void,
-    original: u64,
-    componente: Option<&bwms_primitives::override_state::ComponentState>,
-    prefixo: Option<&bwms_primitives::override_state::ComponentState>,
-) -> Option<u64> {
-    if inst.is_null() || (inst as *const u8).add(0x8b).read_unaligned() == 0 {
-        return None;
-    }
-    let kind = detect_garment_component_kind(reg, inst);
-    if kind == GarmentComponentKind::Unsupported {
-        return None;
-    }
-    let fim = bwms_primitives::override_state::mascara_aplicada(|| original, componente, prefixo)?;
-    component_set_chunk_mask(inst, kind, fim).then_some(fim)
-}
-
-/// Entrada de uma tag: `(CName do componente ou do prefixo, mostrar, máscara)`. O `mostrar` é o `chunkMask.set` que o
-/// `AddChunkMaskOverride(hash, nome, mask, set)` recebe (`Extension.cpp:696`): duas fontes no mesmo componente somam o mostrar (OR) e o esconder
-/// (AND), e sem ele o `s(.., &[0, 1, 2])` do HighHeels esconderia tudo fora desses 3 chunks.
+/// Entrada de uma tag visual: `(CName do componente ou do prefixo, mostrar, máscara)`.
 pub(crate) type EntradaDeTag = (CName, bool, u64);
 
-/// As 14 tags embutidas do `OverrideTagManager` da referência (`Tags.cpp:3-156`), `(CName da tag, entradas)`, calculadas na compilação
-/// (`fnv1a64` e `mascara_de_chunks` são `const fn`). A busca é `tag_por_hash`; só a guarda do smoke (`es20_guardar_tags`) lê a tabela inteira,
-/// porque guarda todos os nomes.
-pub(crate) static TAGS_EMBUTIDAS: [(u64, &[EntradaDeTag]); 14] = {
-    use bwms_primitives::fnv1a64;
-    use bwms_primitives::override_state::mascara_de_chunks;
-    const fn entrada(nome: &str, mostrar: bool, chunks: &[u8]) -> EntradaDeTag {
-        match mascara_de_chunks(mostrar, chunks) {
-            Some(mascara) => (CName::cname(nome), mostrar, mascara),
-            // Só roda na avaliação da `static`: chunk acima de 63 nesta tabela é erro de compilação, nunca pânico no jogo.
-            None => panic!("tabela embutida: chunk acima de 63"),
-        }
-    }
-    const fn tag(nome: &str) -> u64 {
-        fnv1a64(nome.as_bytes())
-    }
-    const fn ha(nome: &str) -> EntradaDeTag {
-        entrada(nome, false, &[])
-    }
-    const fn h(nome: &str, chunks: &[u8]) -> EntradaDeTag {
-        entrada(nome, false, chunks)
-    }
-    const fn s(nome: &str, chunks: &[u8]) -> EntradaDeTag {
-        entrada(nome, true, chunks)
-    }
-    [
-        (
-            tag("hide_Head"),
-            &[
-                ha("h0_"),
-                ha("he_"),
-                ha("heb_"),
-                ha("ht_"),
-                ha("hx_"),
-                ha("i1_"),
-                ha("beard"),
-                ha("beard_"),
-                ha("MorphTargetSkinnedMesh3637"),
-                ha("MorphTargetSkinnedMesh6675"),
-                ha("MorphTargetSkinnedMesh7243"),
-                ha("MorphTargetSkinnedMesh7561"),
-            ],
-        ),
-        (tag("hide_Arms"), &[ha("a0_"), ha("left_arm"), ha("right_arm")]),
-        (
-            tag("hide_Torso"),
-            &[
-                ha("n0_"),
-                ha("tx_"),
-                h("t0_000_pma_base__full", &[0, 1, 2, 3]),
-                ha("t0_000_pma_base__full_seamfix"),
-                h("t0_000_pwa_base__full", &[0, 1, 2, 3]),
-                ha("t0_000_pwa_base__full_seamfix"),
-                h("t0_000_pwa_fpp__torso", &[0, 1, 2, 3]),
-                ha("MorphTargetSkinnedMesh0531"),
-            ],
-        ),
-        (
-            tag("hide_LowerAbdomen"),
-            &[h("t0_000_pma_base__full", &[3]), h("t0_000_pwa_base__full", &[3]), h("t0_000_pwa_fpp__torso", &[3])],
-        ),
-        (
-            tag("hide_UpperAbdomen"),
-            &[h("t0_000_pma_base__full", &[2]), h("t0_000_pwa_base__full", &[2]), h("t0_000_pwa_fpp__torso", &[2])],
-        ),
-        (
-            tag("hide_CollarBone"),
-            &[h("t0_000_pma_base__full", &[1]), h("t0_000_pwa_base__full", &[1]), h("t0_000_pwa_fpp__torso", &[1])],
-        ),
-        (
-            tag("hide_Chest"),
-            &[
-                h("t0_000_pma_base__full", &[0]),
-                h("t0_000_pwa_base__full", &[0]),
-                h("t0_000_pwa_fpp__torso", &[0]),
-                ha("MorphTargetSkinnedMesh0531"),
-            ],
-        ),
-        (
-            tag("hide_Legs"),
-            &[
-                ha("l0_"),
-                ha("s0_"),
-                h("t0_000_pma_base__full", &[4, 5, 6, 7]),
-                h("t0_000_pwa_base__full", &[4, 5, 6, 7]),
-                h("t0_000_pwa_fpp__torso", &[4, 5, 6, 7]),
-            ],
-        ),
-        (
-            tag("hide_Thighs"),
-            &[h("t0_000_pma_base__full", &[4]), h("t0_000_pwa_base__full", &[4]), h("t0_000_pwa_fpp__torso", &[4])],
-        ),
-        (
-            tag("hide_Calves"),
-            &[
-                h("t0_000_pma_base__full", &[5]),
-                h("l0_000_pma_base__high_heels", &[0]),
-                h("l0_000_pma_base__flat_shoes", &[0]),
-                h("t0_000_pwa_base__full", &[5]),
-                h("t0_000_pwa_fpp__torso", &[5]),
-                h("l0_000_pwa_base__cs_flat", &[0]),
-                h("l0_000_pwa_base__high_heels", &[0]),
-                h("l0_000_pwa_base__flat_shoes", &[0]),
-            ],
-        ),
-        (
-            tag("hide_Ankles"),
-            &[
-                ha("s0_"),
-                h("t0_000_pma_base__full", &[6]),
-                h("l0_000_pma_base__high_heels", &[1]),
-                h("l0_000_pma_base__flat_shoes", &[1]),
-                h("t0_000_pwa_base__full", &[6]),
-                h("t0_000_pwa_fpp__torso", &[6]),
-                h("l0_000_pwa_base__cs_flat", &[1]),
-                h("l0_000_pwa_base__high_heels", &[1]),
-                h("l0_000_pwa_base__flat_shoes", &[1]),
-            ],
-        ),
-        (
-            tag("hide_Feet"),
-            &[
-                h("t0_000_pma_base__full", &[7]),
-                h("l0_000_pma_base__high_heels", &[2]),
-                h("l0_000_pma_base__flat_shoes", &[2]),
-                h("t0_000_pwa_base__full", &[7]),
-                h("t0_000_pwa_fpp__torso", &[7]),
-                h("l0_000_pwa_base__cs_flat", &[2]),
-                h("l0_000_pwa_base__high_heels", &[2]),
-                h("l0_000_pwa_base__flat_shoes", &[2]),
-            ],
-        ),
-        (
-            tag("HighHeels"),
-            &[
-                h("t0_000_pma_base__full", &[5, 6, 7]),
-                s("l0_000_pma_base__high_heels", &[0, 1, 2]),
-                h("t0_000_pwa_base__full", &[5, 6, 7]),
-                h("t0_000_pwa_fpp__torso", &[5, 6, 7]),
-                s("l0_000_pwa_base__high_heels", &[0, 1, 2]),
-            ],
-        ),
-        (
-            tag("FlatShoes"),
-            &[
-                h("t0_000_pma_base__full", &[5, 6, 7]),
-                s("l0_000_pma_base__flat_shoes", &[0, 1, 2]),
-                h("t0_000_pwa_base__full", &[5, 6, 7]),
-                h("t0_000_pwa_fpp__torso", &[5, 6, 7]),
-                s("l0_000_pwa_base__flat_shoes", &[0, 1, 2]),
-            ],
-        ),
-    ]
-};
-
-/// Entradas da tag embutida de `CName` `tag`. A busca é pelo hash, como o `GetOverrides(tag)` da referência: a tag dos `visualTags` de uma definição
-/// não precisa ter texto no pool do motor (boot 197), e a native faz `cname(&tag)` uma vez. `None` = tag desconhecida (a referência devolve a
-/// definição vazia).
-pub(crate) fn tag_por_hash(tag: u64) -> Option<&'static [EntradaDeTag]> {
-    TAGS_EMBUTIDAS.iter().find(|(t, _)| *t == tag).map(|(_, entradas)| *entradas)
+/// Esconder o componente inteiro: máscara 0 na interseção.
+const fn esconder_tudo(chave: &str) -> EntradaDeTag {
+    (CName::cname(chave), false, 0)
 }
 
-/// Componentes de `Entity+0xA0` com estado na tabela da tag: o nome base ou o prefixo do nome (`chaves_do_componente`) é chave da tabela, como a
-/// referência acha o estado do componente (`States.cpp:710-711`). As chaves "n0_"/"h0_"/"l0_"/"tx_"/… são prefixos: nenhum componente se chama
+/// Esconder só os chunks da região da tag (chunk N = bit `1 << N` do `chunkMask` do mesh do componente). Chunk acima de 63 para a
+/// compilação: a tabela é `static`, e a máscara errada só apareceria no V.
+const fn esconder_parte(chave: &str, chunks: &[u8]) -> EntradaDeTag {
+    let Some(mascara) = bwms_primitives::override_state::mascara_de_chunks(false, chunks) else { panic!("chunk acima de 63 na tabela de tags") };
+    (CName::cname(chave), false, mascara)
+}
+
+/// Mostrar os chunks do calçado, como em [`esconder_parte`].
+const fn mostrar_parte(chave: &str, chunks: &[u8]) -> EntradaDeTag {
+    let Some(mascara) = bwms_primitives::override_state::mascara_de_chunks(true, chunks) else { panic!("chunk acima de 63 na tabela de tags") };
+    (CName::cname(chave), true, mascara)
+}
+
+const TORSO_PMA: &str = "t0_000_pma_base__full";
+const TORSO_PWA: &str = "t0_000_pwa_base__full";
+const TORSO_PWA_FPP: &str = "t0_000_pwa_fpp__torso";
+
+/// Os 3 meshes de torso do V repartem os mesmos chunks: 0 peito, 1 clavícula, 2 abdômen superior, 3 abdômen inferior, 4 coxas,
+/// 5 panturrilhas, 6 tornozelos, 7 pés (`B4c-chunks-das-tags.md`).
+const fn torso_parcial(chunks: &[u8]) -> [EntradaDeTag; 3] {
+    [esconder_parte(TORSO_PMA, chunks), esconder_parte(TORSO_PWA, chunks), esconder_parte(TORSO_PWA_FPP, chunks)]
+}
+
+/// Torso e as 5 pernas de calçado; nas pernas de calçado o chunk 0 é a panturrilha, 1 o tornozelo, 2 o pé.
+const fn pernas_e_pes(torso: &[u8], calcado: &[u8]) -> [EntradaDeTag; 8] {
+    [
+        esconder_parte(TORSO_PMA, torso),
+        esconder_parte("l0_000_pma_base__high_heels", calcado),
+        esconder_parte("l0_000_pma_base__flat_shoes", calcado),
+        esconder_parte(TORSO_PWA, torso),
+        esconder_parte(TORSO_PWA_FPP, torso),
+        esconder_parte("l0_000_pwa_base__cs_flat", calcado),
+        esconder_parte("l0_000_pwa_base__high_heels", calcado),
+        esconder_parte("l0_000_pwa_base__flat_shoes", calcado),
+    ]
+}
+
+const TAG_PANTURRILHAS: [EntradaDeTag; 8] = pernas_e_pes(&[5], &[0]);
+const TAG_TORNOZELOS: [EntradaDeTag; 8] = pernas_e_pes(&[6], &[1]);
+const TAG_PES: [EntradaDeTag; 8] = pernas_e_pes(&[7], &[2]);
+
+/// As 14 tags visuais que o mod escreve no `visualTags` do item (caixa exata) e os componentes do corpo do V que cada uma toca. Chave terminada
+/// em `_` é prefixo de nome ([`component_prefix_of`]).
+pub(crate) static TAGS_EMBUTIDAS: [(u64, &[EntradaDeTag]); 14] = [
+    (
+        crate::cname::cname("hide_Head"),
+        &[
+            esconder_tudo("h0_"),
+            esconder_tudo("he_"),
+            esconder_tudo("heb_"),
+            esconder_tudo("ht_"),
+            esconder_tudo("hx_"),
+            esconder_tudo("i1_"),
+            esconder_tudo("beard"),
+            esconder_tudo("beard_"),
+            esconder_tudo("MorphTargetSkinnedMesh3637"),
+            esconder_tudo("MorphTargetSkinnedMesh6675"),
+            esconder_tudo("MorphTargetSkinnedMesh7243"),
+            esconder_tudo("MorphTargetSkinnedMesh7561"),
+        ],
+    ),
+    (crate::cname::cname("hide_Arms"), &[esconder_tudo("a0_"), esconder_tudo("left_arm"), esconder_tudo("right_arm")]),
+    (
+        crate::cname::cname("hide_Torso"),
+        &[
+            esconder_tudo("n0_"),
+            esconder_tudo("tx_"),
+            esconder_parte(TORSO_PMA, &[0, 1, 2, 3]),
+            esconder_tudo("t0_000_pma_base__full_seamfix"),
+            esconder_parte(TORSO_PWA, &[0, 1, 2, 3]),
+            esconder_tudo("t0_000_pwa_base__full_seamfix"),
+            esconder_parte(TORSO_PWA_FPP, &[0, 1, 2, 3]),
+            esconder_tudo("MorphTargetSkinnedMesh0531"),
+        ],
+    ),
+    (crate::cname::cname("hide_LowerAbdomen"), &torso_parcial(&[3])),
+    (crate::cname::cname("hide_UpperAbdomen"), &torso_parcial(&[2])),
+    (crate::cname::cname("hide_CollarBone"), &torso_parcial(&[1])),
+    (
+        crate::cname::cname("hide_Chest"),
+        &[esconder_parte(TORSO_PMA, &[0]), esconder_parte(TORSO_PWA, &[0]), esconder_parte(TORSO_PWA_FPP, &[0]), esconder_tudo("MorphTargetSkinnedMesh0531")],
+    ),
+    (
+        crate::cname::cname("hide_Legs"),
+        &[
+            esconder_tudo("l0_"),
+            esconder_tudo("s0_"),
+            esconder_parte(TORSO_PMA, &[4, 5, 6, 7]),
+            esconder_parte(TORSO_PWA, &[4, 5, 6, 7]),
+            esconder_parte(TORSO_PWA_FPP, &[4, 5, 6, 7]),
+        ],
+    ),
+    (crate::cname::cname("hide_Thighs"), &torso_parcial(&[4])),
+    (crate::cname::cname("hide_Calves"), &TAG_PANTURRILHAS),
+    (
+        crate::cname::cname("hide_Ankles"),
+        &[
+            esconder_tudo("s0_"),
+            TAG_TORNOZELOS[0],
+            TAG_TORNOZELOS[1],
+            TAG_TORNOZELOS[2],
+            TAG_TORNOZELOS[3],
+            TAG_TORNOZELOS[4],
+            TAG_TORNOZELOS[5],
+            TAG_TORNOZELOS[6],
+            TAG_TORNOZELOS[7],
+        ],
+    ),
+    (crate::cname::cname("hide_Feet"), &TAG_PES),
+    (
+        crate::cname::cname("HighHeels"),
+        &[
+            esconder_parte(TORSO_PMA, &[5, 6, 7]),
+            mostrar_parte("l0_000_pma_base__high_heels", &[0, 1, 2]),
+            esconder_parte(TORSO_PWA, &[5, 6, 7]),
+            esconder_parte(TORSO_PWA_FPP, &[5, 6, 7]),
+            mostrar_parte("l0_000_pwa_base__high_heels", &[0, 1, 2]),
+        ],
+    ),
+    (
+        crate::cname::cname("FlatShoes"),
+        &[
+            esconder_parte(TORSO_PMA, &[5, 6, 7]),
+            mostrar_parte("l0_000_pma_base__flat_shoes", &[0, 1, 2]),
+            esconder_parte(TORSO_PWA, &[5, 6, 7]),
+            esconder_parte(TORSO_PWA_FPP, &[5, 6, 7]),
+            mostrar_parte("l0_000_pwa_base__flat_shoes", &[0, 1, 2]),
+        ],
+    ),
+];
+
+/// Entradas da tag pelo CName (caixa importa); 0 ou desconhecida → `None`.
+pub(crate) fn tag_por_hash(tag: u64) -> Option<&'static [EntradaDeTag]> {
+    if tag == 0 {
+        return None;
+    }
+    TAGS_EMBUTIDAS.iter().find(|(h, _)| *h == tag).map(|(_, t)| *t)
+}
+
+/// Componentes de `Entity+0xA0` com estado na tabela da tag: o nome base ou o prefixo do nome (`chaves_do_componente`) é chave da tabela (as mesmas duas
+/// chaves com que a loja decide o componente, `es20_estados_do_componente`). As chaves "n0_"/"h0_"/"l0_"/"tx_"/… são prefixos: nenhum componente se chama
 /// assim (o V tem `n0_000_pma_base__full`, `n0_000_pma_fpp__neck2814`). `(verificados, que batem)`; `None` sem lista de componentes coerente.
 pub(crate) unsafe fn componentes_da_tag(entity: *mut c_void, tabela: &[EntradaDeTag]) -> Option<(usize, Vec<*mut c_void>)> {
     if entity.is_null() || !crate::memoria::is_readable(entity as *const c_void, 0x10) {
@@ -4630,8 +4145,7 @@ pub(crate) fn fonte_da_tag(tag: &str, mod_hash: u64) -> u64 {
     bwms_primitives::fnv1a64_seeded(tag.as_bytes(), mod_hash)
 }
 
-/// O `ApplyVisualTagOverrideForMod` sem o RTTI: cada entrada da tag entra na loja do es20 sob a fonte (tag, mod) (`es20_registrar_tag`, o
-/// `AddChunkMaskOverride` de `Extension.cpp:692-700`) e `aplicar` roda em cada componente que bate. `(verificados, que batem, aplicados)`; tag
+/// O `ApplyVisualTagOverrideForMod` sem o RTTI: cada entrada da tag entra na loja do es20 sob a fonte (tag, mod) (`es20_registrar_tag`) e `aplicar` roda em cada componente que bate. `(verificados, que batem, aplicados)`; tag
 /// desconhecida ou entidade sem lista de componentes coerente não entram na loja.
 pub(crate) unsafe fn tag_aplicar_na_loja(
     entity: *mut c_void,
@@ -4647,8 +4161,8 @@ pub(crate) unsafe fn tag_aplicar_na_loja(
 }
 
 /// O `RemoveVisualTagOverrideForMod` sem o RTTI: tira a fonte (tag, mod) só dos nomes da tag (`es20_remover_mascara`) e, se tirou algo, `aplicar`
-/// roda de novo em cada componente que bate. O estado fica com `ChangesChunkMask`, então componente sem fonte nenhuma recebe a original
-/// (`States.cpp:713-717`). `(nomes com estado, nomes com algo da fonte, reaplicados)`.
+/// roda de novo em cada componente que bate. O estado fica com a mudança de máscara ligada, então componente sem fonte nenhuma recebe a
+/// original. `(nomes com estado, nomes com algo da fonte, reaplicados)`.
 pub(crate) unsafe fn tag_remover_da_loja(
     entity: *mut c_void,
     tag: &str,
@@ -4662,24 +4176,20 @@ pub(crate) unsafe fn tag_remover_da_loja(
     Some((com_estado, removidos, reaplicados))
 }
 
-/// `ApplyChunkMaskOverride` num componente da tag e, com `refresh`, o `UpdateRenderer` depois da escrita (`ApplyComponentOverrides` forçado,
-/// `Extension.cpp:810-826`) pelo portão medido (`es20_refresh_medido`). `true` se escreveu.
+/// Grava a máscara decidida pela loja e, com `refresh`, recarrega o visual pelo slot medido. `true` se gravou.
 unsafe fn es20_aplicar_mascara_da_tag(m: &Es20Malhas, entidade: u64, inst: *mut c_void, refresh: bool) -> bool {
-    let escreveu = es20_aplicar_mascara(m, entidade, inst).is_some();
-    if escreveu && refresh {
-        if let Some(f) = es20_refresh_medido(inst) {
-            f(inst);
+    if es20_aplicar_mascara(m, entidade, inst).is_none() {
+        return false;
+    }
+    if refresh {
+        if let Some(recarregar) = es20_refresh_medido(inst) {
+            recarregar(inst);
         }
     }
-    escreveu
+    true
 }
 
-/// `ApplyVisualTagOverrideForMod(WithRefresh)`: `tag_aplicar_na_loja` com o `ApplyChunkMaskOverride` do es20 (`isEnabled`, componente de mesh, estado
-/// do nome base e do prefixo, original em `es20_originais`), a mesma loja e a mesma regra do pipeline do #20. Sem as classes de mesh no RTTI
-/// (`es20_malhas`) nada entra na loja. `(verificados, que batem, escritos)`.
-// TODO(A#22, sem prova ao vivo desta loja): a prova `proofs/2026-08-14-archivexl-21-22-tagoverride-multimod-PROVADO.log` não passa por
-// `es20_componentes`. Falta 1 boot dev com o smoke `archivexl-tagoverride-multimod-smoke.reds`: veredito 9702 `consistente=true`, que relê o
-// `chunkMask` de cada alvo a cada apply e remove, e o 9703 do "esconder vence" quando o V tiver `l0_*_high_heels`; o log vai para `proofs/`.
+/// `ApplyVisualTagOverrideForMod(WithRefresh)`: registra a tag na loja e aplica nos componentes da entidade. `(verificados, que batem, escritos)`.
 pub(crate) unsafe fn apply_visual_tag_override_for_mod(
     reg: &crate::rtti::Registry,
     entity: *mut c_void,
@@ -4710,308 +4220,97 @@ pub(crate) unsafe fn remove_visual_tag_override_for_mod(
 /// FNV-1a64 de `default` — reserva se o global do motor não puder ser lido.
 pub(crate) const CNAME_DEFAULT: u64 = 0xebad_a516_8620_c5fe;
 
-/// `ComponentState::m_part` (`GetAppearancePart`, `States.hpp:12-49`) por `(entidade, nome base)`: a parte de recurso a que o componente foi ligado
-/// (`LinkComponentToPart`). Sem entrada = `IsFromAppearancePart()==false`. O nome base é `DynamicAppearanceRef::parse(nome_real).name`, não o hash cru
-/// do `IComponent::name`, como a referência indexa (`componentRef.name`). Os overrides de aparência e de máscara do mesmo `ComponentState`, dos itens
-/// e das natives de `BwmsAparencia`, ficam em `es20_componentes`.
+/// Parte de recurso a que o componente foi ligado, por `(entidade, nome base)`.
 pub(crate) static ES22_COMPONENT_APPEARANCE: Mutex<Vec<((u64, u64), u64)>> = Mutex::new(Vec::new());
 
-/// A#22 22F — `LinkComponentToPart` pelo nome base (`componentRef.name`) direto do Rust. `true` se ligou.
+/// Liga (ou religa) o nome base à parte. `false` só com a trava envenenada.
 pub(crate) fn es22_ligar_componente(entidade: u64, nome_base: u64, parte: u64) -> bool {
     let Ok(mut g) = ES22_COMPONENT_APPEARANCE.lock() else { return false };
-    let chave = (entidade, nome_base);
-    match g.iter_mut().find(|(k, _)| *k == chave) {
+    match g.iter_mut().find(|(k, _)| *k == (entidade, nome_base)) {
         Some((_, p)) => *p = parte,
-        None => g.push((chave, parte)),
+        None => g.push(((entidade, nome_base), parte)),
     }
     true
 }
 
-/// A#22 22F — `LinkPartToAppearance(parte, nome)` direto do Rust.
 pub(crate) fn es22_ligar_parte(entidade: u64, parte: u64, aparencia: &str) {
     es22_ligar_parte_seletor(entidade, parte, &DynamicAppearanceName::parse(aparencia));
 }
 
-/// A#22 22H — `LinkPartToAppearance(parte, seletor)` com o seletor já lido.
 pub(crate) fn es22_ligar_parte_seletor(entidade: u64, parte: u64, seletor: &DynamicAppearanceName) {
-    if let Ok(mut g) = ES22_RESOURCE_STATE.lock() {
-        let chave = (entidade, parte);
-        match g.iter_mut().find(|(k, _)| *k == chave) {
-            Some((_, s)) => *s = seletor.clone(),
-            None => g.push((chave, seletor.clone())),
-        }
+    let Ok(mut g) = ES22_RESOURCE_STATE.lock() else { return };
+    match g.iter_mut().find(|(k, _)| *k == (entidade, parte)) {
+        Some((_, s)) => *s = seletor.clone(),
+        None => g.push(((entidade, parte), seletor.clone())),
     }
 }
 
-// ===== ArchiveXL `#22` 22C — índice do `OverrideStateManager` pelas 4 chaves (2026-09-14) =====
-// Porte de `States.cpp:790-935`. `GetEntityState` cria o estado da entidade na 1ª vez e liga a ele os caminhos `<hash do TemplatePath>_0.app`, `_1.app` e
-// `_2.app`; `LinkEntityToAssembler` liga o contexto de processamento só a entidade que já tem estado; `LinkEntityToPointer` liga o ponteiro do estado do
-// montador (`GarmentAssemblerState.unk00`), criando o estado se preciso; a passada do `LinkComponentToPart` tira das entidades as expiradas (os outros 3
-// mapas continuam apontando pra elas, como na referência); `ClearStates` esvazia tudo. Cada busca devolve a entidade dona do estado; os dados por
-// componente e por parte seguem nos registros `ES22_*` por entidade. A entidade guarda o handle fraco dela, pra validade.
-#[derive(Default)]
-pub(crate) struct Es22Indice {
-    /// `(entidade, handle fraco)` na ordem de criação.
-    pub(crate) entidades: Vec<(u64, [u64; 2])>,
-    pub(crate) por_caminho: std::collections::HashMap<u64, u64>,
-    pub(crate) por_contexto: std::collections::HashMap<u64, u64>,
-    pub(crate) por_ponteiro: std::collections::HashMap<u64, u64>,
-}
-
-/// Caminho dinâmico `k` (0 a 2) do template: o `ResourcePath` de `<hash decimal do template>_<k>.app`.
-pub(crate) fn es22_caminho_dinamico(template: u64, k: u8) -> u64 {
-    bwms_primitives::resource_path_hash(&format!("{template}_{k}.app"))
-}
-
-/// Esquece os estados de componente da entidade.
+/// Tira da loja de override todas as chaves da entidade.
 pub(crate) fn es20_esquecer(entidade: u64) {
     if let Ok(mut m) = es20_componentes().lock() {
         m.retain(|(e, _), _| *e != entidade);
     }
 }
 
-impl Es22Indice {
-    /// `GetEntityState(entidade)`: a entidade, criando o estado e os 3 caminhos na 1ª vez; `None` sem entidade.
-    pub(crate) fn estado(&mut self, entidade: u64, fraco: [u64; 2], template: u64) -> Option<u64> {
-        if entidade == 0 {
-            return None;
-        }
-        if !self.entidades.iter().any(|(e, _)| *e == entidade) {
-            self.entidades.push((entidade, fraco));
-            for k in 0..3 {
-                self.por_caminho.insert(es22_caminho_dinamico(template, k), entidade);
-            }
-        }
-        Some(entidade)
-    }
-
-    /// `GetFirstEntityState`.
-    pub(crate) fn primeiro(&self) -> Option<u64> {
-        self.entidades.first().map(|(e, _)| *e)
-    }
-
-    /// Entidades com estado.
-    pub(crate) fn quantas(&self) -> usize {
-        self.entidades.len()
-    }
-
-    /// `FindEntityState(Entity*)`.
-    pub(crate) fn por_entidade(&self, entidade: u64) -> Option<u64> {
-        (entidade != 0 && self.entidades.iter().any(|(e, _)| *e == entidade)).then_some(entidade)
-    }
-
-    /// `FindEntityState(ResourcePath)`.
-    pub(crate) fn por_caminho(&self, caminho: u64) -> Option<u64> {
-        self.por_caminho.get(&caminho).copied().filter(|_| caminho != 0)
-    }
-
-    /// `FindEntityState(GarmentProcessingContext*)`.
-    pub(crate) fn por_contexto(&self, contexto: u64) -> Option<u64> {
-        self.por_contexto.get(&contexto).copied().filter(|_| contexto != 0)
-    }
-
-    /// `FindEntityState(uintptr_t)`.
-    pub(crate) fn por_ponteiro(&self, ponteiro: u64) -> Option<u64> {
-        self.por_ponteiro.get(&ponteiro).copied().filter(|_| ponteiro != 0)
-    }
-
-    /// `LinkEntityToAssembler`: liga só entidade que já tem estado.
-    pub(crate) fn ligar_contexto(&mut self, entidade: u64, contexto: u64) -> bool {
-        let tem = self.por_entidade(entidade).is_some();
-        if tem {
-            self.por_contexto.insert(contexto, entidade);
-        }
-        tem
-    }
-
-    /// `LinkEntityToPointer`: liga, criando o estado se a entidade não tem.
-    pub(crate) fn ligar_ponteiro(&mut self, entidade: u64, fraco: [u64; 2], template: u64, ponteiro: u64) {
-        if self.estado(entidade, fraco, template).is_some() {
-            self.por_ponteiro.insert(ponteiro, entidade);
-        }
-    }
-
-    /// Passada do `LinkComponentToPart`/`UpdateDynamicAttributes`: `(entidades vivas, handles fracos das expiradas)`, com as expiradas fora das entidades.
-    pub(crate) fn vivas(&mut self, valida: impl Fn([u64; 2]) -> bool) -> (Vec<u64>, Vec<[u64; 2]>) {
-        let (vivas, expiradas): (Vec<_>, Vec<_>) = self.entidades.drain(..).partition(|(_, f)| valida(*f));
-        self.entidades = vivas;
-        (self.entidades.iter().map(|(e, _)| *e).collect(), expiradas.into_iter().map(|(_, f)| f).collect())
-    }
-
-    /// Handle fraco guardado da entidade.
-    pub(crate) fn fraco(&self, entidade: u64) -> Option<[u64; 2]> {
-        self.entidades.iter().find(|(e, _)| *e == entidade).map(|(_, f)| *f)
-    }
-
-    /// `ClearStates`: devolve os handles fracos pra soltar. Sem chamador no produto: falta o gatilho (TODO F2-04 no fim de `register.rs`).
-    pub(crate) fn limpar(&mut self) -> Vec<[u64; 2]> {
-        self.por_caminho.clear();
-        self.por_contexto.clear();
-        self.por_ponteiro.clear();
-        self.entidades.drain(..).map(|(_, f)| f).collect()
-    }
-}
-
-/// O índice do processo, como o `s_stateManager` da referência.
-pub(crate) fn es22_indice() -> &'static Mutex<Es22Indice> {
-    static INDICE: std::sync::OnceLock<Mutex<Es22Indice>> = std::sync::OnceLock::new();
-    INDICE.get_or_init(|| Mutex::new(Es22Indice::default()))
-}
 
 pub(crate) fn es20_componentes() -> &'static Mutex<Es20Estados> {
     static ESTADOS: std::sync::OnceLock<Mutex<Es20Estados>> = std::sync::OnceLock::new();
     ESTADOS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
-/// `EntityState::AddChunkMaskOverride(hash, nome, máscara, mostrar)`.
 pub(crate) fn es20_adicionar_mascara(entidade: u64, hash: u64, nome: CName, mascara: u64, mostrar: bool) {
     if nome.valor() == 0 {
         return;
     }
-    if let Ok(mut m) = es20_componentes().lock() {
-        let st = m.entry((entidade, nome.valor())).or_default();
-        if mostrar {
-            st.mostrar(hash, mascara);
-        } else {
-            st.esconder(hash, mascara);
-        }
+    let Ok(mut m) = es20_componentes().lock() else { return };
+    let estado = m.entry((entidade, nome.valor())).or_default();
+    if mostrar {
+        estado.mostrar(hash, mascara);
+    } else {
+        estado.esconder(hash, mascara);
     }
 }
 
-/// As máscaras de uma tag (`GetOverrides(tag)`) sob `hash`, como o `RegisterComponentOverrides` faz com cada tag visual de um item
-/// (`Extension.cpp:692-700`).
 pub(crate) fn es20_registrar_tag(entidade: u64, hash: u64, tabela: &[EntradaDeTag]) {
-    for (nome, mostrar, mascara) in tabela {
-        es20_adicionar_mascara(entidade, hash, *nome, *mascara, *mostrar);
+    for &(chave, mostrar, mascara) in tabela {
+        es20_adicionar_mascara(entidade, hash, chave, mascara, mostrar);
     }
 }
 
-/// `RemoveChunkMaskOverrides(hash)` só nos nomes de uma tag (`tag_por_hash`): `(nomes com estado, nomes com algo do hash)`. A aparência e os outros
-/// nomes ficam; `es20_remover_componentes` tira máscara e aparência de todo componente da entidade. O estado fica mesmo sem fonte: o
-/// `ChangesChunkMask` faz a próxima aplicação gravar a original.
+/// Tira a máscara da fonte só nas chaves da tag; o estado fica (com a mudança ligada, a original volta na aplicação).
+/// `(chaves da tag com estado, chaves em que a fonte tinha algo)`.
 pub(crate) fn es20_remover_mascara(entidade: u64, hash: u64, tabela: &[EntradaDeTag]) -> (usize, usize) {
     let Ok(mut m) = es20_componentes().lock() else { return (0, 0) };
     let (mut com_estado, mut removidos) = (0, 0);
-    for (nome, _, _) in tabela {
-        if let Some(st) = m.get_mut(&(entidade, nome.valor())) {
+    for (chave, _, _) in tabela {
+        if let Some(estado) = m.get_mut(&(entidade, chave.valor())) {
             com_estado += 1;
-            removidos += usize::from(st.remover_fonte(hash));
+            removidos += usize::from(estado.remover_fonte(hash));
         }
     }
     (com_estado, removidos)
 }
 
-/// `RemoveChunkMaskOverrides(hash)` + `RemoveAppearanceOverrides(hash)` nos componentes da entidade; devolve em quantos havia algo do hash.
+/// Tira máscara e aparência da fonte em todas as chaves da entidade; devolve em quantas havia algo dela.
 pub(crate) fn es20_remover_componentes(entidade: u64, hash: u64) -> usize {
     let Ok(mut m) = es20_componentes().lock() else { return 0 };
-    let mut n = 0;
-    for ((e, _), st) in m.iter_mut() {
-        if *e == entidade {
-            let mascara = st.remover_fonte(hash);
-            let aparencia = st.remover_aparencia(hash);
-            n += usize::from(mascara || aparencia);
-        }
-    }
-    n
+    m.iter_mut()
+        .filter(|((e, _), _)| *e == entidade)
+        .map(|(_, estado)| {
+            let mascara = estado.remover_fonte(hash);
+            let aparencia = estado.remover_aparencia(hash);
+            usize::from(mascara || aparencia)
+        })
+        .sum()
 }
 
-/// Estado do componente da entidade (cópia), se algum item registrou nele.
 pub(crate) fn es20_estado(entidade: u64, nome: u64) -> Option<bwms_primitives::override_state::ComponentState> {
     es20_componentes().lock().ok()?.get(&(entidade, nome)).cloned()
 }
 
-/// Resultado do `RegisterComponentOverrides`: `partsOverrides` sem recurso, componentes registrados e tags conhecidas.
-#[derive(Debug, Default, PartialEq)]
-pub(crate) struct Es20Registro {
-    pub partes_sem_recurso: usize,
-    pub componentes: usize,
-    pub tags: usize,
-}
 
-/// Um componente de `appearancePartComponentOverrides` (`componentName`, `meshAppearance`, `chunkMask`), lido da memória do motor por
-/// `es20_componentes_de_overrides`.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Es20OverrideDeComponente {
-    pub nome: CName,
-    pub aparencia: CName,
-    pub mascara: u64,
-}
-
-/// `(overrides de parte sem recurso, componentes deles)` de um `DynArray<AppearancePartOverrides>` (0x18 B cada, os componentes 0x50 B), com os
-/// campos já resolvidos (thread de job, sem RTTI).
-pub(crate) unsafe fn es20_componentes_de_overrides(campos: [usize; 3], overrides: *const u8) -> (usize, Vec<Es20OverrideDeComponente>) {
-    let [o_nome, o_aparencia, o_mascara] = campos;
-    let b = rd_u64(overrides as *const c_void, 0) as *const u8;
-    let n = if b.is_null() { 0 } else { (overrides.add(0x0c) as *const u32).read_unaligned() as usize };
-    let (mut partes, mut lista) = (0, Vec::new());
-    for i in 0..n.min(4096) {
-        let parte = b.add(i * 0x18);
-        if (parte as *const u64).read_unaligned() != 0 {
-            continue;
-        }
-        partes += 1;
-        let cb = rd_u64(parte.add(8) as *const c_void, 0) as *const u8;
-        let cn = if cb.is_null() { 0 } else { (parte.add(0x14) as *const u32).read_unaligned() as usize };
-        for k in 0..cn.min(4096) {
-            let ler = |o: usize| (cb.add(k * 0x50 + o) as *const u64).read_unaligned();
-            lista.push(Es20OverrideDeComponente {
-                nome: CName::lido_do_motor(ler(o_nome)),
-                aparencia: CName::lido_do_motor(ler(o_aparencia)),
-                mascara: ler(o_mascara),
-            });
-        }
-    }
-    (partes, lista)
-}
-
-/// `RegisterComponentOverrides(estado, hash, overrides)` com os componentes já lidos: a máscara como esconder e a aparência.
-pub(crate) fn es20_registrar_lista(entidade: u64, hash: u64, lista: &[Es20OverrideDeComponente]) {
-    for c in lista {
-        es20_adicionar_mascara(entidade, hash, c.nome, c.mascara, false);
-        es20_adicionar_aparencia(entidade, hash, c.nome, c.aparencia);
-    }
-}
-
-/// `RegisterComponentOverrides(estado, hash, definição)` com os campos de `appearancePartComponentOverrides` já resolvidos (thread de job, sem RTTI).
-pub(crate) unsafe fn es20_registrar_componentes_com(campos: [usize; 3], entidade: u64, hash: u64, definicao: *const u8) -> Es20Registro {
-    let (partes_sem_recurso, lista) = es20_componentes_de_overrides(campos, definicao.add(crate::jogo::aparencia::APPDEF_PARTSOVERRIDES_OFF));
-    es20_registrar_lista(entidade, hash, &lista);
-    let mut r = Es20Registro { partes_sem_recurso, componentes: lista.len(), tags: 0 };
-    let tags = definicao.add(crate::jogo::aparencia::APPDEF_VISUALTAGS_OFF);
-    let tb = rd_u64(tags as *const c_void, 0) as *const u64;
-    let tn = if tb.is_null() { 0 } else { (tags.add(0x0c) as *const u32).read_unaligned() as usize };
-    for i in 0..tn.min(256) {
-        if let Some(tabela) = tag_por_hash(tb.add(i).read_unaligned()) {
-            r.tags += 1;
-            es20_registrar_tag(entidade, hash, tabela);
-        }
-    }
-    r
-}
-
-/// `UpdatePartAttributes(estado, definição)`: cada parte ligada à aparência de nome igual ao da definição; devolve quantas.
-pub(crate) unsafe fn es20_atualizar_partes(entidade: u64, definicao: *const u8) -> usize {
-    let nome = crate::cname::resolve_cname((definicao.add(crate::jogo::aparencia::APPDEF_NAME_OFF) as *const u64).read_unaligned());
-    let partes = es20_partes(definicao);
-    for parte in &partes {
-        es22_ligar_parte(entidade, *parte, &nome);
-    }
-    partes.len()
-}
-
-/// `UnregisterComponentOverrides` + `UnregisterOffsetOverrides` do item: `(componentes com algo dele, recursos com deslocamento dele)`.
-pub(crate) unsafe fn es20_desregistrar(entidade: u64, hash: u64) -> (usize, u32) {
-    (es20_remover_componentes(entidade, hash), remove_offset_overrides(entidade, hash))
-}
-
-// ===== ArchiveXL `#20` 20c-2 — `UpdatePartAssignments`, `ApplyComponentOverrides` e `ApplyOffsetOverrides` (2026-09-14) =====
-// Porte de `Extension.cpp:739-881` sobre `States.cpp:390-399` e `659-755`, pro `ComputePlayerGarment` (thread de job). Classes e offsets dos tipos de
-// componente de mesh saem do RTTI na thread do jogo (`es20_resolver_malhas`); no job, `class_of` é o `GetType` virtual do próprio objeto e `class_is_kind_of` só
-// anda a cadeia de pais. Os originais ficam por entidade e `GetUniqueId` (`FNV1a64(appearancePath, FNV1a64(appearanceName, name))` do `IComponent`), lidos
-// na 1ª vez que a referência pede. O `ResolveName` do apply precisa do estado dinâmico do `UpdateDynamicAttributes` (20f); sem ele o nome segue igual, como
-// a referência sem entrada em `m_states`.
 pub(crate) struct Es20Malhas {
-    /// `entMeshComponent`, `entMorphTargetSkinnedMeshComponent`, `entGarmentSkinnedMeshComponent`, `entSkinnedMeshComponent` (ordem do `ComponentWrapper`).
+    /// `entMeshComponent`, `entMorphTargetSkinnedMeshComponent`, `entGarmentSkinnedMeshComponent`, `entSkinnedMeshComponent` (garment antes de skinned: a garment é subclasse).
     pub(crate) classes: [u64; 4],
     /// `(chunkMask, meshAppearance)` por tipo: 0 mesh, 1 família skinned, 2 morph target.
     pub(crate) campos: [(usize, usize); 3],
@@ -5037,8 +4336,8 @@ impl Es20Malhas {
     }
 }
 
-/// Classes e offsets de `Es20Malhas` pelo RTTI (thread do jogo). `appearanceName`/`appearancePath` sem propriedade no RTTI caem nos offsets do SDK
-/// (`0x48`/`0x68`); o `bool` diz se vieram do RTTI.
+/// Classes e offsets de `Es20Malhas` pelo RTTI (thread do jogo). `appearanceName`/`appearancePath` sem propriedade no RTTI caem nos offsets
+/// medidos (`0x48`/`0x68`, `DATABASE.md`); o `bool` diz se vieram do RTTI.
 pub(crate) unsafe fn es20_resolver_malhas(reg: &rtti::Registry) -> Option<(Es20Malhas, bool)> {
     let classe = |n: &str| Some(reg.class_by_name(n)).filter(|c| !c.is_null());
     let [mesh, morph, garment, skinned, base] = [
@@ -5073,7 +4372,7 @@ pub(crate) unsafe fn es20_malhas(reg: &rtti::Registry) -> Option<&'static Es20Ma
     Some(MALHAS.get_or_init(|| m))
 }
 
-/// Tipo de mesh do componente na ordem do `ComponentWrapper` (0 mesh, 1 família skinned, 2 morph target); `None` = `IsMeshComponent` falso.
+/// Tipo de mesh do componente (0 mesh, 1 família skinned, 2 morph target); `None` fora das classes de mesh.
 pub(crate) unsafe fn es20_tipo(m: &Es20Malhas, inst: *mut c_void) -> Option<usize> {
     let cls = rtti::class_of(inst);
     if cls.is_null() {
@@ -5091,11 +4390,12 @@ pub(crate) unsafe fn es20_tipo(m: &Es20Malhas, inst: *mut c_void) -> Option<usiz
     }
 }
 
-/// `ComponentWrapper::GetUniqueId`: `name` como semente, depois os 8 bytes de `appearanceName` e os de `appearancePath`.
+/// Identidade do componente vivo para o cache de originais: nome, `appearanceName` e `appearancePath` encadeados. Dois componentes de mesmo
+/// nome com aparência ou caminho diferentes não dividem a original.
 pub(crate) unsafe fn es20_id_do_componente(base: (usize, usize), inst: *const u8) -> u64 {
-    let ler = |o: usize| (inst.add(o) as *const u64).read_unaligned();
-    let id = bwms_primitives::fnv1a64_seeded(&ler(base.0).to_le_bytes(), ler(0x40));
-    bwms_primitives::fnv1a64_seeded(&ler(base.1).to_le_bytes(), id)
+    let ler = |off: usize| (inst.add(off) as *const u64).read_unaligned();
+    let com_aparencia = bwms_primitives::fnv1a64_seeded(&ler(base.0).to_le_bytes(), ler(0x40));
+    bwms_primitives::fnv1a64_seeded(&ler(base.1).to_le_bytes(), com_aparencia)
 }
 
 /// `(entidade, id do componente, 0 máscara / 1 aparência / 2 caminho do recurso)` → original.
@@ -5104,16 +4404,22 @@ pub(crate) fn es20_originais() -> &'static Mutex<std::collections::HashMap<(u64,
     ORIGINAIS.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
-/// `GetOriginalChunkMask`/`GetOriginalAppearance`: o valor guardado, ou `atual` guardado na 1ª vez.
+/// A 1ª leitura fica: depois do override, o campo vivo já não é a original. Trava envenenada → 0.
 pub(crate) fn es20_original(entidade: u64, id: u64, qual: u8, atual: impl FnOnce() -> u64) -> u64 {
-    es20_originais().lock().map(|mut m| *m.entry((entidade, id, qual)).or_insert_with(atual)).unwrap_or(0)
+    let Ok(mut m) = es20_originais().lock() else { return 0 };
+    *m.entry((entidade, id, qual)).or_insert_with(atual)
 }
 
-/// `GetOriginalAppearance` das natives de `BwmsAparencia`, no cache do es20 (`es20_original` 1). Leitura que falha devolve 0 e fica fora do cache: guardada,
-/// a recusa valeria para sempre naquele componente.
+/// Aparência original (campo 1 do cache). Leitura que falha devolve 0 sem guardar: um 0 guardado viraria "original" para sempre.
 pub(crate) unsafe fn es20_original_da_aparencia(base: (usize, usize), entidade: u64, inst: *mut c_void, kind: GarmentComponentKind) -> u64 {
-    let Some(atual) = component_get_appearance_name(inst, kind) else { return 0 };
-    es20_original(entidade, es20_id_do_componente(base, inst as *const u8), 1, || atual)
+    let id = es20_id_do_componente(base, inst as *const u8);
+    if let Some(v) = es20_originais().lock().ok().and_then(|m| m.get(&(entidade, id, 1)).copied()) {
+        return v;
+    }
+    match component_get_appearance_name(inst, kind) {
+        Some(atual) => es20_original(entidade, id, 1, || atual),
+        None => 0,
+    }
 }
 
 /// `(entidade, parte)` → nomes dos componentes ligados a ela (`m_partComponents`, o `GetPartComponentNames` do 20d).
@@ -5122,65 +4428,70 @@ pub(crate) fn es20_componentes_da_parte() -> &'static Mutex<std::collections::Ha
     PARTES.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
-/// Nomes dos componentes ligados à parte na entidade.
+/// Nomes completos dos componentes ligados à parte, em ordem crescente de hash.
 pub(crate) fn es20_nomes_da_parte(entidade: u64, parte: u64) -> Vec<u64> {
     es20_componentes_da_parte().lock().ok().and_then(|m| m.get(&(entidade, parte)).map(|s| s.iter().copied().collect())).unwrap_or_default()
 }
 
-/// Parte ligada ao nome base do componente na entidade (`ComponentState::GetAppearancePart`).
 pub(crate) fn es22_parte_do_componente(entidade: u64, nome_base: u64) -> Option<u64> {
-    ES22_COMPONENT_APPEARANCE.lock().ok()?.iter().find(|(k, _)| *k == (entidade, nome_base)).map(|(_, parte)| *parte)
+    ES22_COMPONENT_APPEARANCE.lock().ok()?.iter().find(|(k, _)| *k == (entidade, nome_base)).map(|(_, p)| *p)
 }
 
-/// `EntityState::LinkComponentToPart(componente, parte)`: o nome base (`ParseReference(name).name`) ligado à parte e o nome do componente na lista
-/// da parte. Devolve o nome base. O estado do componente não é criado aqui: o vazio da referência não muda nenhuma aplicação.
+/// Liga o nome base do componente vivo à parte e põe o nome completo na lista da parte; não cria estado na loja de override.
 pub(crate) unsafe fn es20_ligar_componente(entidade: u64, inst: *const u8, parte: u64) -> u64 {
     let base = es20_nome_base(inst);
     es22_ligar_componente(entidade, base, parte);
+    let nome = (inst.add(0x40) as *const u64).read_unaligned();
     if let Ok(mut m) = es20_componentes_da_parte().lock() {
-        m.entry((entidade, parte)).or_default().insert((inst.add(0x40) as *const u64).read_unaligned());
+        m.entry((entidade, parte)).or_default().insert(nome);
     }
     base
 }
 
-/// Nome base do componente (`ParseReference(name).name`).
+/// Nome base do CName em `inst+0x40`: o texto antes do 1º `!`/`&`; sem texto conhecido, o próprio hash.
 pub(crate) unsafe fn es20_nome_base(inst: *const u8) -> u64 {
-    parse_reference_live((inst.add(0x40) as *const u64).read_unaligned()).name
+    let nome = (inst.add(0x40) as *const u64).read_unaligned();
+    chaves_do_componente(nome).0
 }
 
-/// As duas chaves com que a referência acha o estado do componente de nome `nome` (`IComponent::name@0x40`): o nome base
-/// (`ParseReference(name).name`, `States.cpp:710`) e o prefixo do nome (`GetPrefix(name)`, `States.cpp:711`; `Prefix.cpp:3-27`).
+/// `(nome base, prefixo do nome completo)`. O texto vem do espelho do BWMS e depois do pool do motor; sem texto, sem prefixo.
 pub(crate) unsafe fn chaves_do_componente(nome: u64) -> (u64, Option<u64>) {
-    (parse_reference_live(nome).name, component_prefix_of(&crate::cname::name_of(nome).unwrap_or_default()))
+    if nome == 0 {
+        return (0, None);
+    }
+    let Some(texto) = crate::cname::name_of(nome) else { return (nome, None) };
+    let base = DynamicAppearanceRef::parse(&texto).name;
+    (base, component_prefix_of(&texto))
 }
 
-/// Estados do nome base do componente e do prefixo do nome dele (`FindComponentState(componentRef.name)` e `FindComponentState(GetPrefix(name))`).
 pub(crate) unsafe fn es20_estados_do_componente(
     entidade: u64,
     inst: *const u8,
 ) -> (u64, Option<bwms_primitives::override_state::ComponentState>, Option<bwms_primitives::override_state::ComponentState>) {
     let (base, prefixo) = chaves_do_componente((inst.add(0x40) as *const u64).read_unaligned());
-    (base, es20_estado(entidade, base), prefixo.and_then(|p| es20_estado(entidade, p)))
+    let Ok(m) = es20_componentes().lock() else { return (base, None, None) };
+    let estado = m.get(&(entidade, base)).cloned();
+    let do_prefixo = prefixo.and_then(|p| m.get(&(entidade, p)).cloned());
+    (base, estado, do_prefixo)
 }
 
-/// A máscara que o `ApplyChunkMaskOverride` grava no componente, pelo estado do nome base e do prefixo na loja (`States.cpp:710-731`); `None` = sem
-/// mudança de máscara. `original` só roda depois desse teste.
 pub(crate) unsafe fn es20_decidir_mascara(entidade: u64, inst: *const u8, original: impl FnOnce() -> u64) -> Option<u64> {
-    let (_, componente, prefixo) = es20_estados_do_componente(entidade, inst);
-    bwms_primitives::override_state::mascara_aplicada(original, componente.as_ref(), prefixo.as_ref())
+    let (_, estado, prefixo) = es20_estados_do_componente(entidade, inst);
+    bwms_primitives::override_state::mascara_aplicada(original, estado.as_ref(), prefixo.as_ref())
 }
 
-/// `EntityState::ApplyChunkMaskOverride`: `Some(máscara escrita)`; `None` = a referência sai sem escrever (desligado, fora de mesh, sem mudança).
+/// Grava no `chunkMask` a máscara que a loja decide; `None` sem escrita (nulo, desligado, fora das classes de mesh ou nada a decidir). A
+/// original é a do cache, lida do próprio campo na 1ª vez.
 pub(crate) unsafe fn es20_aplicar_mascara(m: &Es20Malhas, entidade: u64, inst: *mut c_void) -> Option<u64> {
-    if inst.is_null() || (inst as *const u8).add(0x8b).read_unaligned() == 0 {
+    if inst.is_null() || (inst as *const u8).add(0x8b).read() == 0 {
         return None;
     }
-    let tipo = es20_tipo(m, inst)?;
-    let campo = (inst as *mut u8).add(m.campos[tipo].0) as *mut u64;
-    let original = || es20_original(entidade, es20_id_do_componente(m.base, inst as *const u8), 0, || campo.read_unaligned());
-    let fim = es20_decidir_mascara(entidade, inst as *const u8, original)?;
-    campo.write_unaligned(fim);
-    Some(fim)
+    let (campo, _) = m.campos(es20_tipo(m, inst)?);
+    let alvo = (inst as *mut u8).add(campo) as *mut u64;
+    let id = es20_id_do_componente(m.base(), inst as *const u8);
+    let mascara = es20_decidir_mascara(entidade, inst as *const u8, || es20_original(entidade, id, 0, || alvo.read_unaligned()))?;
+    alvo.write_unaligned(mascara);
+    Some(mascara)
 }
 
 /// O `RefreshAppearance` do componente, só com vtable e slot 81 iguais a um par medido.
@@ -5201,120 +4512,10 @@ pub(crate) unsafe fn es20_refresh_medido(inst: *mut c_void) -> Option<unsafe ext
         .then(|| std::mem::transmute::<usize, unsafe extern "C" fn(*mut c_void)>(alvo as usize))
 }
 
-/// Um componente do `ApplyComponentOverrides(estado, componentes, forçar)`: aparência e depois máscara; forçado, com alguma escrita, o `UpdateRenderer`
-/// (o refresh medido). `(aparência escrita, máscara escrita, UpdateRenderer chamado)`.
-pub(crate) unsafe fn es20_aplicar_componente(m: &Es20Malhas, entidade: u64, inst: *mut c_void, forcar: bool) -> (bool, bool, bool) {
-    let aparencia = es20_aplicar_aparencia(m, entidade, inst).is_some();
-    let mascara = es20_aplicar_mascara(m, entidade, inst).is_some();
-    let render = forcar && (aparencia || mascara) && es20_refresh_medido(inst).map(|f| f(inst)).is_some();
-    (aparencia, mascara, render)
-}
 
-/// `componentName`, `meshAppearance`, `chunkMask` e `acceptDismemberment` de `appearancePartComponentOverrides`, pelo RTTI.
-pub(crate) unsafe fn es20_campos_do_remendo(reg: &rtti::Registry) -> Option<[usize; 4]> {
-    let [nome, aparencia, mascara] = es20_campos_de_componente(reg)?;
-    let c = reg.class_by_name("appearancePartComponentOverrides");
-    let desmembramento = rtti::resolve_prop_in_class(c, "acceptDismemberment").map(|(o, _, _)| o as usize).filter(|o| *o < 0x50)?;
-    Some([nome, aparencia, mascara, desmembramento])
-}
-
-/// `DummyAppearancePartPath`.
-pub(crate) const ES20_PARTE_FICTICIA: u64 = bwms_primitives::resource_path_hash("#non_existing_part.ent");
-
-/// Algum override de `partsOverrides` com recurso vazio, igual a `parte` ou o fictício já tem componente `nome`?
-pub(crate) unsafe fn es20_tem_override(campos: [usize; 4], definicao: *const u8, parte: u64, nome: u64) -> bool {
-    let externo = definicao.add(crate::jogo::aparencia::APPDEF_PARTSOVERRIDES_OFF);
-    let b = rd_u64(externo as *const c_void, 0) as *const u8;
-    let n = if b.is_null() { 0 } else { (externo.add(0x0c) as *const u32).read_unaligned() as usize };
-    (0..n.min(4096)).any(|i| {
-        let p = b.add(i * 0x18);
-        let recurso = (p as *const u64).read_unaligned();
-        if recurso != 0 && recurso != parte && recurso != ES20_PARTE_FICTICIA {
-            return false;
-        }
-        let cb = rd_u64(p.add(8) as *const c_void, 0) as *const u8;
-        let cn = if cb.is_null() { 0 } else { (p.add(0x14) as *const u32).read_unaligned() as usize };
-        (0..cn.min(4096)).any(|k| (cb.add(k * 0x50 + campos[0]) as *const u64).read_unaligned() == nome)
-    })
-}
-
-/// Anexa em `partsOverrides` um override de parte com o caminho fictício e o componente `nome` (`default`, máscara cheia, desmembramento ligado).
-pub(crate) unsafe fn es20_anexar_override_de_cabeca(campos: [usize; 4], definicao: *mut u8, nome: u64) -> bool {
-    let externo = definicao.add(crate::jogo::aparencia::APPDEF_PARTSOVERRIDES_OFF);
-    let Some(parte) = es22_vaga_no_fim(externo, 0x18) else { return false };
-    (parte as *mut u64).write_unaligned(ES20_PARTE_FICTICIA);
-    crate::jogo::listas::reservar(parte.add(8) as *mut c_void, 1, 0x50, 0x10, std::ptr::null());
-    let cb = rd_u64(parte.add(8) as *const c_void, 0) as *mut u8;
-    if cb.is_null() || (parte.add(0x10) as *const u32).read_unaligned() < 1 {
-        return false;
-    }
-    std::ptr::write_bytes(cb, 0, 0x50);
-    (cb.add(campos[0]) as *mut u64).write_unaligned(nome);
-    (cb.add(campos[1]) as *mut u64).write_unaligned(crate::cname::cname("default"));
-    (cb.add(campos[2]) as *mut u64).write_unaligned(u64::MAX);
-    cb.add(campos[3]).write(1);
-    (parte.add(0x14) as *mut u32).write_unaligned(1);
-    (externo.add(0x0c) as *mut u32).write_unaligned((externo.add(0x0c) as *const u32).read_unaligned() + 1);
-    true
-}
-
-/// `PatchHeadGarmentOverrides(estado, definição)`: `None` fora da cabeça agregada; `Some(overrides anexados)`.
-pub(crate) unsafe fn es20_remendar_cabeca(campos: [usize; 4], entidade: u64, definicao: *mut u8) -> Option<usize> {
-    if definicao.is_null() || (definicao.add(crate::jogo::aparencia::APPDEF_NAME_OFF) as *const u64).read_unaligned() != crate::cname::cname("AppearanceName1") {
-        return None;
-    }
-    static TRAVA: Mutex<()> = Mutex::new(());
-    let _trava = TRAVA.lock().ok()?;
-    let mut anexados = 0;
-    for parte in es20_partes(definicao) {
-        for nome in es20_nomes_da_parte(entidade, parte) {
-            if !es20_tem_override(campos, definicao, parte, nome) && es20_anexar_override_de_cabeca(campos, definicao, nome) {
-                anexados += 1;
-            }
-        }
-    }
-    Some(anexados)
-}
-
-// ===== ArchiveXL `#20` 20e — `OnResolveAppearance`/`OnResolveDefinition` (2026-09-14) =====
-// Peças de `Extension.cpp:178-285` que não dependem de hook: a aparência vazia da referência (`s_emptyAppearance`), o `IsUniqueAppearanceName`, as tags
-// visuais do template, o `SupportsDynamicAppearance`, as `EmptyAppearanceTags` e a poda de `partsValues` pelo depot. Os hooks ficam em `selftest.rs`
-// (20a). O ramo não dinâmico do `OnResolveDefinition` (`FixCustomizationAppearance`) depende do escopo de customização do `.xl` (A#47) e fica fora.
-pub(crate) const ES20_APARENCIA_VAZIA: &str = "empty_appearance_default";
-
-/// `IsUniqueAppearanceName`: nem vazio, nem `default`, `random` ou a aparência vazia.
-pub(crate) fn es20_nome_unico(nome: u64) -> bool {
-    nome != 0 && !["default", "random", ES20_APARENCIA_VAZIA].iter().any(|n| crate::cname::cname(n) == nome)
-}
-
-/// Tags visuais do template (`visualTagsSchema` `+0x98` → `visualTags.tags` `+0x30`).
-pub(crate) unsafe fn es20_tags_do_template(tpl: *const u8) -> Vec<u64> {
-    let schema = (tpl.add(0x98) as *const u64).read_unaligned() as *const u8;
-    if schema.is_null() {
-        return Vec::new();
-    }
-    let b = (schema.add(0x30) as *const u64).read_unaligned() as *const u64;
-    let n = if b.is_null() { 0 } else { (schema.add(0x3c) as *const u32).read_unaligned() as usize };
-    (0..n.min(256)).map(|k| b.add(k).read_unaligned()).collect()
-}
-
-/// `SupportsDynamicAppearance`: a tag `DynamicAppearance` no template.
-pub(crate) fn es20_suporta_dinamica(tags: &[u64]) -> bool {
-    tags.contains(&crate::cname::cname("DynamicAppearance"))
-}
-
-/// Seletor dinâmico (`ParseAppearance(...).isDynamic`): `Some(contexto)`, com 0 sem `%contexto`; `None` se não é dinâmico. Registra a variante no pool como
-/// o 22G.
-pub(crate) fn es20_contexto_dinamico(texto: &str) -> Option<u64> {
-    let seletor = es22_seletor(texto);
-    seletor.is_dynamic.then_some(seletor.context)
-}
-
-// ===== ArchiveXL `#20` 20f — estado dinâmico por entidade (2026-09-14) =====
-// O `UpdateState` da referência roda no job do ItemFactory; no BWMS o estado sai do `estado_dinamico_do_player`, que chama RTTI e script e só roda na thread do jogo. O
-// hook do ItemFactory pede o recálculo (`es20_pedir_estado`), o tick drena os pedidos (`es20_pedidos_de_estado`) e guarda o resultado
-// (`es20_guardar_estado`), que o `ResolveName`/`ResolvePath` do apply e as condições do 22H leem (`es20_estado_dinamico`). Divergência: entre o pedido e o
-// tick, a montagem vê o estado anterior (a referência atualiza no próprio job).
+// ===== Estado dinâmico por entidade =====
+// O estado sai do `estado_dinamico_do_player`, que chama RTTI e script e só roda na thread do jogo: quem monta pede (`es20_pedir_estado`),
+// o tick drena (`es20_pedidos_de_estado`) e guarda (`es20_guardar_estado`). Entre o pedido e o tick, a montagem vê o estado anterior.
 /// Valores globais (hash do atributo → valor) e condições.
 pub(crate) type Es20EstadoDinamico = (std::collections::HashMap<u64, String>, std::collections::BTreeSet<u64>);
 
@@ -5359,418 +4560,13 @@ pub(crate) fn es20_esquecer_estado_dinamico(entidade: u64) {
     }
 }
 
-/// Texto do `MarkDynamicAppearanceName(nome, entidade)` (`Dynamic.cpp:723-746`, 20f): corta do 1º `%` ou `&` até o fim, põe `!` se o nome não tem e anexa `%` com
-/// o ponteiro da entidade em decimal. Quem chama registra o resultado no pool do motor (`CNamePool::Add`).
-pub(crate) fn es20_marcar_nome_dinamico(texto: &str, entidade: u64) -> String {
-    let base = texto.find(['%', '&']).map_or(texto, |p| &texto[..p]);
-    let variante = if base.contains('!') { "" } else { "!" };
-    format!("{base}{variante}%{entidade}")
-}
 
-/// Combinações de reserva do `ResolvePath` (`s_fallbackVariants`, `Dynamic.cpp:74-79` e `403-418`, 20g): pra `n` atributos com padrão (`body`, `feet`),
-/// as linhas 1..2^n na ordem da referência, cada uma dizendo por atributo se entra o padrão (`true`) ou o valor do estado.
-pub(crate) fn es20_combinacoes_de_reserva(n: usize) -> Vec<Vec<bool>> {
-    (1..1usize << n.min(2)).map(|i| (0..n.min(2)).map(|j| (i >> j) & 1 == 1).collect()).collect()
-}
 
-/// `DynamicAppearanceController::ResolvePath` (`Dynamic.cpp:366-440`, 20g) com as dependências injetadas: `texto_de` é o `GetPathString` (no jogo, o registro
-/// de caminhos dinâmicos do 48c-1), `existe` é o depot e `globais` o estado dinâmico da entidade (`None` = sem estado). Devolve o caminho final e, quando a
-/// reserva por padrão (`base_body`/`flat` nos atributos `body`/`feet` usados e não fixados pela variante) entrou, o par `(resolvido, reserva)` do
-/// `RegisterLink`. Opcional com atributo faltando dá caminho vazio.
-pub(crate) fn es20_resolver_caminho(
-    caminho: u64,
-    globais: Option<&std::collections::HashMap<u64, String>>,
-    locais: &std::collections::HashMap<u64, String>,
-    texto_de: impl Fn(u64) -> Option<String>,
-    existe: impl Fn(u64) -> bool,
-) -> (u64, Option<(u64, u64)>) {
-    let Some(texto) = texto_de(caminho).filter(|t| is_dynamic_value(t)) else { return (caminho, None) };
-    let Some(globais) = globais else { return (caminho, None) };
-    let r = crate::aparencia::processar_texto_dinamico(globais, locais, &texto);
-    if !r.valid {
-        return (caminho, None);
-    }
-    if r.optional && r.missed {
-        return (0, None);
-    }
-    let resolvido = bwms_primitives::resource_path_hash(&r.value);
-    if existe(resolvido) {
-        return (resolvido, None);
-    }
-    let reserva: Vec<(u64, &str)> = [("body", "base_body"), ("feet", "flat")]
-        .iter()
-        .map(|(a, p)| (bwms_primitives::fnv1a64(a.as_bytes()), *p))
-        .filter(|(h, _)| r.atributos.contains(h) && !locais.contains_key(h))
-        .collect();
-    for combinacao in es20_combinacoes_de_reserva(reserva.len()) {
-        let mut estado = globais.clone();
-        for ((h, padrao), usa) in reserva.iter().zip(&combinacao) {
-            if *usa {
-                estado.insert(*h, padrao.to_string());
-            }
-        }
-        let alternativa = crate::aparencia::processar_texto_dinamico(&estado, locais, &texto);
-        if alternativa.valid {
-            let h = bwms_primitives::resource_path_hash(&alternativa.value);
-            if existe(h) {
-                return (h, Some((resolvido, h)));
-            }
-        }
-    }
-    (resolvido, None)
-}
-
-/// `IsDynamicAppearanceName`: `!` em qualquer posição do nome.
-pub(crate) fn es20_nome_dinamico(texto: &str) -> bool {
-    texto.contains('!')
-}
-
-/// Textos que o `DynamicAppearanceName(aAppearance)` registra no pool (`ExtractName(..., true)`, `Dynamic.cpp:136-176`): a variante inteira e, por parte
-/// separada por `+`, o nome e o valor de `nome=valor` ou o valor posicional.
-pub(crate) fn es20_textos_do_seletor(aparencia: &str) -> Vec<&str> {
-    let Some(variante) = es22_texto_da_variante(aparencia) else { return Vec::new() };
-    let mut textos = vec![variante];
-    for parte in variante.split('+') {
-        match parte.find('=') {
-            Some(i) => textos.extend([&parte[..i], &parte[i + 1..]]),
-            None => textos.push(parte),
-        }
-    }
-    textos.retain(|t| !t.is_empty());
-    textos
-}
-
-/// `DynamicPartList` como atributos locais do `ProcessString`: o texto de cada valor (`CName::ToString`); sem texto, vazio (a referência não escreve nada).
-pub(crate) fn es20_locais(
-    partes: &std::collections::BTreeMap<u64, u64>,
-    texto_de: impl Fn(u64) -> Option<String>,
-) -> std::collections::HashMap<u64, String> {
-    partes.iter().map(|(k, v)| (*k, texto_de(*v).unwrap_or_default())).collect()
-}
-
-/// `DynamicAppearanceController::ResolveName` (`Dynamic.cpp:341-364`) com as dependências injetadas: `texto_de` é o `CName::ToString`, `registrar` o
-/// `CNamePool::Add` e `globais` o estado dinâmico da entidade (`None` = sem estado). Opcional com atributo faltando dá o nome vazio.
-pub(crate) fn es20_resolver_nome(
-    nome: u64,
-    globais: Option<&std::collections::HashMap<u64, String>>,
-    locais: &std::collections::HashMap<u64, String>,
-    texto_de: impl Fn(u64) -> Option<String>,
-    registrar: impl Fn(&str) -> u64,
-) -> u64 {
-    let Some(texto) = texto_de(nome).filter(|t| is_dynamic_value(t)) else { return nome };
-    let Some(globais) = globais else { return nome };
-    let r = crate::aparencia::processar_texto_dinamico(globais, locais, &texto);
-    if !r.valid {
-        return nome;
-    }
-    if r.optional && r.missed {
-        return 0;
-    }
-    registrar(&r.value)
-}
-
-/// `EntityState::ToggleConditionalComponents` sobre um `DynArray<Handle<IComponent>>` (`b`, `n`): componente de nome condicional com parte ligada e estado
-/// de recurso fica ligado pelo `MatchReference` com as condições da entidade (sem estado dinâmico, referência com condição não casa); nos grupos de nome base
-/// com peso, só o 1º de maior peso fica ligado. `(condicionais decididos, desligados pelo peso)`.
-pub(crate) unsafe fn es20_alternar_condicionais(entidade: u64, b: *const u64, n: usize) -> (usize, usize) {
-    let condicoes = es20_estado_dinamico(entidade).map(|(_, c)| c);
-    let componente = |k: usize| b.add(k * 2).read_unaligned() as *mut u8;
-    let mut entradas = Vec::with_capacity(n);
-    let mut decididos = 0;
-    for k in 0..n {
-        let inst = componente(k);
-        if inst.is_null() {
-            entradas.push((0, 0, false));
-            continue;
-        }
-        let referencia = parse_reference_live((inst.add(0x40) as *const u64).read_unaligned());
-        if !referencia.is_conditional {
-            entradas.push((referencia.name, 0, true));
-            continue;
-        }
-        let Some(aparencia) = es20_aparencia_do_componente(entidade, referencia.name) else {
-            entradas.push((referencia.name, referencia.weight, false));
-            continue;
-        };
-        let ligado = appearance_matches_reference_com(&referencia, &aparencia, condicoes.as_ref());
-        inst.add(0x8b).write_unaligned(u8::from(ligado));
-        decididos += 1;
-        entradas.push((referencia.name, referencia.weight, ligado));
-    }
-    let desligar = toggle_conditional_group_disable_indices(&entradas);
-    for k in &desligar {
-        componente(*k).add(0x8b).write_unaligned(0);
-    }
-    (decididos, desligar.len())
-}
-
-/// `EntityState::ApplyDynamicAppearance(componente)`: componente ligado, com parte e estado de recurso — a variante ativa da parte, com o nome só sem
-/// `ChangesAppearance` no estado do componente. `(caminho escrito, aparência escrita)`.
-pub(crate) unsafe fn es20_aplicar_dinamica(m: &Es20Malhas, entidade: u64, inst: *mut c_void) -> (bool, bool) {
-    if inst.is_null() || (inst as *const u8).add(0x8b).read_unaligned() == 0 {
-        return (false, false);
-    }
-    let base = es20_nome_base(inst as *const u8);
-    let Some(aparencia) = es20_aparencia_do_componente(entidade, base) else { return (false, false) };
-    let muda = es20_estado(entidade, base).is_some_and(|s| s.muda_aparencia());
-    es20_aplicar_variante(m, entidade, inst, &aparencia.parts, !muda)
-}
-
-/// `ApplyDynamicAppearance(componente, variante, aplicar nome)` num componente de mesh: `ResolvePath` do recurso original e `ResolveName` da aparência
-/// original, cada um escrito só se difere do original e do atual; o par de reserva vai pro `resource.link`.
-pub(crate) unsafe fn es20_aplicar_variante(
-    m: &Es20Malhas,
-    entidade: u64,
-    inst: *mut c_void,
-    partes: &std::collections::BTreeMap<u64, u64>,
-    nome: bool,
-) -> (bool, bool) {
-    let Some(tipo) = es20_tipo(m, inst) else { return (false, false) };
-    let globais = es20_estado_dinamico(entidade).map(|(g, _)| g);
-    let locais = es20_locais(partes, crate::cname::name_of);
-    let id = es20_id_do_componente(m.base, inst as *const u8);
-    let trocar = |campo: *mut u64, original: u64, fim: u64| {
-        let muda = fim != original && fim != campo.read_unaligned();
-        if muda {
-            campo.write_unaligned(fim);
-        }
-        muda
-    };
-    let mut caminho = false;
-    if let Some(o) = m.recurso(tipo) {
-        let campo = (inst as *mut u8).add(o) as *mut u64;
-        let original = es20_original(entidade, id, 2, || campo.read_unaligned());
-        let (fim, link) =
-            es20_resolver_caminho(original, globais.as_ref(), &locais, crate::selftest::a48c_caminho_dinamico, |h| crate::resource_exists_hash(h).unwrap_or(true));
-        if let Some((de, para)) = link {
-            crate::arquivos_do_jogo::reslink_add(de, para);
-        }
-        caminho = trocar(campo, original, fim);
-    }
-    let mut aparencia = false;
-    if nome {
-        let campo = (inst as *mut u8).add(m.campos[tipo].1) as *mut u64;
-        let original = es20_original(entidade, id, 1, || campo.read_unaligned());
-        let fim = es20_resolver_nome(original, globais.as_ref(), &locais, crate::cname::name_of, crate::cname::registrar_no_pool);
-        aparencia = trocar(campo, original, fim);
-    }
-    (caminho, aparencia)
-}
-
-/// `GarmentExtension::ApplyDynamicAppearance(estado, componentes)`: condicionais e depois cada componente. `[condicionais decididos, desligados pelo peso,
-/// caminhos escritos, aparências escritas]`.
-pub(crate) unsafe fn es20_aplicar_dinamica_na_lista(m: &Es20Malhas, entidade: u64, b: *const u64, n: usize) -> [usize; 4] {
-    if b.is_null() {
-        return [0; 4];
-    }
-    let (decididos, desligados) = es20_alternar_condicionais(entidade, b, n);
-    let mut r = [decididos, desligados, 0, 0];
-    for k in 0..n {
-        let (caminho, aparencia) = es20_aplicar_dinamica(m, entidade, b.add(k * 2).read_unaligned() as *mut c_void);
-        r[2] += usize::from(caminho);
-        r[3] += usize::from(aparencia);
-    }
-    r
-}
-
-/// Tira de `partsValues` (8 B cada), de trás pra frente, as partes que `existe` recusa (o `RemoveAt` da referência); devolve quantas tirou.
-pub(crate) unsafe fn es20_podar_partes(definicao: *mut u8, existe: impl Fn(u64) -> bool) -> usize {
-    let arr = definicao.add(crate::jogo::aparencia::APPDEF_PARTSVALUES_OFF);
-    let b = rd_u64(arr as *const c_void, 0) as *mut u64;
-    let mut n = if b.is_null() { 0 } else { ((arr.add(0x0c) as *const u32).read_unaligned() as usize).min(4096) };
-    let mut tiradas = 0;
-    for i in (0..n).rev() {
-        if !existe(b.add(i).read_unaligned()) {
-            std::ptr::copy(b.add(i + 1), b.add(i), n - i - 1);
-            n -= 1;
-            tiradas += 1;
-        }
-    }
-    if tiradas > 0 {
-        (arr.add(0x0c) as *mut u32).write_unaligned(n as u32);
-    }
-    tiradas
-}
-
-// ===== ArchiveXL `#22` 22G/22H — `EntityState::SelectDynamicAppearance` (2026-09-14) =====
-// Os 2 overloads da referência (`States.cpp:427-533`). 22G, no `EntityTemplate`: sem entrada dada, a entrada da aparência base (o nome do seletor, pelo
-// `FindAppearance` do motor) é copiada pro fim de `appearances` com o recurso e o nome de aparência dela (o nome da entrada, se ela não tem), e esse nome
-// ganha a variante e o contexto do seletor (`nome!variante%contexto`, registrado no pool do motor); a entrada passa a se chamar pelo nome de aparência.
-// 22H, no `AppearanceResource`: entre as definições cujo nome base é o do seletor, a sem condição vale 0 e a condicional que casa (variante do seletor e
-// condições da entidade ou overrides do seletor) vale o peso dela; a de maior peso vence, e no empate a primeira. Se o nome dela não é o do seletor, uma
-// cópia propriedade a propriedade com o nome do seletor entra no fim de `appearances` sob a trava exclusiva do recurso (`+0xF0`). Cada parte da escolhida é
-// ligada à aparência do seletor. Sem nenhuma que case, com candidatas e seletor dinâmico, sai uma definição vazia com o nome do seletor, fora do recurso.
-pub(crate) const ES22_TEMPLATE_APARENCIAS: usize = 0x50;
-
-pub(crate) const ES22_TEMPLATE_ENTRADA: usize = 0x18;
-
-/// Texto da variante de um nome de aparência dinâmico, o que a referência registra no pool ao ler o nome: depois do 1º `!`, sem o `%contexto` final e sem
-/// as condições `&`. `None` sem `!` ou com a variante vazia.
-pub(crate) fn es22_texto_da_variante(aparencia: &str) -> Option<&str> {
-    let marca = aparencia.find('!')?;
-    let mut fim = aparencia.len();
-    if let Some(p) = aparencia.rfind('%') {
-        fim = fim.min(p);
-    }
-    if let Some(p) = aparencia[..fim].find('&') {
-        fim = fim.min(p);
-    }
-    (fim > marca + 1).then(|| &aparencia[marca + 1..fim])
-}
-
-/// Nome do `MarkDynamicAppearanceName(nome, seletor)`: `base!variante`, com `%contexto` quando o contexto não é 0.
-pub(crate) fn es22_nome_marcado(base: &str, variante: Option<&str>, contexto: u64) -> String {
-    let mut nome = format!("{base}!{}", variante.unwrap_or(""));
-    if contexto != 0 {
-        nome.push('%');
-        nome.push_str(&contexto.to_string());
-    }
-    nome
-}
-
-/// Escolha do 22H sobre `(nome base, condicional, casa, peso)` de cada definição: índice da vencedora e quantas candidatas têm o nome base do seletor.
-pub(crate) fn es22_escolher_definicao(nome_base: u64, definicoes: &[(u64, bool, bool, i32)]) -> (Option<usize>, usize) {
-    let (mut peso_max, mut vencedora, mut candidatas) = (-1, None, 0);
-    for (i, (base, condicional, casa, peso)) in definicoes.iter().enumerate() {
-        if *base != nome_base {
-            continue;
-        }
-        candidatas += 1;
-        if !condicional {
-            if peso_max < 0 {
-                peso_max = 0;
-                vencedora = Some(i);
-            }
-        } else if *casa && peso_max < *peso {
-            peso_max = *peso;
-            vencedora = Some(i);
-        }
-    }
-    (vencedora, candidatas)
-}
-
-/// Seletor lido de `texto`, com a variante e as partes registradas no pool do motor como a referência faz ao ler o nome (o `ResolveName`/`ResolvePath` do
-/// 20g lê o texto dos valores das partes).
-pub(crate) fn es22_seletor(texto: &str) -> DynamicAppearanceName {
-    let seletor = DynamicAppearanceName::parse(texto);
-    if seletor.is_dynamic {
-        for t in es20_textos_do_seletor(texto) {
-            crate::cname::registrar_no_pool(t);
-        }
-    }
-    seletor
-}
-
-/// 22G — `SelectDynamicAppearance(seletor, template, aparência)` num `EntityTemplate` vivo: `(escolheu, entrada)`, com a entrada dada ou a copiada.
-pub(crate) unsafe fn es22_selecionar_no_template(texto: &str, tpl: *mut u8, aparencia: *mut u8) -> (bool, *mut u8) {
-    let seletor = es22_seletor(texto);
-    if !seletor.is_dynamic || tpl.is_null() {
-        return (false, aparencia);
-    }
-    let mut aparencia = aparencia;
-    if aparencia.is_null() {
-        let achar: unsafe extern "C" fn(*mut u8, u64) -> *mut u8 = std::mem::transmute(crate::rebase(crate::jogo::aparencia::ENTITY_TEMPLATE_FIND_APP_VM));
-        let base = achar(tpl, seletor.name) as usize;
-        let arr = tpl.add(ES22_TEMPLATE_APARENCIAS);
-        let entradas = rd_u64(arr as *const c_void, 0) as usize;
-        let tam = (arr.add(0x0c) as *const u32).read_unaligned();
-        if base == 0 || entradas == 0 || base < entradas || base >= entradas + tam as usize * ES22_TEMPLATE_ENTRADA {
-            return (false, std::ptr::null_mut());
-        }
-        let indice = (base - entradas) / ES22_TEMPLATE_ENTRADA;
-        let Some(nova) = es22_vaga_no_fim(arr, ES22_TEMPLATE_ENTRADA) else { return (false, std::ptr::null_mut()) };
-        let base = (rd_u64(arr as *const c_void, 0) as *const u8).add(indice * ES22_TEMPLATE_ENTRADA);
-        let ler = |off: usize| (base.add(off) as *const u64).read_unaligned();
-        let nome_aparencia = if ler(0x10) != 0 { ler(0x10) } else { ler(0) };
-        let marcado = crate::cname::registrar_no_pool(&es22_nome_marcado(&crate::cname::resolve_cname(nome_aparencia), es22_texto_da_variante(texto), seletor.context));
-        (nova.add(0x08) as *mut u64).write_unaligned(ler(0x08));
-        (nova.add(0x10) as *mut u64).write_unaligned(marcado);
-        (nova as *mut u64).write_unaligned(marcado);
-        (arr.add(0x0c) as *mut u32).write_unaligned(tam + 1);
-        aparencia = nova;
-    }
-    (aparencia as *mut u64).write_unaligned((aparencia.add(0x10) as *const u64).read_unaligned());
-    (true, aparencia)
-}
-
-/// Resultado do 22H: definição escolhida (handle forte, o chamador solta), nome da candidata vencedora (0 sem vencedora), candidatas vistas e se uma cópia
-/// entrou no recurso.
-#[derive(Debug, Default)]
-pub(crate) struct Es22Escolha {
-    pub definicao: Option<[u64; 2]>,
-    pub vencedora: u64,
-    pub candidatas: usize,
-    pub anexada: bool,
-}
-
-/// Anexa uma cópia forte de `h` no fim de `appearances` do recurso, sob a trava exclusiva.
-pub(crate) unsafe fn es22_anexar_definicao(recurso: *mut u8, h: [u64; 2]) -> bool {
-    es22_com_trava(recurso, || es22_anexar_definicao_travado(recurso, h))
-}
-
-/// 22H — `SelectDynamicAppearance(seletor, recurso, definição)` num `AppearanceResource` vivo, pra `entidade` com as `condicoes` do estado dinâmico dela
-/// (`None` = entidade sem estado).
-pub(crate) unsafe fn es22_selecionar_definicao(
-    entidade: u64,
-    texto: &str,
-    recurso: *mut u8,
-    condicoes: Option<&std::collections::BTreeSet<u64>>,
-) -> Es22Escolha {
-    let seletor = es22_seletor(texto);
-    let mut escolha = Es22Escolha::default();
-    let arr = recurso.add(crate::jogo::aparencia::APPRESOURCE_APPEARANCES_OFF);
-    let buffer = rd_u64(arr as *const c_void, 0) as *const u64;
-    let n = if buffer.is_null() { 0 } else { (arr.add(0x0c) as *const u32).read_unaligned() as usize };
-    let handles: Vec<[u64; 2]> = (0..n.min(65536)).map(|i| [buffer.add(i * 2).read_unaligned(), buffer.add(i * 2 + 1).read_unaligned()]).collect();
-    let nome_de = |h: &[u64; 2]| ((h[0] as usize + crate::jogo::aparencia::APPDEF_NAME_OFF) as *const u64).read_unaligned();
-    let definicoes: Vec<(u64, bool, bool, i32)> = handles
-        .iter()
-        .map(|h| {
-            if h[0] == 0 {
-                return (0, false, false, 0);
-            }
-            let referencia = parse_reference_live(nome_de(h));
-            let casa = referencia.is_conditional && appearance_matches_reference_com(&referencia, &seletor, condicoes);
-            (referencia.name, referencia.is_conditional, casa, referencia.weight)
-        })
-        .collect();
-    let (vencedora, candidatas) = if seletor.name == 0 { (None, 0) } else { es22_escolher_definicao(seletor.name, &definicoes) };
-    escolha.candidatas = candidatas;
-    if let Some(i) = vencedora {
-        let m = handles[i];
-        escolha.vencedora = nome_de(&m);
-        let definicao = if escolha.vencedora != seletor.value {
-            let Some(h) = es22_definicao_nova(m[0] as *mut c_void, seletor.value, true) else { return escolha };
-            escolha.anexada = es22_anexar_definicao(recurso, h);
-            h
-        } else {
-            handle_strong_soma(&m, 1);
-            m
-        };
-        for parte in es20_partes(definicao[0] as *const u8) {
-            es22_ligar_parte_seletor(entidade, parte, &seletor);
-        }
-        escolha.definicao = Some(definicao);
-    } else if seletor.is_dynamic && candidatas > 0 {
-        let modelo = definicoes.iter().position(|d| d.0 == seletor.name).map(|i| handles[i][0] as *mut c_void);
-        escolha.definicao = modelo.and_then(|m| es22_definicao_nova(m, seletor.value, false));
-    }
-    escolha
-}
-
-/// Chave = `(entity_ptr, resource_path_hash)` — porte de `App::ResourceState` (`States.hpp:
-/// 51-76`), só o campo `m_appearance` (`DynamicAppearanceName`, o que `GetActiveAppearance()`
-/// devolve) — `m_overridenOffsets` não é usado por nenhum dos 2 métodos desta rodada, fora de
-/// escopo.
+/// Aparência ativa (nome de aparência analisado) por `(entidade, caminho da parte)`.
 pub(crate) static ES22_RESOURCE_STATE: Mutex<Vec<((u64, u64), DynamicAppearanceName)>> = Mutex::new(Vec::new());
 
-/// `DynamicAppearanceController::ParseReference(component->name)` sobre um componente VIVO —
-/// resolve o hash cru do campo via o pool NATIVO do motor (`crate::cname::resolve_cname`, a
-/// MESMA rotina real `CNamePool::Get` já usada em produção há semanas neste projeto) pra
-/// recuperar a STRING, então reusa `DynamicAppearanceRef::parse` (já portado/provado, item
-/// `#23`). Se o hash não resolver (CName nunca "adicionado" ao pool nativo — categoria já vista
-/// noutras funções deste projeto), cai pro mesmo comportamento do ramo "sem marcador" da fonte
-/// real (`name=value=hash cru`, `is_dynamic=false`) — nunca fabrica um nome fictício.
+/// Critério do nome de um componente vivo: o texto do `CName` pelo pool do motor e `DynamicAppearanceRef::parse`; hash sem texto no pool vira
+/// critério não dinâmico com `name = value = hash`.
 pub(crate) unsafe fn parse_reference_live(name_hash: u64) -> DynamicAppearanceRef {
     if name_hash == 0 {
         return DynamicAppearanceRef::default();
@@ -5783,278 +4579,156 @@ pub(crate) unsafe fn parse_reference_live(name_hash: u64) -> DynamicAppearanceRe
     DynamicAppearanceRef::parse(&s)
 }
 
-/// `ComponentPrefixResolver::GetPrefix` (`Prefix.cpp:3-27`) — porte fiel, 100% string, sem cache
-/// (a fonte real cacheia por `Red::CName`; recomputamos toda vez, custo desprezível pra uma
-/// string de poucos bytes, evita mais um registry). Devolve `None` == `Red::CName{}` (prefixo
-/// vazio — nenhum `_` achado dentro dos primeiros 6 bytes).
+/// Prefixo do nome = os bytes até o 1º `_` nas posições 2..=5, com o `_`. A janela é a que casa as chaves de prefixo da tabela de tags
+/// (`h0_`, `heb_`, `beard_`) sem pegar o `_` de nomes completos mais longos.
 pub(crate) fn component_prefix_of(name_str: &str) -> Option<u64> {
-    let bytes = name_str.as_bytes();
-    let prefix_max_len: usize = 6;
-    let mut prefix_end: usize = 2;
-    while prefix_end < prefix_max_len {
-        match bytes.get(prefix_end) {
-            Some(&b) if b != b'_' && b != 0 => prefix_end += 1,
-            _ => break,
-        }
-    }
-    if prefix_end < prefix_max_len && bytes.get(prefix_end) == Some(&b'_') {
-        Some(bwms_primitives::fnv1a64(&bytes[..=prefix_end]))
-    } else {
-        None
-    }
+    let b = name_str.as_bytes();
+    let fim = b.iter().take(6).enumerate().skip(2).find(|(_, c)| **c == b'_').map(|(i, _)| i)?;
+    Some(bwms_primitives::fnv1a64(&b[..=fim]))
 }
 
-/// Núcleo PURO de decisão do 2º loop de `EntityState::ToggleConditionalComponents`
-/// (`States.cpp:574-591`, o desempate por `WeightedComponentGroup`) — recebe já processado
-/// `(nome_base, weight, matched)` por componente (índice = posição na lista original) e devolve
-/// os ÍNDICES que devem ficar `isEnabled=false` por causa do desempate. Testável offline, zero
-/// ponteiro de memória do jogo (mesma disciplina de "núcleo puro + wrapper unsafe" já usada em
-/// toda a codebase pra lógica de decisão).
+/// Índices a desligar: por nome base, entre os que casaram, um grupo com mais de 1 e peso máximo > 0 fica só com o PRIMEIRO (na ordem
+/// de entrada) de peso máximo.
 pub(crate) fn toggle_conditional_group_disable_indices(entries: &[(u64, i32, bool)]) -> Vec<usize> {
-    use std::collections::HashMap;
-    struct Group {
-        max_weight: i32,
-        matches: Vec<(i32, usize)>,
-    }
-    let mut groups: HashMap<u64, Group> = HashMap::new();
-    for (idx, (name, weight, matched)) in entries.iter().enumerate() {
-        if !*matched {
+    let mut grupos: Vec<(u64, Vec<usize>)> = Vec::new();
+    for (i, (base, _, casou)) in entries.iter().enumerate() {
+        if !*casou {
             continue;
         }
-        let g = groups.entry(*name).or_insert(Group { max_weight: 0, matches: Vec::new() });
-        g.matches.push((*weight, idx));
-        if g.max_weight < *weight {
-            g.max_weight = *weight;
+        match grupos.iter_mut().find(|(b, _)| b == base) {
+            Some((_, v)) => v.push(i),
+            None => grupos.push((*base, vec![i])),
         }
     }
-    let mut disable = Vec::new();
-    for g in groups.values() {
-        if g.max_weight > 0 && g.matches.len() > 1 {
-            let mut force_disable = false;
-            for (w, idx) in &g.matches {
-                if *w < g.max_weight || force_disable {
-                    disable.push(*idx);
-                } else {
-                    force_disable = true;
-                }
-            }
+    let mut desligar = Vec::new();
+    for (_, membros) in grupos.iter().filter(|(_, v)| v.len() > 1) {
+        let maximo = membros.iter().map(|&i| entries[i].1).max().unwrap_or(0);
+        if maximo <= 0 {
+            continue;
         }
+        let fica = membros.iter().copied().find(|&i| entries[i].1 == maximo);
+        desligar.extend(membros.iter().copied().filter(|&i| Some(i) != fica));
     }
-    disable
+    desligar
 }
 
-/// `ToggleConditionalComponents` com as condições da entidade (22F); `None` reproduz a entidade sem estado.
+/// `isEnabled` (`+0x8b`) de cada componente condicional da entidade pela aparência ativa da parte dele; depois o desempate por nome base.
+/// Componente não condicional só entra no desempate (pode ser desligado, nunca ligado aqui). Total = componentes avaliados; -1 sem lista.
 pub(crate) unsafe fn run_toggle_conditional_components_com(
-    reg: &crate::rtti::Registry,
+    _reg: &crate::rtti::Registry,
     entity: *mut c_void,
     condicoes: Option<&std::collections::BTreeSet<u64>>,
 ) -> (String, i32) {
-    let _ = reg;
-    if entity.is_null() || !crate::memoria::is_readable(entity as *const c_void, 0x10) {
+    if entity.is_null() || !crate::memoria::is_readable(entity as *const c_void, 0xB0) {
         return ("[togglecond] entity ptr insano".to_string(), -1);
     }
-    let arr = (entity as *mut u8).add(0xA0) as *mut c_void;
-    if !crate::memoria::is_readable(arr as *const c_void, 0x10) {
-        return ("[togglecond] Entity+0xA0 (ComponentsStorage) ilegível".to_string(), -1);
+    let (e, n, cap) = dynarray_em((entity as *const u8).add(0xA0) as *const c_void);
+    if e == 0 || n == 0 || n > 4096 || !dynarray_coerente(e, n, cap) || !crate::memoria::is_readable(e as *const c_void, n as usize * 16) {
+        return (format!("[togglecond] entity={entity:p} sem lista de componentes legível (n={n})"), -1);
     }
-    let entries_ptr = rd_u64(arr, 0x00) as *const u8;
-    let size = core::ptr::read_unaligned((arr as *const u8).add(0x0C) as *const u32);
-    if entries_ptr.is_null() || size == 0 || size > 4096 {
-        return (format!("[togglecond] array de componentes vazio/implausível (size={size})"), -1);
-    }
-    let entity_key = entity as u64;
-
-    struct Entry {
-        name: u64,
-        weight: i32,
-        matched: bool,
-        inst: *mut c_void,
-        conditional: bool,
-    }
-    let mut entries: Vec<Entry> = Vec::with_capacity(size as usize);
-
-    for i in 0..size as usize {
-        let slot = entries_ptr.add(i * 16);
-        if !crate::memoria::is_readable(slot as *const c_void, 16) {
+    let entidade = entity as u64;
+    let mut entradas: Vec<(u64, i32, bool)> = Vec::new();
+    let mut componentes: Vec<*mut u8> = Vec::new();
+    let (mut avaliados, mut casados) = (0, 0);
+    for i in 0..n as usize {
+        let comp = ((e + i * 16) as *const u64).read_unaligned() as *mut u8;
+        if comp.is_null() || !crate::memoria::is_readable(comp as *const c_void, 0x90) {
             continue;
         }
-        let inst = core::ptr::read_unaligned(slot as *const u64) as *mut c_void;
-        if inst.is_null() || !crate::memoria::is_readable(inst as *const c_void, 0x60) {
+        let referencia = parse_reference_live((comp.add(0x40) as *const u64).read_unaligned());
+        if !referencia.is_dynamic || referencia.weight <= 0 {
+            entradas.push((referencia.name, 0, true));
+            componentes.push(comp);
             continue;
         }
-        let name_hash = (inst as *const u8).add(0x40).cast::<u64>().read_unaligned();
-        let reference = parse_reference_live(name_hash);
-
-        if !reference.is_conditional {
-            // `!componentRef.isConditional` -> entra no grupo com weight 0, NUNCA reescreve
-            // `isEnabled` (States.cpp:543-548) — pass-through fiel.
-            entries.push(Entry { name: reference.name, weight: 0, matched: true, inst, conditional: false });
-            continue;
-        }
-
-        let part = match es22_parte_do_componente(entity_key, reference.name) {
-            Some(p) => p,
-            None => continue, // FindComponentState()==null || !IsFromAppearancePart() -> pula (States.cpp:552)
-        };
-
-        let appearance = ES22_RESOURCE_STATE
-            .lock()
-            .ok()
-            .and_then(|g| g.iter().find(|((e, r), _)| *e == entity_key && *r == part).map(|(_, a)| a.clone()));
-        let appearance = match appearance {
-            Some(a) => a,
-            None => continue, // FindResourceState()==null -> pula (States.cpp:557)
-        };
-
-        let matched = appearance_matches_reference_com(&reference, &appearance, condicoes);
-        core::ptr::write_unaligned((inst as *mut u8).add(0x8b), matched as u8);
-        entries.push(Entry { name: reference.name, weight: reference.weight, matched, inst, conditional: true });
+        let Some(parte) = es22_parte_do_componente(entidade, referencia.name) else { continue };
+        let ativa = ES22_RESOURCE_STATE.lock().ok().and_then(|g| g.iter().find(|(k, _)| *k == (entidade, parte)).map(|(_, a)| a.clone()));
+        let Some(aparencia) = ativa else { continue };
+        let casou = appearance_matches_reference_com(&referencia, &aparencia, condicoes);
+        comp.add(0x8b).write(u8::from(casou));
+        avaliados += 1;
+        casados += usize::from(casou);
+        entradas.push((referencia.name, referencia.weight, casou));
+        componentes.push(comp);
     }
-
-    let tuples: Vec<(u64, i32, bool)> = entries.iter().map(|e| (e.name, e.weight, e.matched)).collect();
-    let disable_idx = toggle_conditional_group_disable_indices(&tuples);
-    for &idx in &disable_idx {
-        core::ptr::write_unaligned((entries[idx].inst as *mut u8).add(0x8b), 0u8);
+    let desligar = toggle_conditional_group_disable_indices(&entradas);
+    for &i in &desligar {
+        componentes[i].add(0x8b).write(0);
     }
-
-    let total = entries.len();
-    let conditional = entries.iter().filter(|e| e.conditional).count();
-    let matched_true = entries.iter().filter(|e| e.conditional && e.matched).count();
     (
         format!(
-            "[togglecond] entity={entity:p} total_componentes={total} condicionais_avaliados={conditional} condicionais_matched={matched_true} desabilitados_por_desempate={}",
-            disable_idx.len()
+            "[togglecond] entity={entity:p} total_componentes={} condicionais_avaliados={avaliados} condicionais_matched={casados} desabilitados_por_desempate={}",
+            entradas.len(),
+            desligar.len()
         ),
-        total as i32,
+        entradas.len() as i32,
     )
 }
 
-/// ArchiveXL `#21`/`#23` (`PENDENCIAS-UNIFICADAS.md`, 2026-08-12) — núcleo de
-/// `App::DynamicAppearanceController` exposto ao redscript. `IsDynamicValue` (`Garment/Dynamic.cpp:674-697`):
-/// as 5 sobrecargas da referência fazem a mesma checagem, a string começa com o marcador `*`
-/// (`DynamicValueMarker`). Sem endereço nativo: é texto puro, igual nas duas plataformas.
-///
-/// O par `IsDynamicValue`/`ProcessString` (`:442-556`) tem uma implementação só no projeto, a deste
-/// módulo, no dylib que o jogo carrega. O install (`bwms_primitives::instalacao`) não expande aparência
-/// dinâmica: o valor dos atributos só existe em runtime, no estado
-/// da entidade.
-///
-/// Dá ao item `#21` (`GetDynamicAppearanceController()`) uma contraparte real: um mod processa uma
-/// string de aparência dinâmica (`"*{attr}_suffix"`) via redscript, com o MESMO mecanismo que
-/// `MeshExtension::ExpandResourcePath`/item `#48` usa internamente pro material dinâmico.
-///
-/// Divergência de escopo CONSCIENTE (mesma categoria já aceita várias vezes neste projeto): em vez
-/// de expor um objeto `DynamicAppearanceController` com mapa arbitrário de atributos (exigiria
-/// marshalling de `array<String>`/dicionário, risco desproporcional ao ganho — categoria de risco
-/// que já crashou este projeto uma vez, `TweakXL #43`/array-retorno), aceita 1 par nome/valor LOCAL
-/// — cobre o caso majoritário e é literalmente o mesmo padrão que `ExpandResourcePath` já usa
-/// internamente (só injeta 1 atributo `material`). `attrName` vazio = nenhum atributo local — replica
-/// fielmente `missed=true` se a string tiver `{algumAttr}` (nenhum atributo bate). Esta peça cobre
-/// só o núcleo de templating puro, não o sistema inteiro.
 pub(crate) fn is_dynamic_value(s: &str) -> bool {
-    s.starts_with('*')
+    s.as_bytes().first() == Some(&b'*')
 }
 
-/// `App::DynamicAppearanceController::ProcessString` (`Garment/Dynamic.cpp:442-556`) sobre o núcleo
-/// `process_dynamic_string_com`, especializado pra 1
-/// único atributo LOCAL (ver divergência de escopo documentada acima) — sem mapa `global_attrs`
-/// (sempre vazio aqui, já que o BWMS não tem `EntityState::GetContextAttrs()` real). Substitui
-/// marcadores `{attr}` embutidos na string por `attr_value` quando `attr` bate `attr_name`
-/// (FNV1a64, `bwms_primitives::fnv1a64` — mesma função já usada em toda native de hash deste projeto);
-/// pula o `*` inicial se presente; se sobrar texto não-processado (par `{`/`}` incompleto) OU
-/// nenhum atributo foi encontrado na string, o resultado é inválido (mesma regra exata do C++:
-/// `if (*str || attributes.empty()) return result;`); um `?` final marca `optional=true` e é
-/// removido do valor. Limite de 512 bytes de saída (igual à fonte, `buffer[MaxLength+1]`).
 pub(crate) fn process_dynamic_string_single_attr(attr_name: &str, attr_value: &str, input: &str) -> TextoProcessado {
-    let attr_hash = if attr_name.is_empty() { None } else { Some(bwms_primitives::fnv1a64(attr_name.as_bytes())) };
-    process_dynamic_string_com(input, |hash| (attr_hash == Some(hash)).then_some(attr_value))
+    let alvo = (!attr_name.is_empty()).then(|| bwms_primitives::fnv1a64(attr_name.as_bytes()));
+    process_dynamic_string_com(input, |h| (Some(h) == alvo).then_some(attr_value))
 }
 
-/// `ProcessString` com a busca de atributo do chamador: hash FNV-1a64 do nome → valor. A 48c passa o `material` local e, atrás dele, os atributos do
-/// `@context` (a mesma prioridade local > global da referência).
+/// Teto da saída da expansão: texto literal que passaria dele invalida; o valor de atributo que estoura no fim é truncado.
+const TEXTO_DINAMICO_MAX: usize = 512;
+
+/// Expande `{atributo}` por `valor_de(hash do nome)`. Um `*` inicial é ignorado; `?` no fim da saída marca opcional. Sem nenhum `{…}`, ou com `{`
+/// sem `}`, o texto é inválido.
 pub(crate) fn process_dynamic_string_com<'a>(input: &str, valor_de: impl Fn(u64) -> Option<&'a str>) -> TextoProcessado {
-    const MAX_LENGTH: usize = 512;
-    let mut result = TextoProcessado::default();
-    if input.is_empty() {
-        return result;
-    }
-    let bytes = input.as_bytes();
-    let mut idx = if bytes[0] == b'*' { 1 } else { 0 };
-    let mut out: Vec<u8> = Vec::with_capacity(MAX_LENGTH + 1);
-    let mut attrs_found = 0usize;
-
-    while idx < bytes.len() {
-        let attr_open = match bytes[idx..].iter().position(|&b| b == b'{') {
-            Some(p) => idx + p,
-            None => {
-                while idx < bytes.len() && out.len() < MAX_LENGTH {
-                    out.push(bytes[idx]);
-                    idx += 1;
+    let invalido = TextoProcessado::default();
+    let b = input.as_bytes();
+    let mut i = usize::from(b.first() == Some(&b'*'));
+    let mut saida: Vec<u8> = Vec::with_capacity(TEXTO_DINAMICO_MAX.min(b.len() * 2));
+    let mut atributos = std::collections::BTreeSet::new();
+    let (mut missed, mut algum) = (false, false);
+    // Saída cheia com texto por consumir = inválido; um valor truncado também conta como cheio.
+    let mut cheia = false;
+    while i < b.len() {
+        if cheia || saida.len() >= TEXTO_DINAMICO_MAX {
+            return invalido;
+        }
+        if b[i] != b'{' {
+            saida.push(b[i]);
+            i += 1;
+            continue;
+        }
+        let Some(fim) = b[i + 1..].iter().position(|&c| c == b'}').map(|p| i + 1 + p) else { return invalido };
+        let h = bwms_primitives::fnv1a64(&b[i + 1..fim]);
+        atributos.insert(h);
+        algum = true;
+        match valor_de(h) {
+            Some(v) => {
+                let livre = TEXTO_DINAMICO_MAX - saida.len();
+                if v.len() > livre {
+                    let corte = (0..=livre).rev().find(|&c| v.is_char_boundary(c)).unwrap_or(0);
+                    saida.extend_from_slice(&v.as_bytes()[..corte]);
+                    cheia = true;
+                } else {
+                    saida.extend_from_slice(v.as_bytes());
                 }
-                break;
             }
-        };
-        let attr_close = match bytes[attr_open..].iter().position(|&b| b == b'}') {
-            Some(p) => attr_open + p,
-            None => break,
-        };
-        while idx != attr_open && out.len() < MAX_LENGTH {
-            out.push(bytes[idx]);
-            idx += 1;
+            None => missed = true,
         }
-        if out.len() == MAX_LENGTH {
-            break;
-        }
-        idx = attr_close + 1;
-        let name = &input[attr_open + 1..attr_close];
-        let hash = bwms_primitives::fnv1a64(name.as_bytes());
-        attrs_found += 1;
-        result.atributos.insert(hash);
-        if let Some(attr_value) = valor_de(hash) {
-            let vbytes = attr_value.as_bytes();
-            let mut vi = 0;
-            while vi < vbytes.len() && out.len() < MAX_LENGTH {
-                out.push(vbytes[vi]);
-                vi += 1;
-            }
-            if out.len() == MAX_LENGTH {
-                break;
-            }
-        } else {
-            result.missed = true;
-        }
+        i = fim + 1;
     }
-
-    if idx < bytes.len() || attrs_found == 0 {
-        return result;
+    if !algum {
+        return invalido;
     }
-    if out.last() == Some(&b'?') {
-        result.optional = true;
-        out.pop();
+    let optional = saida.last() == Some(&b'?');
+    if optional {
+        saida.pop();
     }
-    result.value = String::from_utf8_lossy(&out).into_owned();
-    result.valid = true;
-    result
+    // Byte de texto literal cortado no teto só acontece no ramo inválido; a saída válida é UTF-8 inteiro.
+    let Ok(value) = String::from_utf8(saida) else { return invalido };
+    TextoProcessado { valid: true, missed, optional, value, atributos }
 }
 
-/// ArchiveXL `#23` (`App::DynamicAppearanceRef`, `Garment/Dynamic.cpp:194-266`, catálogo item
-/// `#23`, 2026-08-12 round 3), no dylib que o jogo carrega: segue o ctor
-/// `DynamicAppearanceRef(Red::CName aReference)` byte a byte, e os vetores estão em `register.rs`
-/// (`archivexl_dynamic_appearance_tests` e `archivexl_dynamic_appearance_parse_tests`). É a
-/// implementação única do projeto: o install (`bwms_primitives::instalacao`) não avalia o critério, que só
-/// é avaliado em runtime, contra o estado da entidade (`EntityState`, item `#22`).
-/// Parseia o NOME de
-/// um componente/aparência que pode embutir uma lista de VARIANTES (`nome!v1!v2`) e/ou CONDIÇÕES
-/// (`nome&c1&c2`, ou combinando os 2) — a sintaxe que `EntityState::ToggleConditionalComponents`/
-/// `SelectDynamicAppearance` (item `#22`) usam pra decidir qual componente/aparência condicional
-/// está ativo dado o contexto do personagem. 100% hash puro (FNV1a64 via `bwms_primitives::fnv1a64`,
-/// zero registro no `CNamePool` — confirmado ser o único caminho usado aqui, mesma convenção já
-/// usada em `process_dynamic_string_single_attr`). Os 7 campos são os do `Garment/Dynamic.hpp:28-43`.
-/// `weight` é guardado em `i32` porque
-/// `toggle_conditional_group_disable_indices`, `es22_escolher_definicao` e o retorno `Int32` de
-/// `AppearanceRefWeight` comparam em `i32`, mas o valor é truncado mod 256 como o `int8_t` da
-/// referência (`Garment/Dynamic.hpp:42`, `Dynamic.cpp:263-264`): de 28 a 155 condições com variante
-/// (de 128 a 255 sem variante) o peso fica negativo e `is_conditional` = false.
+/// Critério de nome de componente/aparência (`nome!variantes&condições`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct DynamicAppearanceRef {
     #[allow(dead_code)]
@@ -6069,86 +4743,52 @@ pub(crate) struct DynamicAppearanceRef {
     pub(crate) weight: i32,
 }
 
-/// `App::ExtractName(aName, aOffset, aSize)` (`Garment/Dynamic.cpp:81-93`): FNV-1a64 do trecho, 0 se vazio.
+/// Hash de um trecho do nome: vazio = 0 (o "nenhum" do formato).
 pub(crate) fn dynref_extract_name_hash(s: &str) -> u64 {
     if s.is_empty() { 0 } else { bwms_primitives::fnv1a64(s.as_bytes()) }
 }
 
+/// Peso que a variante dá ao critério; cada condição soma 1.
+const PESO_DA_VARIANTE: i32 = 100;
+
 impl DynamicAppearanceRef {
-    /// Porte byte-a-byte do ctor `DynamicAppearanceRef(Red::CName aReference)`.
+    /// `nome!v1!v2&c1&c2`: as variantes vão até o 1º `&`; na parte de condição o `!` é texto. Trecho vazio entre marcadores vale 0.
     pub(crate) fn parse(reference: &str) -> Self {
-        let mut r = DynamicAppearanceRef { value: dynref_extract_name_hash(reference), ..Default::default() };
-
-        let Some(marker_pos) = reference.find(['!', '&']) else {
-            // sem marcador nenhum -> não-dinâmico, `name` = a própria referência.
-            r.name = r.value;
-            return r;
+        let value = dynref_extract_name_hash(reference);
+        let Some(marca) = reference.find(['!', '&']) else {
+            return Self { value, name: value, ..Default::default() };
         };
-
-        r.is_dynamic = true;
-        r.name = dynref_extract_name_hash(&reference[..marker_pos]);
-        let mut rest = &reference[marker_pos..];
-
-        if rest.len() > 1 {
-            if rest.as_bytes()[0] == b'!' {
-                rest = &rest[1..];
-                loop {
-                    if rest.is_empty() {
-                        break;
-                    }
-                    match rest.find(['!', '&']) {
-                        Some(0) if rest.as_bytes()[0] == b'&' => break,
-                        None => {
-                            r.variants.insert(dynref_extract_name_hash(rest));
-                            break;
-                        }
-                        Some(p) => {
-                            r.variants.insert(dynref_extract_name_hash(&rest[..p]));
-                            if rest.as_bytes()[p] != b'!' {
-                                rest = &rest[p..];
-                                break;
-                            }
-                            rest = &rest[p + 1..];
-                        }
-                    }
-                }
-            }
-
-            if rest.as_bytes().first() == Some(&b'&') {
-                rest = &rest[1..];
-                loop {
-                    if rest.is_empty() {
-                        break;
-                    }
-                    match rest.find('&') {
-                        None => {
-                            r.conditions.insert(dynref_extract_name_hash(rest));
-                            break;
-                        }
-                        Some(p) => {
-                            r.conditions.insert(dynref_extract_name_hash(&rest[..p]));
-                            rest = &rest[p + 1..];
-                        }
-                    }
-                }
-            }
-
-            // Soma em `usize` e trunca mod 256 em `i8` como o `static_cast<int8_t>` de `Dynamic.cpp:263`: de 28 a 155 condições
-            // com variante (de 128 a 255 sem variante) o peso fica negativo e `is_conditional` = false. O campo segue `i32`
-            // porque os consumidores comparam em `i32`.
-            r.weight = (((if r.variants.is_empty() { 0usize } else { 100 }) + r.conditions.len()) as i8) as i32;
-            r.is_conditional = r.weight > 0;
+        let pedacos = |trecho: &str, sep: char| -> std::collections::BTreeSet<u64> {
+            if trecho.is_empty() { Default::default() } else { trecho.split(sep).map(dynref_extract_name_hash).collect() }
+        };
+        let resto = &reference[marca..];
+        let (variantes, condicoes) = match resto.strip_prefix('!') {
+            Some(v) => match v.find('&') {
+                Some(e) => (&v[..e], &v[e + 1..]),
+                None => (v, ""),
+            },
+            None => ("", &resto[1..]),
+        };
+        let variants = pedacos(variantes, '!');
+        let conditions = pedacos(condicoes, '&');
+        // Sem estouro: a variante sempre pesa mais que qualquer número de condições sem ela.
+        let weight = if variants.is_empty() { 0 } else { PESO_DA_VARIANTE }.saturating_add(i32::try_from(conditions.len()).unwrap_or(i32::MAX));
+        Self {
+            value,
+            name: dynref_extract_name_hash(&reference[..marca]),
+            variants,
+            conditions,
+            is_dynamic: true,
+            is_conditional: weight > 0,
+            weight,
         }
-
-        r
     }
 
-    /// `Match(aVariant)`.
     pub(crate) fn matches_variant(&self, variant_hash: u64) -> bool {
         self.variants.contains(&variant_hash)
     }
 
-    /// `Match(aConditions, aOverrides)` — condição satisfeita se estiver em QUALQUER um dos 2 sets.
+    /// Cada condição do critério está no estado da entidade ou nos overrides do nome pedido.
     pub(crate) fn matches_conditions_with_overrides(
         &self,
         conditions_present: &std::collections::BTreeSet<u64>,
@@ -6158,15 +4798,7 @@ impl DynamicAppearanceRef {
     }
 }
 
-/// ArchiveXL `#23` (`App::DynamicAppearanceName`, `Garment/Dynamic.hpp:12-26`+`Dynamic.cpp:96-192`,
-/// item `#23` do catálogo, 2026-08-15), no dylib que o jogo carrega: implementação única do
-/// projeto, como a do `DynamicAppearanceRef` irmão acima, com os 7 campos de
-/// `Garment/Dynamic.hpp:12-26`. Os vetores estão nos mesmos dois módulos de teste de `register.rs`
-/// (`archivexl_dynamic_appearance_tests` e `archivexl_dynamic_appearance_parse_tests`).
-/// É o VALOR real de uma aparência/componente que o
-/// motor tenta casar contra um `DynamicAppearanceRef` (o CRITÉRIO, já portado acima) — sintaxe
-/// `nome!variante[+parte[=valor]]...[%contexto][&condicao...]`. 100% composição pura sobre
-/// `bwms_primitives::fnv1a64`/`fnv1a64_seeded` (já provados), zero endereço nativo, zero campo cru.
+/// Valor de nome de aparência (`nome!variante+partes%contexto&condições`).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct DynamicAppearanceName {
     #[allow(dead_code)]
@@ -6180,174 +4812,99 @@ pub(crate) struct DynamicAppearanceName {
 }
 
 impl DynamicAppearanceName {
-    /// Porte do ctor `DynamicAppearanceName(Red::CName aAppearance)` (`Dynamic.cpp:102-186`), com o
-    /// corte por índice (`end`). Com '%'/'&' antes do '!' o parse degrada para não-dinâmico: no C++ o
-    /// `remove_prefix` passaria do tamanho (UB), e texto vindo de redscript não pode derrubar o jogo.
+    /// `nome!variante[+parte|+chave=valor]…[&condição…][%contexto]`. O contexto é o número depois do ÚLTIMO `%`; as condições do nome não são
+    /// guardadas. `!` depois do corte (`%` ou `&`) não abre variante: o texto inteiro vale como nome não dinâmico.
     pub(crate) fn parse(appearance: &str) -> Self {
-        let mut n = DynamicAppearanceName { value: dynref_extract_name_hash(appearance), ..Default::default() };
-
-        let Some(marker_pos) = appearance.find('!') else {
-            n.name = n.value;
-            return n;
+        let value = dynref_extract_name_hash(appearance);
+        let nao_dinamico = Self { value, name: value, ..Default::default() };
+        let (corpo, contexto) = match appearance.rfind('%') {
+            Some(p) => (&appearance[..p], &appearance[p + 1..]),
+            None => (appearance, ""),
         };
-
-        // contexto: ÚLTIMO '%' na string ORIGINAL (achado de RE: só parseia se `%numero` for o
-        // final LITERAL da string — a ordem válida é "nome!variante&condicao%numero").
-        let mut end = appearance.len();
-        if let Some(context_pos) = appearance.rfind('%') {
-            if let Ok(v) = appearance[context_pos + 1..].parse::<u64>() {
-                n.context = v;
-            }
-            end = end.min(context_pos);
+        let corpo = corpo.find('&').map_or(corpo, |e| &corpo[..e]);
+        let Some(bang) = corpo.find('!') else { return nao_dinamico };
+        let context = if !contexto.is_empty() && contexto.bytes().all(|c| c.is_ascii_digit()) { contexto.parse::<u64>().unwrap_or(0) } else { 0 };
+        let mut nome = Self { value, name: dynref_extract_name_hash(&corpo[..bang]), context, is_dynamic: true, ..Default::default() };
+        let secao = &corpo[bang + 1..];
+        if secao.is_empty() {
+            return nome;
         }
-        if let Some(cond_pos) = appearance[..end].find('&') {
-            end = end.min(cond_pos);
-        }
-        // guarda de segurança (sem equivalente no C++ — string malformada vinda de redscript ao
-        // vivo nunca pode panicar o processo do jogo).
-        if end <= marker_pos {
-            n.name = n.value;
-            return n;
-        }
-
-        n.is_dynamic = true;
-        n.name = dynref_extract_name_hash(&appearance[..marker_pos]);
-
-        let mut rest = &appearance[marker_pos + 1..end];
-
-        if !rest.is_empty() {
-            n.variant = dynref_extract_name_hash(rest);
-            let variant_attr = bwms_primitives::fnv1a64(b"variant");
-            n.parts.insert(variant_attr, n.variant);
-
-            let mut part_counter: u8 = b'1';
-
-            loop {
-                if rest.is_empty() {
-                    break;
+        nome.variant = dynref_extract_name_hash(secao);
+        nome.parts.insert(crate::cname::cname("variant"), nome.variant);
+        // Pedaço sem `=` entra como `variant.<c>`, com `c` um byte que começa em '1' e sobe um código por pedaço.
+        let mut contador = b'1';
+        for pedaco in secao.split('+').filter(|p| !p.is_empty()) {
+            match pedaco.find('=') {
+                None => {
+                    let mut chave = *b"variant._";
+                    chave[8] = contador;
+                    nome.parts.insert(bwms_primitives::fnv1a64(&chave), dynref_extract_name_hash(pedaco));
+                    contador = contador.wrapping_add(1);
                 }
-                match rest.find('+') {
-                    Some(0) => {
-                        rest = &rest[1..];
-                        continue;
-                    }
-                    found => {
-                        let (marker2, skip) = match found {
-                            Some(p) => (p, p + 1),
-                            None => (rest.len(), rest.len()),
-                        };
-                        let assign_pos = rest.find('=').filter(|&ap| ap < marker2);
-                        if let Some(ap) = assign_pos {
-                            let part_name = dynref_extract_name_hash(&rest[..ap]);
-                            let part_value = dynref_extract_name_hash(&rest[ap + 1..marker2]);
-                            n.parts.insert(part_name, part_value);
-                            // `Dynamic.cpp:168` faz `FNV1a64(str.data(), markerPos - assignPos)`: os `marker2 - ap` primeiros bytes da PARTE, não a chave, o valor
-                            // nem "chave=valor". Anomalia da referência, replicada de propósito: a condição do mod casa contra esse mesmo hash lá.
-                            let quirky_len = (marker2 - ap).min(rest.len());
-                            n.overrides.insert(bwms_primitives::fnv1a64(rest[..quirky_len].as_bytes()));
-                        } else {
-                            let seed = bwms_primitives::fnv1a64(b"variant");
-                            let part_name = bwms_primitives::fnv1a64_seeded(&[b'.', part_counter], seed);
-                            let part_value = dynref_extract_name_hash(&rest[..marker2]);
-                            n.parts.insert(part_name, part_value);
-                            part_counter = part_counter.wrapping_add(1);
-                        }
-                        rest = &rest[skip..];
-                    }
+                Some(eq) => {
+                    nome.parts.insert(dynref_extract_name_hash(&pedaco[..eq]), dynref_extract_name_hash(&pedaco[eq + 1..]));
+                    // O override é o hash dos primeiros `tamanho - posição do '='` bytes do pedaço: é contra esse hash que os critérios `&x`
+                    // dos mods casam nos componentes condicionais.
+                    nome.overrides.insert(bwms_primitives::fnv1a64(&pedaco.as_bytes()[..pedaco.len() - eq]));
                 }
             }
         }
-
-        n
+        nome
     }
 }
 
-/// Porte de `App::ResourceState` (`States.hpp:51-76`), só o campo `m_overridenOffsets` (os outros
-/// campos — `m_appearance`/`m_path` — já têm contraparte em `ES22_RESOURCE_STATE`, registry
-/// separado, mesma disciplina "1 registry por campo/rodada" já estabelecida acima).
-///
-/// Semântica (`ResourceState::GetOverriddenOffset`, `States.cpp:187-190`):
-/// `!m_overridenOffsets.empty() ? m_overridenOffsets.begin()->second : 0`. O `Core::Map` é `tsl::hopscotch_map`
-/// (`Stl.hpp:40`), sem ordem: com 2+ mods registrando offset pro MESMO resource a referência não tem regra. Aqui vence
-/// a 1ª entrada INSERIDA (`Vec` linear); a aparência do componente usa o menor hash (`ComponentState::aparencia_sobrescrita`).
+/// Offsets de roupa por recurso, um por mod.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Es67ResourceOffset {
-    /// `(mod_hash, offset)` — 1 entrada por mod; `AddOffsetOverride` atualiza in-place se o
-    /// `mod_hash` já existir (fiel: `EntityState::AddOffsetOverride`→`ResourceState::
-    /// AddOffsetOverride`, `States.cpp:172-180`: `it==end() ? emplace(hash,0) : it`, sempre
-    /// seguido por `it.value() = aOffset`).
+    /// `(mod_hash, offset)`.
     pub(crate) overrides: Vec<(u64, i32)>,
 }
 
 impl Es67ResourceOffset {
+    /// Um valor por mod; o mesmo mod atualiza no lugar, sem perder a posição.
     pub(crate) fn add_offset_override(&mut self, mod_hash: u64, offset: i32) {
-        if let Some(e) = self.overrides.iter_mut().find(|(h, _)| *h == mod_hash) {
-            e.1 = offset;
-        } else {
-            self.overrides.push((mod_hash, offset));
+        match self.overrides.iter_mut().find(|(m, _)| *m == mod_hash) {
+            Some((_, o)) => *o = offset,
+            None => self.overrides.push((mod_hash, offset)),
         }
     }
 
-    /// `ResourceState::RemoveOffsetOverride(aHash) -> bool` (`States.cpp:182-185`) —
-    /// `m_overridenOffsets.erase(aHash)`, devolve se algo foi de fato removido.
     pub(crate) fn remove_offset_override(&mut self, mod_hash: u64) -> bool {
-        let before = self.overrides.len();
-        self.overrides.retain(|(h, _)| *h != mod_hash);
-        self.overrides.len() != before
+        let antes = self.overrides.len();
+        self.overrides.retain(|(m, _)| *m != mod_hash);
+        self.overrides.len() != antes
     }
 
+    /// O do mod que entrou primeiro: a roupa fica com o deslocamento que o 1º mod carregado pediu.
     pub(crate) fn get_overridden_offset(&self) -> i32 {
-        self.overrides.first().map(|(_, o)| *o).unwrap_or(0)
+        self.overrides.first().map_or(0, |(_, o)| *o)
     }
 }
 
-/// Chave = `(entity_ptr, resource_path_hash)` — MESMO esquema de `ES22_RESOURCE_STATE`/
-/// `ES22_COMPONENT_APPEARANCE` (registry por-rodada dedicado; não reusa os outros 2, cada um
-/// guarda um campo diferente do `ResourceState`/`ComponentState` real).
+/// Chave = `(entidade, hash do caminho do recurso)`.
 pub(crate) static ES67_RESOURCE_OFFSET: Mutex<Vec<((u64, u64), Es67ResourceOffset)>> = Mutex::new(Vec::new());
 
-/// `EntityState::AddOffsetOverride(aHash, aResourcePath, aOffset)` (`States.cpp:367-372`).
-/// `pub(crate)` desde a rodada 44 (2026-08-16) — o probe de escrita sintética em `selftest.rs`
-/// precisa registrar um override de TESTE diretamente (sem passar pela trampolim nativa
-/// `tramp_adicionar_offset_de_roupa`, que exige um frame de chamada redscript real).
 pub(crate) unsafe fn add_offset_override(entity: u64, mod_hash: u64, resource_path: u64, offset: i32) {
-    if let Ok(mut g) = ES67_RESOURCE_OFFSET.lock() {
-        let key = (entity, resource_path);
-        match g.iter_mut().find(|(k, _)| *k == key) {
-            Some((_, s)) => s.add_offset_override(mod_hash, offset),
-            None => {
-                let mut s = Es67ResourceOffset::default();
-                s.add_offset_override(mod_hash, offset);
-                g.push((key, s));
-            }
+    let Ok(mut g) = ES67_RESOURCE_OFFSET.lock() else { return };
+    let chave = (entity, resource_path);
+    match g.iter_mut().find(|(k, _)| *k == chave) {
+        Some((_, s)) => s.add_offset_override(mod_hash, offset),
+        None => {
+            let mut s = Es67ResourceOffset::default();
+            s.add_offset_override(mod_hash, offset);
+            g.push((chave, s));
         }
     }
 }
 
-/// `EntityState::RemoveOffsetOverrides(aHash)` (`States.cpp:375-380`) — remove `aHash` de TODOS
-/// os `ResourceState` da entidade (loop `for (auto& [path, resourceState] : m_resourceStates)`),
-/// não só de 1 resource — fiel ao caso real ("mod X foi desequipado, limpa tudo que X registrou").
-/// Devolve a contagem de `ResourceState`s afetados (diagnóstico; a fonte real é `void`).
+/// Tira o mod de todos os recursos da entidade; devolve quantos recursos tinham o mod.
 pub(crate) unsafe fn remove_offset_overrides(entity: u64, mod_hash: u64) -> u32 {
-    let mut n = 0u32;
-    if let Ok(mut g) = ES67_RESOURCE_OFFSET.lock() {
-        for ((e, _), s) in g.iter_mut() {
-            if *e == entity && s.remove_offset_override(mod_hash) {
-                n += 1;
-            }
-        }
-    }
-    n
+    let Ok(mut g) = ES67_RESOURCE_OFFSET.lock() else { return 0 };
+    g.iter_mut().filter(|((e, _), _)| *e == entity).map(|(_, s)| u32::from(s.remove_offset_override(mod_hash))).sum()
 }
 
-/// `EntityState::GetOffsetOverride(aResourcePath)` (`States.cpp:748-754`) — `0` se não houver
-/// `ResourceState` pra esse path (fiel: `!resourceState ? 0 : resourceState->GetOverriddenOffset()`).
 pub(crate) unsafe fn get_offset_override(entity: u64, resource_path: u64) -> i32 {
-    ES67_RESOURCE_OFFSET
-        .lock()
-        .ok()
-        .and_then(|g| g.iter().find(|(k, _)| *k == (entity, resource_path)).map(|(_, s)| s.get_overridden_offset()))
-        .unwrap_or(0)
+    ES67_RESOURCE_OFFSET.lock().ok().and_then(|g| g.iter().find(|(k, _)| *k == (entity, resource_path)).map(|(_, s)| s.get_overridden_offset())).unwrap_or(0)
 }
 
 /// Tamanho da tabela sem travar: com 0 os hooks só repassam (o `m_customAppOverrides.empty()`).
@@ -6421,7 +4978,7 @@ pub(crate) fn contar_alias_do_teste_resolvido(src: u64) {
 }
 
 
-// cw-controller-misc: IComponent::Toggle native scripting handler vmaddr
+// Controller de recurso: IComponent::Toggle native scripting handler vmaddr
 // Achado 2026-07-28: classe "IComponent" NÃO existe por esse nome no RTTI (nativefunc IComponent
 // Toggle -> "classe não encontrada"); mas `nativefunc gameuiCharacterCustomizationGenitalsController
 // Toggle` resolve (Toggle está na hierarquia herdada). rf.func @+0x00 = CName hash duplicado
@@ -6445,8 +5002,8 @@ pub(crate) const ICOMP_TOGGLE_VM: u64 = 0x1_019b_a498;
 /// Original do handler de script do `IComponent::Toggle`, publicado pelo `instalar_com_threads_paradas` (`garantir_hooks_de_toggle`).
 pub(crate) static ORIG_ICOMP_TOGGLE: AtomicU64 = AtomicU64::new(0);
 
-// ===== Codeware `#127`/`#128`/`#134`: `Component/Toggle` e `Vehicle/ToggleAuxLights` =====
-// Como os controllers da referência (`HookAfter`): a original roda e, com ouvinte do evento, o evento sai com o componente (ou o controller do veículo) e a
+// ===== `Component/Toggle` e `Vehicle/ToggleAuxLights` =====
+// A original roda e, com ouvinte do evento, o evento sai com o componente (ou o controller do veículo) e a
 // entidade dona (`owner` em `+0x50` do `entIComponent`; o `vehicleController` herda `gameComponent`), só quando há dono. No Mac o `IComponent::Toggle`
 // C++ (`0x1019b95f4`: compara com `+0x8b`, grava e, com o bit 1 de `+0x88`, chama o virtual `+0x1e8`) e o handler de script do `Toggle` (`0x1019ba498`)
 // têm o mesmo corpo em linha — o handler não chama a função —, então os 2 são hookados. O `vehicleController::ToggleLights` (`0x102b3d974`, RE de
@@ -6483,7 +5040,7 @@ pub(crate) unsafe extern "C" fn icomp_toggle_cpp(componente: *mut c_void, ligado
     toggle_despachar(componente, 1);
 }
 
-/// Codeware `#127`/`#118`: instala os 2 hooks do `Toggle` no `RegisterCallback` de `Component/Toggle`, de novo depois de uma desinstalação. Quem chama
+/// Instala os 2 hooks do `Toggle` no `RegisterCallback` de `Component/Toggle`, de novo depois de uma desinstalação. Quem chama
 /// serializa ativação e desativação.
 pub(crate) unsafe fn garantir_hooks_de_toggle() {
     let script = instalar_conferindo_prologo(ICOMP_TOGGLE_VM, ICOMP_TOGGLE_PROLOGO, icomp_toggle_handler as *mut c_void, &ORIG_ICOMP_TOGGLE);
@@ -6496,13 +5053,13 @@ pub(crate) unsafe fn garantir_hooks_de_toggle() {
 
 pub(crate) const CMESH_POSTLOAD_VM: u64 = 0x1_0519_a58c;
 
-// ===== ArchiveXL `#17` — `ExtractPartComponents` ao vivo, partes 17a e 17b (2026-09-12) =====
+// ===== `ExtractPartComponents` ao vivo, partes 17a e 17b (2026-09-12) =====
 // 17a, com `~/.bwms-hook-a17-partes`: hook só observando em `0x1017d3158` (Mac: `x0` = &SharedPtr<ResourceToken<EntityTemplate>> da parte, `x8` = DynArray
-// de saída; RE em `proofs/20260911-archivexl-17-extractpartcomponents-sret-identificado.log`). Um trampolim nu passa o `x8` do chamador como 2º argumento; o
+// de saída; RE em `proofs/20260911-*-17-extractpartcomponents-sret-identificado.log`). Um trampolim nu passa o `x8` do chamador como 2º argumento; o
 // hook chama a original com ele explícito (`extract_part_components_em`) e guarda, das primeiras partes com objetos, o token (com 1 strong a mais, pra seguir
 // vivo), o campo `+0x48` do token, o tamanho do array e as classes dos objetos. 17b, no tick de gameplay: chama a original de novo com o token guardado e
-// confere tamanho e classes com o que o motor extraiu; controle com o token de um caminho que não existe (token com falha: array vazio). É a base da 17c — a
-// referência aplica `resource.patch` extraindo os componentes do `.ent` de patch e mesclando por nome e id no array da parte. Os arrays das chamadas do teste
+// confere tamanho e classes com o que o motor extraiu; controle com o token de um caminho que não existe (token com falha: array vazio). É a base da 17c — o
+// `resource.patch` se aplica extraindo os componentes do `.ent` de patch e mesclando por nome e id no array da parte. Os arrays das chamadas do teste
 // ficam sem soltar (vazamento pequeno e consciente de teste).
 pub(crate) const EXTRACT_PART_COMPONENTS_VM: u64 = 0x1_017d_3158;
 
@@ -6557,35 +5114,45 @@ pub(crate) enum PassoDaMescla {
     Pula,
 }
 
-/// Núcleo puro do `MergeComponents` da referência: `resultado[i]` = `(nome, id)` do objeto se ele é componente; `patch[j]` = `(nome, id, externo)`. Os
-/// anexados entram nas buscas seguintes, como o `PushBack` da referência.
+/// Um passo por objeto do patch, na ordem do patch. O componente casa pela chave `(name, id)` com a 1ª posição do resultado, ou com um anexado
+/// antes no mesmo patch (que ocupa `resultado.len() + ordem de anexação`): dois objetos do patch com a mesma chave viram um anexado e uma troca dele.
+/// Em mescla de parte o componente externo novo não entra.
 pub(crate) fn plano_da_mescla(resultado: &[Option<(u64, u64)>], patch: &[Option<(u64, u64, bool)>], parte: bool) -> Vec<PassoDaMescla> {
-    let mut chaves = resultado.to_vec();
-    patch
-        .iter()
-        .map(|p| {
-            let Some((nome, id, externo)) = *p else { return PassoDaMescla::Pula };
-            if let Some(i) = chaves.iter().position(|c| *c == Some((nome, id))) {
-                PassoDaMescla::Substitui(i)
-            } else if parte && externo {
-                PassoDaMescla::Pula
-            } else {
-                chaves.push(Some((nome, id)));
-                PassoDaMescla::Anexa
-            }
-        })
-        .collect()
+    let mut anexadas: Vec<(u64, u64)> = Vec::new();
+    let mut plano = Vec::with_capacity(patch.len());
+    for objeto in patch {
+        let Some((nome, id, externo)) = *objeto else {
+            plano.push(PassoDaMescla::Pula);
+            continue;
+        };
+        let chave = (nome, id);
+        let passo = if let Some(i) = resultado.iter().position(|r| *r == Some(chave)) {
+            PassoDaMescla::Substitui(i)
+        } else if let Some(j) = anexadas.iter().position(|a| *a == chave) {
+            PassoDaMescla::Substitui(resultado.len() + j)
+        } else if parte && externo {
+            PassoDaMescla::Pula
+        } else {
+            anexadas.push(chave);
+            PassoDaMescla::Anexa
+        };
+        plano.push(passo);
+    }
+    plano
 }
 
-/// Os dois arrays de handles `{instância, bloco}` depois de aplicar `plano`: substituídos trocados de lugar, anexados em ordem no fim com a vaga nula.
+/// O plano sobre cópias dos dois arrays. Substituir TROCA os handles: o do alvo vai para o array do patch e é solto com ele, então nenhuma
+/// contagem de referência muda. O anexado deixa `[0, 0]` no patch pelo mesmo motivo. Passo além do patch ou troca fora do resultado não mexe.
 pub(crate) fn arrays_com_o_plano(resultado: &[[u64; 2]], patch: &[[u64; 2]], plano: &[PassoDaMescla]) -> (Vec<[u64; 2]>, Vec<[u64; 2]>) {
-    let (mut r, mut p) = (resultado.to_vec(), patch.to_vec());
+    let mut r = Vec::with_capacity(resultado.len() + patch.len());
+    r.extend_from_slice(resultado);
+    let mut p = patch.to_vec();
     for (j, passo) in plano.iter().enumerate().take(p.len()) {
         match *passo {
-            PassoDaMescla::Substitui(i) if i < r.len() => std::mem::swap(&mut r[i], &mut p[j]),
+            PassoDaMescla::Substitui(i) if i < r.len() => core::mem::swap(&mut r[i], &mut p[j]),
             PassoDaMescla::Anexa => {
                 r.push(p[j]);
-                p[j] = [0; 2];
+                p[j] = [0, 0];
             }
             _ => {}
         }
@@ -6593,59 +5160,80 @@ pub(crate) fn arrays_com_o_plano(resultado: &[[u64; 2]], patch: &[[u64; 2]], pla
     (r, p)
 }
 
-/// Chave de mescla do objeto: `(nome, id, externo)` se ele é componente.
+/// `entIComponent` lido em `name` (`+0x40`) e `id` (`+0x60`).
+const MESCLA_COMPONENTE_LEGIVEL: usize = 0x68;
+
+/// `(name, id, é entExternalComponent)` do objeto; `None` para objeto ilegível ou que não é componente. Sem as classes guardadas
+/// (`guardar_classes_da_mescla`) nada é componente e o plano só pula.
 pub(crate) unsafe fn chave_de_mescla(obj: u64) -> Option<(u64, u64, bool)> {
-    if obj == 0 || !crate::memoria::is_readable(obj as *const c_void, 8) {
+    let componente = CLASSE_DE_COMPONENTE.load(Ordering::Relaxed);
+    if obj == 0 || componente.is_null() || !crate::memoria::is_readable(obj as *const c_void, MESCLA_COMPONENTE_LEGIVEL) {
         return None;
     }
-    let cls = crate::rtti::class_of(obj as *mut c_void);
-    if !class_is_kind_of(cls, CLASSE_DE_COMPONENTE.load(Ordering::Relaxed)) {
+    let classe = rtti::class_of(obj as *mut c_void);
+    if !crate::register::class_is_kind_of(classe, componente) {
         return None;
     }
-    let (id, nome) = crate::register::component_id_name(obj as *mut c_void)?;
-    Some((nome, id, class_is_kind_of(cls, CLASSE_DE_COMPONENTE_EXTERNO.load(Ordering::Relaxed))))
+    let base = obj as *const u8;
+    let nome = base.add(0x40).cast::<u64>().read_unaligned();
+    let id = base.add(0x60).cast::<u64>().read_unaligned();
+    let externo = crate::register::class_is_kind_of(classe, CLASSE_DE_COMPONENTE_EXTERNO.load(Ordering::Relaxed));
+    Some((nome, id, externo))
 }
 
-/// Handles de um `DynArray<Handle<ISerializable>>` (cabeçalho de 16 B), até 16384 (o pacote do V passa de 4096); vazio se ilegível.
+/// Teto de objetos de um array de extração: acima disso o cabeçalho é lixo, não um pacote.
+const MESCLA_TETO_DE_OBJETOS: u32 = 0x4000;
+
+/// Tamanho de um `DynArray` (`+0x0C`), `None` com o cabeçalho ilegível.
+unsafe fn tamanho_do_dynarray(arr: *const u8) -> Option<u32> {
+    if arr.is_null() || !crate::memoria::is_readable(arr as *const c_void, 0x10) {
+        return None;
+    }
+    Some(arr.add(0x0C).cast::<u32>().read_unaligned())
+}
+
+/// Os handles `{instância, bloco}` de um `DynArray<Handle<ISerializable>>`, nulos inclusive (a posição importa para o plano). Vazio com o array
+/// ilegível, sem buffer ou acima do teto.
 pub(crate) unsafe fn handles_do_dynarray(arr: *const u8) -> Vec<[u64; 2]> {
-    let v = (arr as *const u64).read_unaligned() as *const u64;
-    let n = (arr.add(0x0C) as *const u32).read_unaligned() as usize;
-    if v.is_null() || n == 0 || n > 0x4000 || !crate::memoria::is_readable(v as *const c_void, n * 16) {
+    let Some(tamanho) = tamanho_do_dynarray(arr) else { return Vec::new() };
+    let buffer = arr.cast::<u64>().read_unaligned() as *const u64;
+    if tamanho == 0 || tamanho > MESCLA_TETO_DE_OBJETOS || buffer.is_null() || !crate::memoria::is_readable(buffer as *const c_void, tamanho as usize * 16) {
         return Vec::new();
     }
-    (0..n).map(|i| [v.add(i * 2).read_unaligned(), v.add(i * 2 + 1).read_unaligned()]).collect()
+    (0..tamanho as usize).map(|i| [buffer.add(i * 2).read_unaligned(), buffer.add(i * 2 + 1).read_unaligned()]).collect()
 }
 
-/// Mescla `patch` em `resultado` (cabeçalhos de 16 B de `DynArray<Handle<ISerializable>>`) e devolve o plano aplicado; `None` sem efeito com array ilegível
-/// ou reserve sem capacidade.
+/// Mescla os componentes do `patch` no `resultado` (os dois `DynArray<Handle<ISerializable>>` de uma extração) e devolve o plano aplicado.
+/// `None`, sem escrever nada, quando um array não se lê inteiro ou o resultado não cresce. Os handles só trocam de lugar: soltar o `patch`
+/// depois (`soltar_dynarray_de_handles`) solta exatamente os substituídos. O tamanho do patch não muda: as vagas anexadas ficam `[0, 0]`.
 pub(crate) unsafe fn mesclar_componentes(resultado: *mut u8, patch: *mut u8, parte: bool) -> Option<Vec<PassoDaMescla>> {
-    let tam = |arr: *const u8| (arr.add(0x0C) as *const u32).read_unaligned() as usize;
-    let (r0, p0) = (handles_do_dynarray(resultado), handles_do_dynarray(patch));
-    if r0.len() != tam(resultado) || p0.len() != tam(patch) {
+    let r = handles_do_dynarray(resultado);
+    let p = handles_do_dynarray(patch);
+    if tamanho_do_dynarray(resultado)? as usize != r.len() || tamanho_do_dynarray(patch)? as usize != p.len() {
         return None;
     }
-    let chaves_r: Vec<Option<(u64, u64)>> = r0.iter().map(|h| chave_de_mescla(h[0]).map(|(nome, id, _)| (nome, id))).collect();
-    let chaves_p: Vec<Option<(u64, u64, bool)>> = p0.iter().map(|h| chave_de_mescla(h[0])).collect();
+    let chaves_r: Vec<Option<(u64, u64)>> = r.iter().map(|h| chave_de_mescla(h[0]).map(|(nome, id, _)| (nome, id))).collect();
+    let chaves_p: Vec<Option<(u64, u64, bool)>> = p.iter().map(|h| chave_de_mescla(h[0])).collect();
     let plano = plano_da_mescla(&chaves_r, &chaves_p, parte);
-    let (r1, p1) = arrays_com_o_plano(&r0, &p0, &plano);
-    if r1.len() as u32 > (resultado.add(0x08) as *const u32).read_unaligned() {
-        let mover = if r0.is_empty() { std::ptr::null() } else { crate::rebase(MOVER_HANDLES_VM) as *const c_void };
-        crate::jogo::listas::reservar(resultado as *mut c_void, r1.len() as u32, 0x10, 8, mover);
-        if ((resultado.add(0x08) as *const u32).read_unaligned() as usize) < r1.len() {
-            return None;
-        }
+    let (novo_r, novo_p) = arrays_com_o_plano(&r, &p, &plano);
+    let (_, _, capacidade) = crate::jogo::listas::dynarray_no_campo(resultado, 0);
+    if novo_r.len() > capacidade {
+        // Com elementos, o reserve do motor tem de mover handles pelo mover do próprio tipo; vazio, não há o que mover.
+        let mover = if r.is_empty() { std::ptr::null() } else { crate::rebase(MOVER_HANDLES_VM) as *const c_void };
+        crate::jogo::listas::reservar(resultado as *mut c_void, novo_r.len() as u32, 0x10, 8, mover);
     }
-    let rv = (resultado as *const u64).read_unaligned() as *mut u64;
-    let pv = (patch as *const u64).read_unaligned() as *mut u64;
-    for (i, h) in r1.iter().enumerate() {
-        rv.add(i * 2).write_unaligned(h[0]);
-        rv.add(i * 2 + 1).write_unaligned(h[1]);
+    let (buffer_r, _, capacidade) = crate::jogo::listas::dynarray_no_campo(resultado, 0);
+    if novo_r.len() > capacidade || (!novo_r.is_empty() && (buffer_r.is_null() || !crate::memoria::is_readable(buffer_r as *const c_void, novo_r.len() * 16))) {
+        return None;
     }
-    for (j, h) in p1.iter().enumerate() {
-        pv.add(j * 2).write_unaligned(h[0]);
-        pv.add(j * 2 + 1).write_unaligned(h[1]);
+    let (buffer_p, _, _) = crate::jogo::listas::dynarray_no_campo(patch, 0);
+    if !novo_r.is_empty() {
+        core::ptr::copy_nonoverlapping(novo_r.as_ptr() as *const u8, buffer_r, novo_r.len() * 16);
     }
-    (resultado.add(0x0C) as *mut u32).write_unaligned(r1.len() as u32);
+    if !novo_p.is_empty() {
+        core::ptr::copy_nonoverlapping(novo_p.as_ptr() as *const u8, buffer_p, novo_p.len() * 16);
+    }
+    resultado.add(0x0C).cast::<u32>().write_unaligned(novo_r.len() as u32);
     Some(plano)
 }
 
@@ -6687,51 +5275,37 @@ pub(crate) unsafe fn guardar_classes_da_mescla(reg: &crate::rtti::Registry) -> R
     Ok(())
 }
 
-// ===== ArchiveXL `#17` 17e — `resource.patch` no job de extração de garment (2026-09-12) =====
-// A roupa do V não passa só pelo `ExtractPartComponents`: o `GarmentAssembler::ExtractComponentsJob` (`0x1017ee34c`, offline — `x0` =
-// `GarmentExtractionParams{partTemplate Handle @0x00, context SharedPtr @0x10}`, `x1` = `JobGroup&`; lê o bloco de pacote `+0x1d8` do template, monta o
-// próprio extrator, chama o `ExtractSync` `0x101075dbc` direto e percorre os componentes com o `context` de `params+0x10`) extrai o pacote da parte por conta
-// própria. No boot 93 o hook da 17d mesclou na jaqueta do V (7 → 11) e nenhum componente da camisa apareceu. A referência hookeia esse job depois da original
-// (`OnGarmentPackageExtract`): pra cada patch da parte com `Modifies("components")`, troca o `partTemplate` dos params pelo template do patch, chama a original de
-// novo com o mesmo `JobGroup` e devolve o template. Aqui igual, com a troca crua dos 16 B do handle (nada é solto e o original volta no lugar). O caminho do
-// template sai de `+0x30` (o `path` do `CResource`, o mesmo do hook do `PostLoad` do `CMesh`); as primeiras chamadas vão pro log com o hash, pra conferir o
-// offset contra o hash da parte alvo. O template do patch é o `Handle` em `+0x28` do token pedido na carga da tabela.
 pub(crate) const GARMENT_EXTRACT_JOB_VM: u64 = 0x1_017e_e34c;
 
 pub(crate) static ORIG_GARMENT_EXTRACT_JOB: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) type GarmentExtractJobFn = unsafe extern "C" fn(*mut [u64; 2], *const c_void);
 
+/// Job de extração do montador de roupa: a roupa do V não passa pela extração de parte, então o `components` do `resource.patch` entra como
+/// extração extra no mesmo contexto de montagem — a original roda de novo uma vez por patch, com params novos que apontam o template do patch.
 pub(crate) unsafe extern "C" fn garment_extract_job_hook(params: *mut [u64; 2], grupo: *const c_void) {
-    let f: GarmentExtractJobFn = std::mem::transmute(original_publicado(&ORIG_GARMENT_EXTRACT_JOB));
-    // O job solta os próprios params no fim (`Free<job::PoolJobs2Data>` com o `x19`, `0x1017eed3c`): tudo que se lê deles vem ANTES da original, e a original
-    // não roda de novo com o mesmo bloco. A 17e v1/v2 lia depois (bloco já solto — a 1ª palavra virava o elo da lista livre do pool, o que as sondas dos boots
-    // 118 e 120 mostraram) e reusava o bloco. A extração do patch fica pra v3, com params novos do pool do job.
-    let mut copias: Vec<*mut [u64; 2]> = Vec::new();
-    let (mut contexto, mut caminho) = (0u64, 0u64);
-    if PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) && !params.is_null() && crate::memoria::is_readable(params as *const c_void, 0x30) {
-        a17_garment_observar(params);
-        copias = params_do_job_por_patch(params);
-        if !copias.is_empty() {
-            contexto = ((params as *const u8).add(0x10) as *const u64).read_unaligned();
-            let tpl = (*params)[0];
-            if tpl != 0 && crate::memoria::is_readable((tpl + 0x30) as *const c_void, 8) {
-                caminho = ((tpl + 0x30) as *const u64).read_unaligned();
-            }
-        }
+    let original: GarmentExtractJobFn = std::mem::transmute(original_publicado(&ORIG_GARMENT_EXTRACT_JOB));
+    if !PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed) || params.is_null() || !crate::memoria::is_readable(params as *const c_void, 0x30) {
+        original(params, grupo);
+        return;
     }
-    let t0 = a17e_alvos_de_skin(contexto);
-    f(params, grupo);
-    let t1 = a17e_alvos_de_skin(contexto);
-    // 17e v3: a extração de cada patch depois da original (o `HookAfter` da referência), cada uma com params próprios, que o job solta no fim.
-    let aplicar = !copias.is_empty();
-    for c in copias {
-        f(c, grupo);
-        A17_GARMENT_APLICADOS.fetch_add(1, Ordering::Relaxed);
+    crate::diagnostico::a17_garment_observar(params);
+    // O job solta os params no fim: tudo o que se lê deles vem antes da original.
+    let tpl = (*params)[0];
+    let contexto = (*params.add(1))[0];
+    let caminho = crate::jogo::recursos::hash_do_caminho_do_recurso(tpl);
+    let blocos = params_do_job_por_patch(params);
+    let antes = crate::diagnostico::a17e_alvos_de_skin(contexto);
+    original(params, grupo);
+    if blocos.is_empty() {
+        return;
     }
-    if aplicar {
-        a17e_amostrar(contexto, caminho, t0, t1);
+    let depois_da_parte = crate::diagnostico::a17e_alvos_de_skin(contexto);
+    for bloco in blocos {
+        original(bloco, grupo);
+        crate::diagnostico::A17_GARMENT_APLICADOS.fetch_add(1, Ordering::Relaxed);
     }
+    crate::diagnostico::a17e_amostrar(contexto, caminho, antes, depois_da_parte);
 }
 
 /// `PoolStorageProxy<job::PoolJobs2Data>::Allocate(tamanho)` e `Free<job::PoolJobs2Data>(bloco, 1)` (stubs; o agendador `0x1017ee098` aloca os params assim).
@@ -6739,59 +5313,59 @@ pub(crate) const POOL_JOBS2_ALLOCATE_VM: u64 = 0x1_052a_488c;
 
 pub(crate) const POOL_JOBS2_FREE_VM: u64 = 0x1_052a_6584;
 
-/// Params novos (0x30 B do pool do job) pra cada patch com `components` da parte deste job: cópia dos params com o `Handle` do template do patch em `+0x00`
-/// e strong+1 nos dois `Handle` (`+0x00` e `+0x10`), que o job solta no fim. Chamado antes da original, com os params ainda vivos.
-pub(crate) unsafe fn params_do_job_por_patch(params: *mut [u64; 2]) -> Vec<*mut [u64; 2]> {
-    let p = params as *const u8;
-    let tpl = (p as *const u64).read_unaligned();
-    if tpl == 0 || !crate::memoria::is_readable((tpl + 0x30) as *const c_void, 8) {
-        return Vec::new();
+/// Recurso carregado do token (`+0x28`), sem espera; 0 se o token ainda não carregou.
+unsafe fn recurso_do_token(t: [u64; 2]) -> u64 {
+    if t[0] == 0 || crate::register::status_do_token(t[0]) != 1 || !crate::memoria::is_readable((t[0] + 0x28) as *const c_void, 0x10) {
+        return 0;
     }
-    let caminho = ((tpl + 0x30) as *const u64).read_unaligned();
+    ((t[0] + 0x28) as *const u64).read_unaligned()
+}
+
+/// Um bloco novo de params (0x30 B, do pool dos params de job) por patch de `components` da parte: cópia dos params com o template do patch em
+/// `+0x00`. O job solta uma referência fraca do template e do contexto no fim, então cada bloco soma uma em cada. Falha num passo devolve o
+/// bloco ao pool e pula o patch.
+pub(crate) unsafe fn params_do_job_por_patch(params: *mut [u64; 2]) -> Vec<*mut [u64; 2]> {
+    let tpl = (*params)[0];
+    let caminho = crate::jogo::recursos::hash_do_caminho_do_recurso(tpl);
     let tokens: Vec<[u64; 2]> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g.do_alvo(caminho).filter(|x| x.props & A17_PROP_COMPONENTS != 0).map(|x| x.token).collect(),
+        Ok(g) => g.do_alvo_ou_da_instancia(Some(caminho), tpl, |p| p.props & A17_PROP_COMPONENTS != 0, |t| recurso_do_token(t)).map(|p| p.token).collect(),
         Err(_) => return Vec::new(),
     };
+    if tokens.is_empty() {
+        return Vec::new();
+    }
     let alocar: unsafe extern "C" fn(u64) -> *mut u8 = std::mem::transmute(crate::rebase(POOL_JOBS2_ALLOCATE_VM));
-    let soltar: unsafe extern "C" fn(*mut u8, u32) = std::mem::transmute(crate::rebase(POOL_JOBS2_FREE_VM));
-    let mut v = Vec::new();
-    for pt in tokens {
-        if recurso_do_patch_da_classe(pt, 0x248, CLASSE_ENTENTITYTEMPLATE.load(Ordering::Relaxed)).is_null() || !crate::memoria::is_readable((pt[0] + 0x28) as *const c_void, 16) {
+    let liberar: unsafe extern "C" fn(*mut u8, u32) = std::mem::transmute(crate::rebase(POOL_JOBS2_FREE_VM));
+    let classe = CLASSE_ENTENTITYTEMPLATE.load(Ordering::Relaxed);
+    let contexto_rc = (*params.add(1))[1];
+    let mut blocos = Vec::with_capacity(tokens.len());
+    for t in tokens {
+        if t[0] == 0 || recurso_do_patch_da_classe(t, 0x248, classe).is_null() {
             continue;
         }
-        let h = [((pt[0] + 0x28) as *const u64).read_unaligned(), ((pt[0] + 0x30) as *const u64).read_unaligned()];
-        if h[0] == 0 || h[1] == 0 {
+        let handle = [((t[0] + 0x28) as *const u64).read_unaligned(), ((t[0] + 0x30) as *const u64).read_unaligned()];
+        if handle[0] == 0 || handle[1] == 0 || contexto_rc == 0 {
             continue;
         }
         let bloco = alocar(0x30);
         if bloco.is_null() {
             continue;
         }
-        std::ptr::copy_nonoverlapping(p, bloco, 0x30);
-        let segundo = (p.add(0x18) as *const u64).read_unaligned();
-        if !travar_fraco(h[1]) || (segundo != 0 && !travar_fraco(segundo)) {
-            soltar(bloco, 1);
+        if !crate::memoria::is_readable(bloco as *const c_void, 0x30) {
+            liberar(bloco, 1);
             continue;
         }
-        (bloco as *mut [u64; 2]).write_unaligned(h);
-        v.push(bloco as *mut [u64; 2]);
-        crate::veredito_dev!("[a17e] v3: params {:p} do patch (template {:#x}) pra parte {caminho:#018x}", bloco, h[0]);
+        std::ptr::copy_nonoverlapping(params as *const u8, bloco, 0x30);
+        let b = bloco as *mut [u64; 2];
+        *b = handle;
+        for rc in [handle[1], contexto_rc] {
+            (*((rc + 4) as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
+        }
+        blocos.push(b);
     }
-    v
+    blocos
 }
 
-// ===== ArchiveXL `#51` 51f — `OnEntityPackageLoad`: `resource.patch` nos resultados do extrator do `EntityBuilder` (2026-09-12) =====
-// A referência hookeia antes o `EntityBuilder::ScheduleExtractComponentsJob` e despacha na mesma fila, antes do job do motor, o `PatchPackageResults` nos
-// resultados do extrator da entidade (e das aparências). No Mac o agendador é o `0x1019b3e70` (rótulo `EntityBuilder_ExtractComponents`; `x0` = builder,
-// `x1` = fila; ele mesmo monta os `EntityBuilderJobParams` de 0x18 B) e o corpo do job é o `0x1019b74b0` (`x0` = params `{builder, WeakPtr}`, `x1` =
-// `JobGroup`): trava o weak, toma os resultados do `entityExtractor` (`+0x10`) pelo `0x101076170` e lê o template em `+0x90` — o layout da referência.
-// Aqui o hook fica no corpo, antes da original: os resultados já estão prontos e ainda no extrator (`+0xa8`). Pra cada patch da tabela com
-// `components`/`entity` cujo alvo é o template do builder (ponteiro do token pedido na carga), o pacote do template do patch (`+0x1d8`) é extraído com as
-// flags do extrator do builder (`+0xb8`–`+0xbc`; mudam por chamada no builder) e mesclado pela 17c/17f. O extrator é montado como o `ExtractPartComponents`
-// (`0x1017d3158`) monta: bloco de params com o cabeçalho, o loader, as flags e o bitset de objetos; `0x1010763f0` cria, `SharedPtr` com weak próprio em
-// `+0x00`, `0x101075dbc` extrai, `0x101076170` toma os resultados e a soltura segue a do motor. Antes da 1ª mescla, um controle: o template do próprio
-// builder extraído com as flags e o bitset dele tem que dar o tamanho e as classes dos resultados do motor, com instâncias distintas; sem isso a mescla fica
-// desligada. As mesclas de aparência (`PatchPackageResults` do `.app` e `IncludeAppearanceParts`) ficam pra outras partes.
 pub(crate) const JOB_DO_BUILDER_VM: u64 = 0x1_019b_74b0;
 
 pub(crate) const EXTRATOR_CRIAR_VM: u64 = 0x1_0107_63f0;
@@ -6804,44 +5378,57 @@ pub(crate) const EXTRATOR_DESTRUIR_VM: u64 = 0x1_0107_5714;
 
 pub(crate) type JobDoBuilderFn = unsafe extern "C" fn(*mut [u64; 3], *const c_void);
 
-/// Extrai o pacote compilado do template (`+0x1d8`) pra `saida` (`DynArray<Handle<ISerializable>>` vazio) com as `flags`; `bitset` `None` liga todos os
-/// objetos. Devolve o tamanho; `None` sem pacote, com bitset de tamanho errado ou sem extrator.
+/// `EntityTemplate`: cabeçalho do pacote compilado (`rootIndex` i16 no começo).
+const TEMPLATE_PACOTE_OFF: u64 = 0x1d8;
+
+/// `ObjectPackageExtractor`: bitset de objetos (ponteiro `+0x68`, palavras `+0x74`), resultados `+0xa8`, flags (5 B) `+0xb8`.
+const EXTRATOR_BITSET_OFF: u64 = 0x68;
+const EXTRATOR_RESULTADOS_OFF: u64 = 0xa8;
+const EXTRATOR_FLAGS_OFF: u64 = 0xb8;
+
+/// `EntityBuilder`: extrator da entidade `+0x10`, template `+0x90`, flags `+0x110`; `appearance` `+0x20`/`+0x30`/`+0x40`; `appearances` `+0x80`.
+const BUILDER_EXTRATOR_OFF: u64 = 0x10;
+const BUILDER_TEMPLATE_OFF: u64 = 0x90;
+const BUILDER_FLAGS_OFF: u64 = 0x110;
+
+unsafe fn flags_do_extrator(ext: u64) -> [u8; 5] {
+    let mut f = [0u8; 5];
+    std::ptr::copy_nonoverlapping((ext + EXTRATOR_FLAGS_OFF) as *const u8, f.as_mut_ptr(), 5);
+    f
+}
+
 pub(crate) unsafe fn extrair_pacote_do_template(template: u64, flags: [u8; 5], bitset: Option<Vec<u32>>, saida: *mut [u64; 2]) -> Option<usize> {
     if template == 0 {
         return None;
     }
-    extrair_pacote_do_cabecalho(template + 0x1d8, flags, bitset, saida)
+    extrair_pacote_do_cabecalho(template + TEMPLATE_PACOTE_OFF, flags, bitset, saida)
 }
 
-/// Controle da extração própria: template do builder com as flags e o bitset do extrator dele contra os resultados do motor. Devolve se bateu; o estado
-/// global (`CONTROLE_DA_EXTRACAO`) é gravado só pelo 1º builder com resultados.
+/// Controle da extração própria: o próprio template extraído com as flags e o bitset do motor dá o mesmo número de objetos, com a mesma
+/// classe em cada posição e instâncias novas. Sem isso, mesclar no resultado do motor seria trocar objetos de um pacote lido de outro jeito.
 pub(crate) unsafe fn conferir_extracao_propria(ext: u64, tpl: u64, flags: [u8; 5]) -> bool {
-    let ler32 = |o: u64| ((ext + o) as *const u32).read_unaligned();
-    let (bits, palavras, objetos) = (((ext + 0x68) as *const u64).read_unaligned(), ler32(0x74) as usize, ler32(0x78) as usize);
-    let bitset: Option<Vec<u32>> = (bits != 0 && palavras > 0 && palavras <= 0x800 && crate::memoria::is_readable(bits as *const c_void, palavras * 4))
-        .then(|| (0..palavras).map(|i| ((bits as usize + i * 4) as *const u32).read_unaligned()).collect());
-    let motor = handles_do_dynarray((ext + 0xa8) as *const u8);
-    let mut meu = [0u64; 2];
-    let tam = extrair_pacote_do_template(tpl, flags, bitset.clone(), &mut meu);
-    let proprio = if tam.is_some() { handles_do_dynarray(meu.as_ptr() as *const u8) } else { Vec::new() };
-    let classe = |h: &[u64; 2]| if h[0] == 0 { 0 } else { crate::rtti::type_name_hash(crate::rtti::class_of(h[0] as *mut c_void)) };
-    let iguais = proprio.iter().zip(&motor).filter(|(a, b)| classe(a) == classe(b)).count();
-    let distintas = proprio.iter().zip(&motor).all(|(a, b)| a[0] == 0 || a[0] != b[0]);
-    let ok = !motor.is_empty() && proprio.len() == motor.len() && iguais == motor.len() && distintas;
-    if tam.is_some() {
-        soltar_dynarray_de_handles(meu.as_mut_ptr() as *mut u8);
+    let bits = (ext + EXTRATOR_BITSET_OFF) as *const u64;
+    let palavras = ((ext + EXTRATOR_BITSET_OFF + 0x0c) as *const u32).read_unaligned() as usize;
+    let dados = bits.read_unaligned() as *const u32;
+    let bitset = ((1..=0x800).contains(&palavras) && !dados.is_null() && crate::memoria::is_readable(dados as *const c_void, palavras * 4))
+        .then(|| std::slice::from_raw_parts(dados, palavras).to_vec());
+    let motor = handles_do_dynarray((ext + EXTRATOR_RESULTADOS_OFF) as *const u8);
+    let mut saida = [0u64; 2];
+    let extraiu = extrair_pacote_do_template(tpl, flags, bitset, &mut saida).is_some();
+    let proprio = handles_do_dynarray(saida.as_ptr() as *const u8);
+    let classe = |h: &[u64; 2]| if h[0] == 0 { std::ptr::null_mut() } else { rtti::class_of(h[0] as *mut c_void) };
+    let ok = extraiu
+        && !motor.is_empty()
+        && proprio.len() == motor.len()
+        && motor.iter().zip(&proprio).all(|(m, p)| classe(m) == classe(p) && (p[0] == 0 || p[0] != m[0]));
+    if saida[0] != 0 {
+        soltar_dynarray_de_handles(saida.as_mut_ptr() as *mut u8);
     }
-    crate::veredito_dev!(
-        "[a51f] controle da extração no template {tpl:#x}: motor {} objeto(s), própria {tam:?} ({iguais} com a mesma classe, instâncias distintas {distintas}), bitset do extrator {} palavra(s) de {objetos} objeto(s), flags {flags:02x?}; extracao-ok={ok}",
-        motor.len(),
-        bitset.as_ref().map_or(0, |b| b.len())
-    );
     ok
 }
 
-/// Se a mescla 51f deste builder segue, pelo controle global lido depois do CAS. Com o controle `EmCurso` (o 1º builder ainda extrai), o builder confere a
-/// extração no próprio template: recusar monta a entidade sem o patch até a próxima carga, e esperar prenderia o worker do pool atrás da extração de outro
-/// job. `Pendente` não acontece depois do CAS e recusa como `Falhou`.
+/// `Ok` mescla sem conferir; `EmCurso` (outro builder ainda conferindo) confere no próprio template em vez de recusar, para a entidade não sair
+/// sem o patch até a próxima carga; `Pendente`/`Falhou` não mesclam.
 pub(crate) fn mescla_no_builder_segue(controle: ControleDaExtracao, conferir_no_proprio: impl FnOnce() -> bool) -> bool {
     match controle {
         ControleDaExtracao::Ok => true,
@@ -6850,109 +5437,102 @@ pub(crate) fn mescla_no_builder_segue(controle: ControleDaExtracao, conferir_no_
     }
 }
 
-/// 51f com o builder travado: mescla nos resultados do extrator da entidade os patches da tabela cujo alvo é o template do builder. Devolve o tamanho dos
-/// resultados antes da mescla.
+/// Amostra de teste de uma mescla com substituídos (até 8 por lista).
+unsafe fn amostrar_mescla(lista: &Mutex<Vec<crate::diagnostico::A51fAmostra>>, builder: u64, template: u64, resultados: u64, patch: u64, antes: usize, plano: &[PassoDaMescla]) {
+    let substituidos = plano.iter().filter(|p| matches!(p, PassoDaMescla::Substitui(_))).count();
+    if substituidos == 0 {
+        return;
+    }
+    let Ok(mut g) = lista.try_lock() else { return };
+    if g.len() >= 8 {
+        return;
+    }
+    let (r, p) = (handles_do_dynarray(resultados as *const u8), handles_do_dynarray(patch as *const u8));
+    g.push(crate::diagnostico::A51fAmostra {
+        builder,
+        template,
+        antes,
+        depois: r.len(),
+        substituidos,
+        anexados: plano.iter().filter(|p| **p == PassoDaMescla::Anexa).count(),
+        pares: pares_substituidos(plano, &r, &p).into_iter().take(8).collect(),
+    });
+}
+
+/// `components` e `entity` do `resource.patch` nos resultados do extrator da entidade, com o builder travado e antes da original do job.
+/// Devolve o tamanho dos resultados antes da mescla.
 pub(crate) unsafe fn mesclar_no_builder_travado(builder: u64) -> usize {
-    if !crate::memoria::is_readable(builder as *const c_void, 0x118) {
+    if builder == 0 || !crate::memoria::is_readable(builder as *const c_void, 0x118) {
         return 0;
     }
-    let ler = |o: u64| ((builder + o) as *const u64).read_unaligned();
-    let (ext, tpl) = (ler(0x10), ler(0x90));
-    let n = JOBS_DO_BUILDER_VISTOS.fetch_add(1, Ordering::Relaxed);
-    let legivel = ext != 0 && crate::memoria::is_readable(ext as *const c_void, 0x120);
-    let resultados = (ext + 0xa8) as *mut u8;
-    let tamanho = || ((ext + 0xb4) as *const u32).read_unaligned() as usize;
-    let tam = if legivel { tamanho() } else { 0 };
-    let flags: [u8; 5] = if legivel { core::array::from_fn(|i| ((ext + 0xb8 + i as u64) as *const u8).read()) } else { [0; 5] };
-    let caminho = hash_do_caminho_do_recurso(tpl);
-    if n < 12 {
-        crate::veredito_dev!(
-            "[a51f] job de componentes #{n}: builder {builder:#x}, template {tpl:#x} (caminho {caminho:#018x}), extrator {ext:#x} com {tam} objeto(s), flags do extrator {flags:02x?}, flags do builder {:#04x}",
-            ((builder + 0x110) as *const u8).read()
-        );
+    let ext = ((builder + BUILDER_EXTRATOR_OFF) as *const u64).read_unaligned();
+    if ext == 0 || !crate::memoria::is_readable(ext as *const c_void, 0x120) {
+        return 0;
     }
-    if !legivel || tpl == 0 || tam == 0 {
+    let resultados = ext + EXTRATOR_RESULTADOS_OFF;
+    let tam = ((resultados + 0x0c) as *const u32).read_unaligned() as usize;
+    let tpl = ((builder + BUILDER_TEMPLATE_OFF) as *const u64).read_unaligned();
+    if tpl == 0 || tam == 0 {
         return tam;
     }
+    let flags = flags_do_extrator(ext);
+    // O 1º builder com resultados decide o controle pelo processo inteiro.
     if CONTROLE_DA_EXTRACAO
-        .compare_exchange(ControleDaExtracao::Pendente as u8, ControleDaExtracao::EmCurso as u8, Ordering::Relaxed, Ordering::Relaxed)
+        .compare_exchange(ControleDaExtracao::Pendente as u8, ControleDaExtracao::EmCurso as u8, Ordering::AcqRel, Ordering::Relaxed)
         .is_ok()
     {
         let ok = conferir_extracao_propria(ext, tpl, flags);
-        CONTROLE_DA_EXTRACAO.store(if ok { ControleDaExtracao::Ok } else { ControleDaExtracao::Falhou } as u8, Ordering::Relaxed);
+        CONTROLE_DA_EXTRACAO.store(if ok { ControleDaExtracao::Ok } else { ControleDaExtracao::Falhou } as u8, Ordering::Release);
+        crate::veredito_dev!("[a51f] controle da extração própria no template {tpl:#x}: {tam} objeto(s); extracao-ok={ok}");
     }
-    let instancia = |t: [u64; 2]| -> u64 {
-        if t[0] != 0 && crate::register::status_do_token(t[0]) == 1 && crate::memoria::is_readable((t[0] + 0x28) as *const c_void, 8) {
-            ((t[0] + 0x28) as *const u64).read_unaligned()
-        } else {
-            0
-        }
-    };
-    let patches: Vec<(u64, [u64; 2], u32)> = match PATCHES_DE_RECURSO.try_read() {
+    let caminho = crate::jogo::recursos::hash_do_caminho_do_recurso(tpl);
+    let patches: Vec<([u64; 2], u32)> = match PATCHES_DE_RECURSO.try_read() {
         Ok(g) => g
-            .do_alvo_ou_da_instancia((caminho != 0).then_some(caminho), tpl, |p| p.props & (A17_PROP_COMPONENTS | A17_PROP_ENTITY) != 0, instancia)
-            .map(|p| (p.patch, p.token, p.props))
+            .do_alvo_ou_da_instancia(Some(caminho), tpl, |p| p.props & (A17_PROP_COMPONENTS | A17_PROP_ENTITY) != 0, |t| recurso_do_token(t))
+            .map(|p| (p.token, p.props))
             .collect(),
         Err(_) => return tam,
     };
     if patches.is_empty() {
         return tam;
     }
-    let controle = ControleDaExtracao::do_byte(CONTROLE_DA_EXTRACAO.load(Ordering::Relaxed));
+    let controle = ControleDaExtracao::do_byte(CONTROLE_DA_EXTRACAO.load(Ordering::Acquire));
     if !mescla_no_builder_segue(controle, || conferir_extracao_propria(ext, tpl, flags)) {
-        if crate::primeiras(&MESCLAS_NO_BUILDER_RECUSADAS, 8) {
-            crate::veredito_dev!("[a51f] template {tpl:#x} com {} patch(es), mescla recusada: controle da extração {controle:?}", patches.len());
-        }
+        MESCLAS_NO_BUILDER_RECUSADAS.fetch_add(1, Ordering::Relaxed);
         return tam;
     }
-    let raiz = |t: u64| -> i16 { if crate::memoria::is_readable((t + 0x1d8) as *const c_void, 2) { ((t + 0x1d8) as *const i16).read_unaligned() } else { -1 } };
-    for (patch, pt, props) in patches {
-        let ptpl = instancia(pt);
+    // `rootIndex` (i16) no começo do pacote; -1 = sem raiz, e a troca de raiz não acontece.
+    let raiz = |t: u64| {
+        let p = (t + TEMPLATE_PACOTE_OFF) as *const i16;
+        if crate::memoria::is_readable(p as *const c_void, 2) { p.read_unaligned() } else { -1 }
+    };
+    let raiz_r = raiz(tpl);
+    for (token, props) in patches {
+        let ptpl = recurso_do_token(token);
         if ptpl == 0 {
-            A17_PATCHES_NAO_PRONTOS.fetch_add(1, Ordering::Relaxed);
+            crate::diagnostico::A17_PATCHES_NAO_PRONTOS.fetch_add(1, Ordering::Relaxed);
             continue;
         }
-        let antes = tamanho();
-        let mut p = [0u64; 2];
-        let Some(tam_p) = extrair_pacote_do_template(ptpl, flags, None, &mut p) else {
-            crate::veredito_dev!("[a51f] patch {patch:#018x} sem pacote extraível (template {ptpl:#x})");
+        let mut saida = [0u64; 2];
+        if extrair_pacote_do_template(ptpl, flags, None, &mut saida).is_none() {
             continue;
-        };
-        // A ordem da referência: `MergeComponents`, depois `MergeEntity`.
-        let plano = if props & A17_PROP_COMPONENTS != 0 { mesclar_componentes(resultados, p.as_mut_ptr() as *mut u8, false) } else { Some(Vec::new()) };
-        let troca = if props & A17_PROP_ENTITY != 0 { mesclar_entidade(resultados, p.as_mut_ptr() as *mut u8, raiz(tpl), raiz(ptpl)) } else { None };
-        let depois = tamanho();
-        let (s, x) = plano.as_ref().map_or((0, 0), |pl| {
-            (pl.iter().filter(|q| matches!(q, PassoDaMescla::Substitui(_))).count(), pl.iter().filter(|q| **q == PassoDaMescla::Anexa).count())
-        });
-        if let Some(pl) = plano.as_ref() {
-            let pares = pares_substituidos(pl, &handles_do_dynarray(resultados), &handles_do_dynarray(p.as_ptr() as *const u8));
-            if let Ok(mut g) = A51F_AMOSTRAS.try_lock() {
-                if g.len() < 8 && !pares.is_empty() {
-                    g.push(A51fAmostra { builder, template: tpl, antes, depois, substituidos: s, anexados: x, pares: pares.into_iter().take(8).collect() });
-                }
+        }
+        let patch = saida.as_mut_ptr() as *mut u8;
+        let antes = ((resultados + 0x0c) as *const u32).read_unaligned() as usize;
+        if props & A17_PROP_COMPONENTS != 0 {
+            if let Some(plano) = mesclar_componentes(resultados as *mut u8, patch, false) {
+                amostrar_mescla(&crate::diagnostico::A51F_AMOSTRAS, builder, tpl, resultados, patch as u64, antes, &plano);
             }
         }
-        soltar_dynarray_de_handles(p.as_mut_ptr() as *mut u8);
-        if crate::primeiras(&MESCLAS_NO_BUILDER_APLICADAS, 16) {
-            crate::veredito_dev!(
-                "[a51f] patch {patch:#018x} no builder {builder:#x} (template {tpl:#x}): {tam_p} objeto(s) do patch, resultados {antes} → {depois}, {s} substituído(s), {x} anexado(s), raiz trocada {troca:?}{}",
-                if plano.is_none() { ", mescla recusada" } else { "" }
-            );
+        if props & A17_PROP_ENTITY != 0 {
+            mesclar_entidade(resultados as *mut u8, patch, raiz_r, raiz(ptpl));
         }
+        soltar_dynarray_de_handles(patch);
+        MESCLAS_NO_BUILDER_APLICADAS.fetch_add(1, Ordering::Relaxed);
     }
     tam
 }
 
-// ===== ArchiveXL `#51` 51f-2 — `PatchPackageResults(AppearanceResource)` nos extratores de aparência do `EntityBuilder` (2026-09-12) =====
-// No mesmo job do builder, a referência aplica aos resultados do extrator de cada aparência (`appearance`, se a flag `ExtractAppearance` está ligada, e cada
-// item de `appearances`, com `ExtractAppearances`) os componentes da definição homônima de cada `.app` de patch do recurso da aparência. O `compiledData`
-// da definição do patch (buffer diferido em `+0xf0`) precisa estar carregado e com o cabeçalho lido em `+0x148`: a referência pede a carga e espera na
-// fila. Aqui a carga é pedida no tick, com o token do patch pronto (`DeferredDataBuffer/CreateLoadingJobs` `0x101215524`, handle retido), e o cabeçalho é
-// lido no hook quando falta, como o job `AppearanceDefinition_OpenCompiledData` (`0x1017d8d88`) lê: leitor `0x1019be2fc`, buffer `0x101074b44`, leitura
-// `0x1019be360`, cópia de 0x70 B pra `+0x148`, destrutor `0x1019be348`. A extração usa o cabeçalho da definição e as flags do extrator da aparência; a
-// mescla é a 17c sem parte. Layout de aparência do builder conferido no corpo do job: `appearance` em `+0x20` (definição), `+0x30` (recurso), `+0x40`
-// (extrator); `appearances` em `+0x80`, elemento de 0x30 B com definição `+0x00`, recurso `+0x10`, extrator `+0x20`.
 pub(crate) const APPDEF_COMPILEDDATA_OFF: u64 = 0xf0;
 
 pub(crate) const APPDEF_CABECALHO_DO_PACOTE_OFF: u64 = 0x148;
@@ -6965,10 +5545,9 @@ pub(crate) const LEITOR_DO_PACOTE_SOLTAR_VM: u64 = 0x1_019b_e348;
 
 pub(crate) static MESCLA_DE_APARENCIA_ATIVA: AtomicBool = AtomicBool::new(false);
 
-/// Definição do patch pra uma definição do alvo, como o registro do `OnAppearanceResourceLoad` da referência: a 1ª, na ordem do patch, com o mesmo nome ou sem
-/// nome (`None`, patch multi-alvo).
+/// 1ª definição do patch, na ordem do patch, com o nome do alvo ou sem nome (sem nome vale para qualquer alvo).
 pub(crate) fn definicao_do_patch(nomes: &[u64], alvo: u64) -> Option<usize> {
-    nomes.iter().position(|n| *n == alvo || *n == 0)
+    nomes.iter().position(|&n| n == 0 || n == alvo)
 }
 
 pub(crate) static MESCLAS_DE_APARENCIA_APLICADAS: AtomicU64 = AtomicU64::new(0);
@@ -6981,40 +5560,36 @@ pub(crate) static CABECALHOS_DE_DEFINICAO_LIDOS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static LEITURA_DE_DEFINICAO: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Objetos de um cabeçalho de pacote de 0x70 B: `(fim - início) / 8` dos ponteiros em `+0x20`/`+0x28`; 0 com cabeçalho vazio ou invertido.
+/// Objetos do pacote pelos ponteiros de início (`+0x20`) e fim (`+0x28`), 8 B cada.
 pub(crate) fn objetos_do_cabecalho(cabecalho: &[u8; 0x70]) -> usize {
-    let ler = |o: usize| u64::from_le_bytes([
-        cabecalho[o],
-        cabecalho[o + 1],
-        cabecalho[o + 2],
-        cabecalho[o + 3],
-        cabecalho[o + 4],
-        cabecalho[o + 5],
-        cabecalho[o + 6],
-        cabecalho[o + 7],
-    ]);
-    let (ini, fim) = (ler(0x20), ler(0x28));
-    if ini == 0 || fim < ini { 0 } else { ((fim - ini) / 8) as usize }
+    let ler = |o: usize| u64::from_le_bytes([cabecalho[o], cabecalho[o + 1], cabecalho[o + 2], cabecalho[o + 3], cabecalho[o + 4], cabecalho[o + 5], cabecalho[o + 6], cabecalho[o + 7]]);
+    let (inicio, fim) = (ler(0x20), ler(0x28));
+    if inicio == 0 || fim < inicio { 0 } else { ((fim - inicio) / 8) as usize }
 }
 
-/// Cópia do cabeçalho da definição (`+0x148`).
+/// Cópia do cabeçalho do pacote da definição (`+0x148`); zerado com a definição ilegível.
 pub(crate) unsafe fn cabecalho_da_definicao(def: u64) -> [u8; 0x70] {
     let mut c = [0u8; 0x70];
-    std::ptr::copy_nonoverlapping((def + APPDEF_CABECALHO_DO_PACOTE_OFF) as *const u8, c.as_mut_ptr(), 0x70);
+    let origem = def.wrapping_add(APPDEF_CABECALHO_DO_PACOTE_OFF);
+    if def != 0 && crate::memoria::is_readable(origem as *const c_void, 0x70) {
+        std::ptr::copy_nonoverlapping(origem as *const u8, c.as_mut_ptr(), 0x70);
+    }
     c
 }
 
-/// Dados e tamanho do `compiledData` carregado da definição (`DataBuffer` em `+0x20` do buffer diferido); `None` sem dados.
+/// `(dados, tamanho)` do `DataBuffer` do `compiledData` da definição; `None` sem dados carregados.
 pub(crate) unsafe fn compileddata_da_definicao(def: u64) -> Option<(u64, u32)> {
-    let obj = ((def + APPDEF_COMPILEDDATA_OFF + 0x20) as *const u64).read_unaligned();
-    if obj == 0 || !crate::memoria::is_readable(obj as *const c_void, 0x10) {
+    let buffer = def.wrapping_add(APPDEF_COMPILEDDATA_OFF + 0x20);
+    if def == 0 || !crate::memoria::is_readable(buffer as *const c_void, 0x0c) {
         return None;
     }
-    let (dados, tam) = ((obj as *const u64).read_unaligned(), ((obj + 8) as *const u32).read_unaligned());
-    (dados != 0 && tam > 0).then_some((dados, tam))
+    let dados = (buffer as *const u64).read_unaligned();
+    let tamanho = ((buffer + 8) as *const u32).read_unaligned();
+    (dados != 0 && tamanho != 0).then_some((dados, tamanho))
 }
 
-/// Cabeçalho da definição lido do `compiledData` carregado quando ainda está vazio, como o `OpenCompiledData` do motor. `true` com o cabeçalho pronto.
+/// Garante o cabeçalho do pacote da definição: se ainda não tem objetos, lê o do `compiledData` carregado pelo leitor do motor e grava em
+/// `+0x148`. Uma leitura por vez (a definição é do recurso compartilhado), conferindo de novo depois de travar.
 pub(crate) unsafe fn abrir_definicao(def: u64) -> bool {
     if def == 0 || !crate::memoria::is_readable(def as *const c_void, 0x1c0) {
         return false;
@@ -7022,111 +5597,88 @@ pub(crate) unsafe fn abrir_definicao(def: u64) -> bool {
     if objetos_do_cabecalho(&cabecalho_da_definicao(def)) > 0 {
         return true;
     }
-    let Ok(_trava) = LEITURA_DE_DEFINICAO.lock() else { return false };
+    let _trava = LEITURA_DE_DEFINICAO.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if objetos_do_cabecalho(&cabecalho_da_definicao(def)) > 0 {
         return true;
     }
-    let Some((dados, tam)) = compileddata_da_definicao(def) else {
+    let Some((dados, tamanho)) = compileddata_da_definicao(def) else {
         MESCLAS_DE_APARENCIA_SEM_DADOS.fetch_add(1, Ordering::Relaxed);
         return false;
     };
+    // Leitor local do motor (0x88 B; folga até 0x100).
     let mut leitor = [0u8; 0x100];
-    let mut local = [0u8; 0x70];
+    let mut cabecalho = [0u8; 0x70];
     let criar: unsafe extern "C" fn(*mut u8) = std::mem::transmute(crate::rebase(LEITOR_DO_PACOTE_CRIAR_VM));
     let buffer: unsafe extern "C" fn(*mut u8, u64, u64) = std::mem::transmute(crate::rebase(crate::jogo::recursos::LEITOR_BUFFER_VM));
     let soltar: unsafe extern "C" fn(*mut u8) = std::mem::transmute(crate::rebase(LEITOR_DO_PACOTE_SOLTAR_VM));
     criar(leitor.as_mut_ptr());
-    buffer(leitor.as_mut_ptr(), dados, tam as u64);
+    buffer(leitor.as_mut_ptr(), dados, u64::from(tamanho));
     core::arch::asm!(
         "blr {f}",
         f = in(reg) crate::rebase(LEITOR_DO_PACOTE_LER_VM) as u64,
         in("x0") leitor.as_mut_ptr() as u64,
-        in("x8") local.as_mut_ptr() as u64,
+        in("x8") cabecalho.as_mut_ptr() as u64,
         clobber_abi("C"),
     );
-    let pronto = objetos_do_cabecalho(&local) > 0;
-    if pronto {
-        std::ptr::copy_nonoverlapping(local.as_ptr(), (def + APPDEF_CABECALHO_DO_PACOTE_OFF) as *mut u8, 0x70);
-        CABECALHOS_DE_DEFINICAO_LIDOS.fetch_add(1, Ordering::Relaxed);
-    }
     soltar(leitor.as_mut_ptr());
-    pronto
+    if objetos_do_cabecalho(&cabecalho) == 0 {
+        return false;
+    }
+    std::ptr::copy_nonoverlapping(cabecalho.as_ptr(), (def + APPDEF_CABECALHO_DO_PACOTE_OFF) as *mut u8, 0x70);
+    CABECALHOS_DE_DEFINICAO_LIDOS.fetch_add(1, Ordering::Relaxed);
+    true
 }
 
-/// 51f-2 com o builder travado: componentes da definição homônima de cada `.app` de patch do recurso nos resultados do extrator de uma aparência; com
-/// `identidade` (teste), o próprio recurso entra como patch.
+/// `components` dos patches `.app` numa aparência do builder (definição `def`, recurso `.app` `res`, extrator `ext`): a definição do patch com o
+/// nome da do alvo (ou sem nome) tem o pacote extraído com as flags do extrator da aparência e mesclado nos resultados dele. Com `identidade`
+/// (teste) o próprio recurso entra como patch.
 pub(crate) unsafe fn mesclar_patch_na_aparencia(builder: u64, tpl: u64, def: u64, res: u64, ext: u64, identidade: bool) {
-    if def == 0 || res == 0 || ext == 0 || !crate::memoria::is_readable(ext as *const c_void, 0x120) || !crate::memoria::is_readable(def as *const c_void, 0x1c0) {
+    if def == 0 || res == 0 || ext == 0 || !crate::memoria::is_readable(ext as *const c_void, 0x120) || !crate::memoria::is_readable(def as *const c_void, 0x40) {
         return;
     }
-    let caminho = hash_do_caminho_do_recurso(res);
-    let nome = ((def + APPDEF_NAME_OFF as u64) as *const u64).read_unaligned();
-    let instancia = |t: [u64; 2]| -> u64 {
-        if t[0] != 0 && crate::register::status_do_token(t[0]) == 1 && crate::memoria::is_readable((t[0] + 0x28) as *const c_void, 8) {
-            ((t[0] + 0x28) as *const u64).read_unaligned()
-        } else {
-            0
-        }
-    };
-    let mut patches: Vec<(u64, u64)> = match PATCHES_DE_RECURSO.try_read() {
-        Ok(g) => g.do_alvo(caminho).filter(|p| p.app && p.props & A17_PROP_COMPONENTS != 0).map(|p| (p.patch, instancia(p.token))).filter(|(_, r)| *r != 0).collect(),
+    let caminho = crate::jogo::recursos::hash_do_caminho_do_recurso(res);
+    let mut recursos: Vec<u64> = match PATCHES_DE_RECURSO.try_read() {
+        Ok(g) => g.apps().filter(|p| p.alvo == caminho && p.props & A17_PROP_COMPONENTS != 0).map(|p| recurso_do_token(p.token)).filter(|r| *r != 0).collect(),
         Err(_) => return,
     };
     if identidade {
-        patches.push((caminho, res));
+        recursos.push(res);
     }
-    let resultados = (ext + 0xa8) as *mut u8;
-    let tamanho = || ((ext + 0xb4) as *const u32).read_unaligned() as usize;
-    let flags: [u8; 5] = core::array::from_fn(|i| ((ext + 0xb8 + i as u64) as *const u8).read());
-    for (patch, pres) in patches {
-        let pdef = definicoes_do_app(pres as *const u8)
-            .and_then(|d| {
-                let sem_nome = A51F2_TESTE_NONE.load(Ordering::Relaxed);
-                let nomes: Vec<u64> = d.iter().map(|h| if sem_nome { 0 } else { ((h[0] + APPDEF_NAME_OFF as u64) as *const u64).read_unaligned() }).collect();
-                definicao_do_patch(&nomes, nome).map(|j| d[j][0])
-            })
-            .unwrap_or(0);
-        if pdef == 0 {
+    let nome_do_alvo = ((def + APPDEF_NAME_OFF as u64) as *const u64).read_unaligned();
+    let sem_nome = crate::diagnostico::A51F2_TESTE_NONE.load(Ordering::Relaxed);
+    let flags = flags_do_extrator(ext);
+    let resultados = ext + EXTRATOR_RESULTADOS_OFF;
+    for recurso in recursos {
+        let Some(definicoes) = definicoes_do_app(recurso as *const u8) else { continue };
+        let nomes: Vec<u64> = definicoes
+            .iter()
+            .map(|h| if sem_nome || h[0] == 0 || !crate::memoria::is_readable((h[0] + APPDEF_NAME_OFF as u64) as *const c_void, 8) { 0 } else { ((h[0] + APPDEF_NAME_OFF as u64) as *const u64).read_unaligned() })
+            .collect();
+        let Some(i) = definicao_do_patch(&nomes, nome_do_alvo) else {
             MESCLAS_DE_APARENCIA_SEM_DEFINICAO.fetch_add(1, Ordering::Relaxed);
             continue;
-        }
+        };
+        let pdef = definicoes[i][0];
         if !abrir_definicao(pdef) {
             continue;
         }
-        let antes = tamanho();
-        let mut p = [0u64; 2];
-        let Some(tam_p) = extrair_pacote_do_cabecalho(pdef + APPDEF_CABECALHO_DO_PACOTE_OFF, flags, None, &mut p) else {
-            crate::veredito_dev!("[a51f2] definição {nome:#018x} do patch {patch:#018x} sem pacote extraível");
+        let mut saida = [0u64; 2];
+        if extrair_pacote_do_cabecalho(pdef + APPDEF_CABECALHO_DO_PACOTE_OFF, flags, None, &mut saida).is_none() {
             continue;
-        };
-        let hp = handles_do_dynarray(p.as_ptr() as *const u8);
-        let plano = mesclar_componentes(resultados, p.as_mut_ptr() as *mut u8, false);
-        let depois = tamanho();
-        let (s, x) = plano.as_ref().map_or((0, 0), |pl| {
-            (pl.iter().filter(|q| matches!(q, PassoDaMescla::Substitui(_))).count(), pl.iter().filter(|q| **q == PassoDaMescla::Anexa).count())
-        });
-        if let Some(pl) = plano.as_ref() {
-            let mut pares = pares_substituidos(pl, &handles_do_dynarray(resultados), &handles_do_dynarray(p.as_ptr() as *const u8));
-            pares.extend(instancias_anexadas(pl, &hp).into_iter().map(|i| (i, 0)));
-            if let Ok(mut g) = A51F2_AMOSTRAS.try_lock() {
-                if g.len() < 8 && !pares.is_empty() {
-                    g.push(A51fAmostra { builder, template: tpl, antes, depois, substituidos: s, anexados: x, pares: pares.into_iter().take(8).collect() });
-                }
-            }
         }
+        let patch = saida.as_mut_ptr() as *mut u8;
+        let antes = ((resultados + 0x0c) as *const u32).read_unaligned() as usize;
+        if let Some(plano) = mesclar_componentes(resultados as *mut u8, patch, false) {
+            MESCLAS_DE_APARENCIA_APLICADAS.fetch_add(1, Ordering::Relaxed);
+            amostrar_mescla(&crate::diagnostico::A51F2_AMOSTRAS, builder, tpl, resultados, patch as u64, antes, &plano);
+        }
+        soltar_dynarray_de_handles(patch);
         if identidade {
-            if let Ok(mut g) = A51F2_RECURSOS.try_lock() {
-                if g.len() < 16 {
-                    g.push([tpl, res, nome]);
+            if let Ok(mut g) = crate::diagnostico::A51F2_RECURSOS.try_lock() {
+                if g.len() < 64 {
+                    g.push([tpl, res, nome_do_alvo]);
                 }
             }
-        }
-        soltar_dynarray_de_handles(p.as_mut_ptr() as *mut u8);
-        if crate::primeiras(&MESCLAS_DE_APARENCIA_APLICADAS, 16) {
-            crate::veredito_dev!(
-                "[a51f2] patch {patch:#018x} na aparência {nome:#018x} do builder {builder:#x} (template {tpl:#x}, .app {caminho:#018x}): {tam_p} objeto(s) do patch, resultados {antes} → {depois}, {s} substituído(s), {x} anexado(s){}",
-                if plano.is_none() { ", mescla recusada" } else { "" }
-            );
         }
     }
 }
@@ -7135,36 +5687,39 @@ pub(crate) unsafe fn mesclar_patch_na_aparencia(builder: u64, tpl: u64, def: u64
 const BUILDER_EXTRAI_APARENCIA: u8 = 1 << 2;
 const BUILDER_EXTRAI_APARENCIAS: u8 = 1 << 3;
 
-/// 51f-2 no builder travado: a `appearance` (flag `ExtractAppearance`, bit 2 de `+0x110`) e cada item de `appearances` (`ExtractAppearances`, bit 3).
+/// Item de `appearances` do builder (0x30 B): definição `+0x00`, recurso `+0x10`, extrator `+0x20`.
+const BUILDER_APARENCIAS_OFF: u64 = 0x80;
+const BUILDER_APARENCIA_PASSO: u64 = 0x30;
+
+/// As aparências que o builder extrai (`appearance` com o bit 2, cada uma de `appearances` com o bit 3) como `(definição, recurso, extrator)`.
+unsafe fn aparencias_do_builder(builder: u64) -> (Option<[u64; 3]>, Vec<[u64; 3]>) {
+    let flags = ((builder + BUILDER_FLAGS_OFF) as *const u8).read();
+    let ler = |p: u64| (p as *const u64).read_unaligned();
+    let unica = (flags & BUILDER_EXTRAI_APARENCIA != 0).then(|| [ler(builder + 0x20), ler(builder + 0x30), ler(builder + 0x40)]);
+    let mut lista = Vec::new();
+    if flags & BUILDER_EXTRAI_APARENCIAS != 0 {
+        let dados = ler(builder + BUILDER_APARENCIAS_OFF);
+        let n = ((builder + BUILDER_APARENCIAS_OFF + 0x0c) as *const u32).read_unaligned() as u64;
+        if dados != 0 && (1..=64).contains(&n) && crate::memoria::is_readable(dados as *const c_void, (n * BUILDER_APARENCIA_PASSO) as usize) {
+            lista = (0..n).map(|i| dados + i * BUILDER_APARENCIA_PASSO).map(|e| [ler(e), ler(e + 0x10), ler(e + 0x20)]).collect();
+        }
+    }
+    (unica, lista)
+}
+
 pub(crate) unsafe fn mesclar_patches_nas_aparencias(builder: u64) {
-    if !MESCLA_DE_APARENCIA_ATIVA.load(Ordering::Relaxed) || !crate::memoria::is_readable(builder as *const c_void, 0x118) {
+    if !MESCLA_DE_APARENCIA_ATIVA.load(Ordering::Relaxed) || builder == 0 || !crate::memoria::is_readable(builder as *const c_void, 0x118) {
         return;
     }
-    let ler = |o: u64| ((builder + o) as *const u64).read_unaligned();
-    let tpl = ler(0x90);
-    let flags = ((builder + 0x110) as *const u8).read();
-    let identidade = A51F2_TESTE.load(Ordering::Relaxed) && a51f_teste_hashes().contains(&hash_do_caminho_do_recurso(tpl));
-    if flags & BUILDER_EXTRAI_APARENCIA != 0 {
-        mesclar_patch_na_aparencia(builder, tpl, ler(0x20), ler(0x30), ler(0x40), identidade);
-    }
-    if flags & BUILDER_EXTRAI_APARENCIAS != 0 {
-        let (b, n, _) = dynarray_no_campo(builder as *const u8, 0x80);
-        if n > 0 && n <= 64 && crate::memoria::is_readable(b as *const c_void, n * 0x30) {
-            for i in 0..n {
-                let e = b.add(i * 0x30) as u64;
-                let r = |o: u64| ((e + o) as *const u64).read_unaligned();
-                mesclar_patch_na_aparencia(builder, tpl, r(0x00), r(0x10), r(0x20), identidade);
-            }
-        }
+    let tpl = ((builder + BUILDER_TEMPLATE_OFF) as *const u64).read_unaligned();
+    let identidade = crate::diagnostico::A51F2_TESTE.load(Ordering::Relaxed)
+        && crate::diagnostico::a51f_teste_hashes().contains(&crate::jogo::recursos::hash_do_caminho_do_recurso(tpl));
+    let (unica, lista) = aparencias_do_builder(builder);
+    for [def, res, ext] in unica.into_iter().chain(lista) {
+        mesclar_patch_na_aparencia(builder, tpl, def, res, ext, identidade);
     }
 }
 
-// ===== ArchiveXL `#51` 51f-3 — `IncludeAppearanceParts` no job de componentes do `EntityBuilder` (2026-09-12) =====
-// A referência, antes do `PatchPackageResults`, inclui nos resultados do extrator de cada aparência do builder os componentes dos templates de `partsValues`
-// da definição quando ela tem a tag `AppearanceParts` no `visualTags`, ou em todas quando o schema de tags do template do builder tem a tag: carrega cada
-// parte (`LoadAsync` + espera do job), extrai o pacote do template da parte com as flags do extrator da aparência e mescla como parte (componente externo
-// novo fica de fora). Aqui o token da parte é pedido uma vez e retido, e a espera é a da 51a (até 500 ms) no lugar da junção de job — parte que não ficou
-// pronta sai daquela montagem e é contada. Liga com qualquer linha na tabela, sem depender de patch.
 pub(crate) static INCLUSAO_DE_PARTES_ATIVA: AtomicBool = AtomicBool::new(false);
 
 /// Hash do `CName` `AppearanceParts` (FNV-1a 64 do texto, como o construtor de `CName`).
@@ -7173,181 +5728,146 @@ pub(crate) fn tag_appearance_parts() -> u64 {
     *H.get_or_init(|| bwms_primitives::fnv1a64(b"AppearanceParts"))
 }
 
-/// Núcleo puro do `IncludeAppearanceParts`: a definição inclui as partes quando tem alguma e a tag no `visualTags`, ou quando o schema do template força.
+/// A definição inclui as partes dela se tem parte e a tag (na definição, ou forçada pelo schema de tags do template).
 pub(crate) fn definicao_inclui_partes(partes: usize, tags_definicao: &[u64], forcar: bool, tag: u64) -> bool {
     partes > 0 && (forcar || tags_definicao.contains(&tag))
 }
 
-/// Instâncias do patch que o plano anexa, com `patch` lido antes da mescla (que move os handles).
+/// Instâncias dos objetos anexados, lidas do patch ANTES da mescla (depois dela a vaga do anexado fica nula).
 pub(crate) fn instancias_anexadas(plano: &[PassoDaMescla], patch: &[[u64; 2]]) -> Vec<u64> {
-    plano.iter().enumerate().filter(|(j, p)| **p == PassoDaMescla::Anexa && *j < patch.len()).map(|(j, _)| patch[j][0]).collect()
+    plano.iter().zip(patch).filter(|(p, _)| **p == PassoDaMescla::Anexa).map(|(_, h)| h[0]).collect()
 }
 
-/// Valores de 8 B de um `DynArray` (`CName` de `TagList`, caminho de `partsValues`), até 256. O cabeçalho (0x10 B) já vem conferido por quem
-/// chama (`is_readable(def, 0x1c0)` e `is_readable(schema, 0x40)`): aqui só o buffer.
+/// Valores de 8 B de um `DynArray` (`CName` de `TagList`, caminho de `partsValues`); vazio se ilegível ou com mais de 256.
 pub(crate) unsafe fn valores_u64_do_dynarray(arr: *const u8) -> Vec<u64> {
-    if arr.is_null() {
+    if arr.is_null() || !crate::memoria::is_readable(arr as *const c_void, 0x10) {
         return Vec::new();
     }
-    let (b, n, _) = dynarray_no_campo(arr, 0);
-    if n == 0 || n > 256 || !crate::memoria::is_readable(b as *const c_void, n * 8) {
+    let dados = (arr as *const u64).read_unaligned() as *const u64;
+    let n = (arr.add(0x0c) as *const u32).read_unaligned() as usize;
+    if dados.is_null() || n == 0 || n > 256 || !crate::memoria::is_readable(dados as *const c_void, n * 8) {
         return Vec::new();
     }
-    (0..n).map(|i| (b.add(i * 8) as *const u64).read_unaligned()).collect()
+    (0..n).map(|i| dados.add(i).read_unaligned()).collect()
 }
 
-/// Token da parte pelo caminho, pedido uma vez pelo `LoadAsync` do motor (a referência pede na thread de job) e retido.
+/// Teto de tokens de parte retidos: cada um segura o template carregado.
+const TOKENS_DE_PARTE_MAX: usize = 4096;
+
+/// Token de carga da parte pelo caminho, pedido UMA vez e retido (o template fica carregado para as próximas montagens). Pedido que falha
+/// não é guardado: a próxima chamada pede de novo.
 pub(crate) unsafe fn token_da_parte(caminho: u64) -> [u64; 2] {
-    let Ok(mut g) = TOKENS_DE_PARTE.lock() else { return [0; 2] };
+    let Ok(mut g) = TOKENS_DE_PARTE.lock() else { return [0, 0] };
     if let Some((_, t)) = g.iter().find(|(c, _)| *c == caminho) {
         return *t;
     }
-    let t = token_do_path(caminho).unwrap_or([0; 2]);
-    if t[0] != 0 && g.len() < 4096 {
+    let Some(t) = crate::jogo::recursos::token_do_path(caminho).filter(|t| t[0] != 0) else { return [0, 0] };
+    if g.len() < TOKENS_DE_PARTE_MAX {
         g.push((caminho, t));
     }
     t
 }
 
-/// 51f-3 numa aparência do builder: partes da definição nos resultados do extrator dela. `teste` troca a lista pela parte de teste e força.
+/// Tamanho legível do `EntityTemplate` que a inclusão de partes lê.
+const TEMPLATE_TAMANHO_LIDO: usize = 0x248;
+
+/// Partes da definição (`partsValues`) entram nos resultados do extrator da aparência como mescla de PARTE (componente externo novo fica de
+/// fora). Parte sem template carregado é pulada: a montagem segue sem ela.
 pub(crate) unsafe fn incluir_partes_na_aparencia(builder: u64, tpl: u64, def: u64, res: u64, ext: u64, forcar: bool, teste: bool) {
-    if def == 0 || res == 0 || ext == 0 || !crate::memoria::is_readable(ext as *const c_void, 0x120) || !crate::memoria::is_readable(def as *const c_void, 0x1c0) {
+    let _ = res;
+    if def == 0 || ext == 0 || !crate::memoria::is_readable(ext as *const c_void, 0x120) || !crate::memoria::is_readable(def as *const c_void, 0x98) {
+        return;
+    }
+    let (partes, forcar) = if teste {
+        (vec![bwms_primitives::resource_path_hash(crate::diagnostico::A51B_TESTE_ALVO)], true)
+    } else {
+        (valores_u64_do_dynarray((def + APPDEF_PARTSVALUES_OFF as u64) as *const u8), forcar)
+    };
+    let tags = valores_u64_do_dynarray((def + APPDEF_VISUALTAGS_OFF as u64) as *const u8);
+    let tag = tag_appearance_parts();
+    crate::diagnostico::A51F3_DEFINICOES.fetch_add(1, Ordering::Relaxed);
+    if tags.contains(&tag) {
+        crate::diagnostico::A51F3_COM_TAG.fetch_add(1, Ordering::Relaxed);
+    }
+    if !definicao_inclui_partes(partes.len(), &tags, forcar, tag) {
+        return;
+    }
+    crate::diagnostico::A51F3_INCLUSOES.fetch_add(1, Ordering::Relaxed);
+    let flags = flags_do_extrator(ext);
+    let resultados = ext + EXTRATOR_RESULTADOS_OFF;
+    let classe = CLASSE_ENTENTITYTEMPLATE.load(Ordering::Relaxed);
+    for parte in partes {
+        crate::diagnostico::A51F3_PARTES.fetch_add(1, Ordering::Relaxed);
+        let modelo = recurso_do_patch_da_classe(token_da_parte(parte), TEMPLATE_TAMANHO_LIDO, classe) as u64;
+        if modelo == 0 {
+            crate::diagnostico::A51F3_NAO_PRONTAS.fetch_add(1, Ordering::Relaxed);
+            continue;
+        }
+        let mut saida = [0u64; 2];
+        if extrair_pacote_do_template(modelo, flags, None, &mut saida).is_none() {
+            crate::diagnostico::A51F3_SEM_PACOTE.fetch_add(1, Ordering::Relaxed);
+            continue;
+        }
+        let patch = saida.as_mut_ptr() as *mut u8;
+        let antes = ((resultados + 0x0c) as *const u32).read_unaligned() as usize;
+        if let Some(plano) = mesclar_componentes(resultados as *mut u8, patch, true) {
+            amostrar_mescla(&crate::diagnostico::A51F3_AMOSTRAS, builder, tpl, resultados, patch as u64, antes, &plano);
+        }
+        soltar_dynarray_de_handles(patch);
+    }
+}
+
+/// Inclusão de partes nas aparências que o builder extrai. O schema de tags do template com `AppearanceParts` força a inclusão em toda
+/// definição com parte.
+pub(crate) unsafe fn incluir_partes_no_builder(builder: u64) {
+    if !INCLUSAO_DE_PARTES_ATIVA.load(Ordering::Relaxed) || builder == 0 || !crate::memoria::is_readable(builder as *const c_void, 0x118) {
+        return;
+    }
+    let tpl = ((builder + BUILDER_TEMPLATE_OFF) as *const u64).read_unaligned();
+    if tpl == 0 || !crate::memoria::is_readable(tpl as *const c_void, TEMPLATE_TAMANHO_LIDO) {
         return;
     }
     let tag = tag_appearance_parts();
-    let tags = valores_u64_do_dynarray((def + APPDEF_VISUALTAGS_OFF as u64) as *const u8);
-    if tags.contains(&tag) {
-        A51F3_COM_TAG.fetch_add(1, Ordering::Relaxed);
-    }
-    let partes = if teste { vec![bwms_primitives::resource_path_hash(A51B_TESTE_ALVO)] } else { valores_u64_do_dynarray((def + APPDEF_PARTSVALUES_OFF as u64) as *const u8) };
-    if !partes.is_empty() {
-        A51F3_DEFINICOES.fetch_add(1, Ordering::Relaxed);
-    }
-    if !definicao_inclui_partes(partes.len(), &tags, forcar || teste, tag) {
-        return;
-    }
-    A51F3_INCLUSOES.fetch_add(1, Ordering::Relaxed);
-    let nome = ((def + APPDEF_NAME_OFF as u64) as *const u64).read_unaligned();
-    let resultados = (ext + 0xa8) as *mut u8;
-    let tamanho = || ((ext + 0xb4) as *const u32).read_unaligned() as usize;
-    let flags: [u8; 5] = core::array::from_fn(|i| ((ext + 0xb8 + i as u64) as *const u8).read());
-    for parte in partes {
-        let pres = recurso_do_patch_da_classe(token_da_parte(parte), 0x248, CLASSE_ENTENTITYTEMPLATE.load(Ordering::Relaxed)) as u64;
-        if pres == 0 {
-            if crate::primeiras(&A51F3_NAO_PRONTAS, 8) {
-                crate::veredito_dev!("[a51f3] parte {parte:#018x} da aparência {nome:#018x} (.app {:#018x}) não ficou pronta na espera", hash_do_caminho_do_recurso(res));
-            }
-            continue;
-        }
-        let mut p = [0u64; 2];
-        let Some(tam_p) = extrair_pacote_do_template(pres, flags, None, &mut p) else {
-            A51F3_SEM_PACOTE.fetch_add(1, Ordering::Relaxed);
-            continue;
-        };
-        let antes = tamanho();
-        let hp = handles_do_dynarray(p.as_ptr() as *const u8);
-        let plano = mesclar_componentes(resultados, p.as_mut_ptr() as *mut u8, true);
-        let depois = tamanho();
-        let (mut s, mut x) = (0usize, 0usize);
-        if let Some(pl) = plano.as_ref() {
-            A51F3_PARTES.fetch_add(1, Ordering::Relaxed);
-            let anexados = instancias_anexadas(pl, &hp);
-            s = pl.iter().filter(|q| matches!(q, PassoDaMescla::Substitui(_))).count();
-            x = anexados.len();
-            let mut pares = pares_substituidos(pl, &handles_do_dynarray(resultados), &handles_do_dynarray(p.as_ptr() as *const u8));
-            pares.extend(anexados.iter().map(|&i| (i, 0)));
-            if let Ok(mut g) = A51F3_AMOSTRAS.try_lock() {
-                if g.len() < 8 && !pares.is_empty() {
-                    g.push(A51fAmostra { builder, template: tpl, antes, depois, substituidos: s, anexados: x, pares: pares.into_iter().take(16).collect() });
-                }
-            }
-        }
-        soltar_dynarray_de_handles(p.as_mut_ptr() as *mut u8);
-        if crate::primeiras(&A51F3_LOGADAS, 16) {
-            crate::veredito_dev!(
-                "[a51f3] parte {parte:#018x} na aparência {nome:#018x} do builder {builder:#x} (template {tpl:#x}, caminho {:#018x}, .app {:#018x}): {tam_p} objeto(s) da parte, resultados {antes} → {depois}, {s} substituído(s), {x} anexado(s){}",
-                hash_do_caminho_do_recurso(tpl),
-                hash_do_caminho_do_recurso(res),
-                if plano.is_none() { ", mescla recusada" } else { "" }
-            );
-        }
-    }
-}
-
-/// 51f-3 no job do builder, antes do `PatchPackageResults` (a ordem da referência): aparência atual e lista de aparências.
-pub(crate) unsafe fn incluir_partes_no_builder(builder: u64) {
-    if !INCLUSAO_DE_PARTES_ATIVA.load(Ordering::Relaxed) || !crate::memoria::is_readable(builder as *const c_void, 0x118) {
-        return;
-    }
-    let ler = |o: u64| ((builder + o) as *const u64).read_unaligned();
-    let tpl = ler(0x90);
-    if tpl == 0 || !crate::memoria::is_readable(tpl as *const c_void, 0x248) {
-        return;
-    }
     let schema = ((tpl + TEMPLATE_VISUALTAGSSCHEMA_OFF as u64) as *const u64).read_unaligned();
-    let forcar = schema != 0
-        && crate::memoria::is_readable(schema as *const c_void, SCHEMA_VISUALTAGS_OFF + 0x10)
-        && valores_u64_do_dynarray((schema + SCHEMA_VISUALTAGS_OFF as u64) as *const u8).contains(&tag_appearance_parts());
+    let forcar = schema != 0 && valores_u64_do_dynarray((schema + SCHEMA_VISUALTAGS_OFF as u64) as *const u8).contains(&tag);
     if forcar {
-        A51F3_SCHEMAS_COM_TAG.fetch_add(1, Ordering::Relaxed);
+        crate::diagnostico::A51F3_SCHEMAS_COM_TAG.fetch_add(1, Ordering::Relaxed);
     }
-    let teste = A51F3_TESTE.load(Ordering::Relaxed) && a51f_teste_hashes().contains(&hash_do_caminho_do_recurso(tpl));
-    let flags = ((builder + 0x110) as *const u8).read();
-    let extrai_aparencia = flags & BUILDER_EXTRAI_APARENCIA != 0;
-    if extrai_aparencia {
-        incluir_partes_na_aparencia(builder, tpl, ler(0x20), ler(0x30), ler(0x40), forcar, teste);
-    }
-    // No teste só a aparência atual recebe a parte: a lista de aparências pode repetir o extrator e trocaria as instâncias da 1ª inclusão.
-    if flags & BUILDER_EXTRAI_APARENCIAS != 0 && !(teste && extrai_aparencia) {
-        let (b, n, _) = dynarray_no_campo(builder as *const u8, 0x80);
-        if n > 0 && n <= 64 && crate::memoria::is_readable(b as *const c_void, n * 0x30) {
-            for i in 0..n {
-                let e = b.add(i * 0x30) as u64;
-                let r = |o: u64| ((e + o) as *const u64).read_unaligned();
-                incluir_partes_na_aparencia(builder, tpl, r(0x00), r(0x10), r(0x20), forcar, teste);
-            }
+    let teste = crate::diagnostico::A51F3_TESTE.load(Ordering::Relaxed)
+        && crate::diagnostico::a51f_teste_hashes().contains(&crate::jogo::recursos::hash_do_caminho_do_recurso(tpl));
+    let (unica, lista) = aparencias_do_builder(builder);
+    if let Some([def, res, ext]) = unica {
+        incluir_partes_na_aparencia(builder, tpl, def, res, ext, forcar, teste);
+        // No teste a parte de teste entra uma vez: com a `appearance` feita, as `appearances` ficam de fora.
+        if teste {
+            return;
         }
+    }
+    for [def, res, ext] in lista {
+        incluir_partes_na_aparencia(builder, tpl, def, res, ext, forcar, teste);
     }
 }
 
-// ===== ArchiveXL `#51` 51i-1 — `resource.fix` names no `OnMeshResourceLoad` (2026-09-12) =====
-// A referência, no começo do `OnMeshResourceLoad`, troca cada `chunkMaterials` de cada aparência e o `name` de cada `materialEntries` pelo nome mapeado no
-// fix do caminho do mesh (`ResourceMetaExtension::GetFix`; configs juntadas pelo `Merge`, o nome antigo repetido fica com o novo do último config). Aqui a
-// tabela `bwms-resfixes.txt` (do `emit_resfixes`) entra na carga das tabelas e a troca roda no hook do `CMesh::PostLoad`, antes da original. Layout (SDK,
-// conferido pelo RTTI): `CMesh.appearances` `+0x1E0` (`Handle<meshMeshAppearance>`), `materialEntries` `+0xE0` (`CMeshMaterialEntry` 0x30 B, `name` `+0x20`),
-// `meshMeshAppearance.chunkMaterials` `+0x38`.
 pub(crate) static CMESH_OFFSETS_OK: AtomicBool = AtomicBool::new(false);
 
 pub(crate) static FIXES_DE_NOME_DO_MESH: std::sync::RwLock<Option<std::collections::HashMap<u64, Vec<(u64, u64)>>>> = std::sync::RwLock::new(None);
 
-/// Offsets do `CMesh`, do `meshMeshAppearance` e do `CMeshMaterialEntry` pelo RTTI (game thread), conferidos contra o SDK.
+/// Confere pelo RTTI os 4 offsets que a troca de nomes de material escreve; só com os 4 iguais aos medidos o fix de nomes liga.
 pub(crate) unsafe fn guardar_offsets_do_cmesh(reg: &crate::rtti::Registry) -> bool {
-    let off = |classe: &str, campo: &str| {
-        let c = reg.class_by_name(classe);
-        if c.is_null() { None } else { crate::rtti::resolve_prop_in_class(c, campo).map(|(o, _, _)| o as usize) }
-    };
-    let lidos = [
-        ("CMesh.appearances", off("CMesh", "appearances"), 0x1e0),
-        ("CMesh.materialEntries", off("CMesh", "materialEntries"), 0xe0),
-        ("meshMeshAppearance.chunkMaterials", off("meshMeshAppearance", "chunkMaterials"), 0x38),
-        ("CMeshMaterialEntry.name", off("CMeshMaterialEntry", "name"), 0x20),
-    ];
-    let ok = lidos.iter().all(|(_, o, e)| *o == Some(*e));
+    let campo = |classe: &str, nome: &str| prop_value_offset(reg.class_by_name(classe), nome);
+    let ok = campo("CMesh", "appearances") == Some(CMESH_APPEARANCES_OFF)
+        && campo("CMesh", "materialEntries") == Some(CMESH_MATERIALENTRIES_OFF)
+        && campo("meshMeshAppearance", "chunkMaterials") == Some(MESHAPPEARANCE_CHUNKMATERIALS_OFF)
+        && campo("CMeshMaterialEntry", "name") == Some(0x20);
     CMESH_OFFSETS_OK.store(ok, Ordering::Relaxed);
-    crate::veredito_dev!(
-        "[a51i] offsets pelo RTTI: {}; fix de nomes {}",
-        lidos.iter().map(|(n, o, e)| format!("{n} {} (SDK {e:#x})", o.map_or("?".to_string(), |o| format!("{o:#x}")))).collect::<Vec<_>>().join(", "),
-        if ok { "ligado" } else { "desligado" }
-    );
     ok
 }
 
-/// Carga da tabela de fix de nomes (game thread) com os `names` de `bwms-resfixes.txt` (`mods_do_usuario::pipeline::resfixes_linhas`; vazio sem o
-/// arquivo). Com linha, ou com `~/.bwms-hook-a51i-teste` (o teste registra o fix no tick), confere os offsets e instala o hook. Devolve as linhas carregadas.
-/// Sem linha, com `substituir` (o `ArchiveXL.Reload`), o fix da carga anterior sai; o hook fica, sem fix a aplicar.
+/// Tabela dos `names` do `resource.fix` (hash do mesh → pares (antigo, novo)). Sem linha nem marcador de teste: a recarga (`substituir`) apaga a
+/// anterior e o gancho do `PostLoad`, se instalado, fica. Com linha: só com os offsets do `CMesh` conferidos a tabela entra e o gancho instala.
+/// Devolve os pares carregados.
 pub(crate) unsafe fn carregar_fixes_de_nome_do_mesh(nomes: std::collections::HashMap<u64, Vec<(u64, u64)>>, substituir: bool) -> usize {
-    let teste = marcador_individual("a51i-teste");
-    if nomes.is_empty() && !teste {
+    if nomes.is_empty() && !marcador_individual("a51i-teste") {
         if substituir {
             if let Ok(mut g) = FIXES_DE_NOME_DO_MESH.write() {
                 *g = None;
@@ -7357,26 +5877,23 @@ pub(crate) unsafe fn carregar_fixes_de_nome_do_mesh(nomes: std::collections::Has
     }
     let Some(reg) = crate::rtti::Registry::obtain() else { return 0 };
     if !guardar_offsets_do_cmesh(&reg) {
+        crate::veredito_dev!("[a51i] offsets do CMesh divergem do medido; fix de nomes desligado");
         return 0;
     }
-    let (linhas, recursos) = (nomes.values().map(Vec::len).sum::<usize>(), nomes.len());
+    let n = nomes.values().map(Vec::len).sum();
     if let Ok(mut g) = FIXES_DE_NOME_DO_MESH.write() {
         *g = Some(nomes);
     }
     install_cmesh_postload_hook();
-    crate::veredito_dev!(
-        "[a51i] fix de nomes: {linhas} linha(s) de {recursos} recurso(s), teste {teste}; hook do CMesh::PostLoad {}",
-        if ORIG_CMESH_POSTLOAD.load(Ordering::Relaxed) == 0 { "FALHOU" } else { "instalado" }
-    );
-    linhas
+    n
 }
 
 /// `context` do `resource.fix` (S12): caminho do mesh → atributos `(CName do nome em snake_case, valor)`, entregues ao estado de mesh dinâmico
-/// NATIVO da 2.5 (`z040/relatorios/S12a.md`): o jogo faz o mesh dinâmico do ArchiveXL sozinho, mas nada chama o `PrepareMeshState` dele com contexto.
+/// NATIVO da 2.5 (`z040/relatorios/S12a.md`): o jogo faz o mesh dinâmico sozinho, mas nada chama o `PrepareMeshState` dele com contexto.
 pub(crate) static CONTEXTOS_DO_MESH: std::sync::RwLock<Option<std::collections::HashMap<u64, Vec<(u64, String)>>>> = std::sync::RwLock::new(None);
 
-/// `App::MeshExtension::PrepareMeshState(CMesh*, const Core::Map<CName, std::string>&)` da 2.5: cria o estado, zera o `contextToken` (o `@context`
-/// do mesh fica de fora, como na referência), insere os atributos sem sobrescrever e resolve o `appearance_expansion_source`.
+/// Preparo do estado de mesh dinâmico nativo da 2.5 (`mesh, &contexto`, contexto de 0x28 B, S12a): cria o estado, zera o `contextToken` (o
+/// `@context` do mesh fica de fora: o contexto do fix já é o dado), insere os atributos sem sobrescrever e resolve o `appearance_expansion_source`.
 const PREPARE_MESH_STATE_VM: u64 = 0x1_01ce_476c;
 /// Os 16 bytes do prólogo do `PrepareMeshState` no Steam 2.5 (S12a §5.2): outro build não recebe a chamada.
 const PREPARE_MESH_STATE_PROLOGO: [u32; 4] = [0xd101_83ff, 0xa902_5ff8, 0xa903_57f6, 0xa904_4ff4];
@@ -7537,81 +6054,78 @@ pub(crate) fn tag_resource_patch() -> u64 {
     *H.get_or_init(|| bwms_primitives::fnv1a64(b"ResourcePatch"))
 }
 
-/// Clone de uma `meshMeshAppearance` do patch com as 3 tags, num `Handle` novo; `None` sem instância.
+/// `meshMeshAppearance`: `name` `+0x30`, `tags` `+0x58` (`DynArray<CName>`).
+const MESHAPPEARANCE_NOME_OFF: usize = 0x30;
+const MESHAPPEARANCE_TAGS_OFF: usize = 0x58;
+
+/// Aparência nova (handle forte) com o nome e os `chunkMaterials` da aparência do patch e exatamente as tags `ResourcePatch`, `expansao`,
+/// `origem`, nessa ordem: as tags marcam de onde ela veio para a expansão do mesh achar os materiais do patch. Falha solta o que criou.
 pub(crate) unsafe fn clonar_aparencia_do_mesh(pinst: *const u8, expansao: u64, origem: u64) -> Option<[u64; 2]> {
-    let obj = crate::rtti::create_instance(CLASSE_MESHMESHAPPEARANCE.load(Ordering::Relaxed));
-    if obj.is_null() {
+    let classe = CLASSE_MESHMESHAPPEARANCE.load(Ordering::Relaxed);
+    if pinst.is_null() || classe.is_null() || !crate::memoria::is_readable(pinst as *const c_void, MESHAPPEARANCE_TAGS_OFF + 0x10) {
+        return None;
+    }
+    let nova = rtti::create_instance(classe);
+    if nova.is_null() {
         return None;
     }
     let mut h = [0u64; 2];
-    crate::rtti::make_handle(h.as_mut_ptr() as *mut c_void, obj);
-    if h[0] == 0 || h[1] == 0 {
+    rtti::make_handle(h.as_mut_ptr() as *mut c_void, nova);
+    if h[0] == 0 {
         return None;
     }
-    let o = obj as *mut u8;
-    (o.add(0x30) as *mut u64).write_unaligned((pinst.add(0x30) as *const u64).read_unaligned());
-    let chunks_ok = copiar_dynarray(o.add(0x38), pinst.add(0x38), 8, 8);
-    let tags = o.add(0x58);
-    crate::jogo::listas::reservar(tags as *mut c_void, 3, 8, 8, std::ptr::null());
-    if !chunks_ok || dynarray_no_campo(tags, 0).2 < 3 {
+    let n = nova as *mut u8;
+    (n.add(MESHAPPEARANCE_NOME_OFF) as *mut u64).write_unaligned((pinst.add(MESHAPPEARANCE_NOME_OFF) as *const u64).read_unaligned());
+    if !copiar_dynarray(n.add(MESHAPPEARANCE_CHUNKMATERIALS_OFF), pinst.add(MESHAPPEARANCE_CHUNKMATERIALS_OFF), 8, 8) {
         crate::jogo::objetos::soltar_handle(&mut h);
         return None;
     }
-    let tb = dynarray_no_campo(tags, 0).0;
-    for (k, v) in [tag_resource_patch(), expansao, origem].into_iter().enumerate() {
-        (tb.add(k * 8) as *mut u64).write_unaligned(v);
+    let tags = n.add(MESHAPPEARANCE_TAGS_OFF);
+    crate::jogo::listas::reservar(tags as *mut c_void, 3, 8, 8, std::ptr::null());
+    let (buffer, _, capacidade) = crate::jogo::listas::dynarray_no_campo(tags, 0);
+    if buffer.is_null() || capacidade < 3 {
+        crate::jogo::objetos::soltar_handle(&mut h);
+        return None;
+    }
+    for (i, t) in [tag_resource_patch(), expansao, origem].into_iter().enumerate() {
+        (buffer.add(i * 8) as *mut u64).write_unaligned(t);
     }
     (tags.add(0x0c) as *mut u32).write_unaligned(3);
     Some(h)
 }
 
-// ===== ArchiveXL `#51` 51i-3 — `renderResourceBlob` do `OnMeshResourceLoad` (`CopyRenderBlob`, 2026-09-12) =====
-// Referência: com blob no patch e `Modifies(renderResourceBlob, alvo tem blob)`, o alvo recebe um `rendRenderMeshBlob` novo com o `header` do patch (cópia) e
-// o `renderBuffer` copiado (`Initialize` com o alocador, o tamanho e o alinhamento do patch + `memcpy`), mais 16 campos do mesh do patch (listas de ossos, LOD e
-// trilhas, caixa, área por eixo, tipo de objeto e flags de sombra). Layout (SDK): blob `header` `+0x30` (0xE0 B), `renderBuffer` `+0x110`; header com 10
-// `DynArray` — `bonePositions` (Vector4), `renderLODs` (float), `renderChunks` e mais 5 listas de u8, `renderChunkInfos` (`rend::Chunk` 0xF8 B, `materialId`
-// `DynArray<CName>` em `+0xD8`), `topology` (`rend::TopologyData` 0x28 B, `data`/`metadata` u8 em `+0x08`/`+0x18`) — e os escalares de `+0x00` e de `+0xA8` a
-// `+0xE0`. Blob novo e `Handle` pelo motor, como os clones da 51i-2; o `renderBuffer` aloca pelo `RawBufferAllocator` copiado do patch (51g v2).
 pub(crate) static MESCLA_DE_RENDER_BLOB_ATIVA: AtomicBool = AtomicBool::new(false);
 
-/// Blob muda com blob no patch e, com props escritas, a prop `renderResourceBlob`; com `-`, só se o alvo não tem blob (o `Modifies(p, alvo tem blob)`).
-pub(crate) fn render_blob_muda(props: u32, patch_tem: bool, alvo_tem: bool) -> bool {
-    patch_tem && if props == u32::MAX { !alvo_tem } else { props & A17_PROP_RENDERBLOB != 0 }
+/// Blob do patch entra com a prop escrita (mesmo com o alvo tendo blob) ou, com todas as props (`-`), só no alvo sem blob.
+fn blob_muda(props: u32, bit: u32, patch_tem: bool, alvo_tem: bool) -> bool {
+    patch_tem && if props == u32::MAX { !alvo_tem } else { props & bit != 0 }
 }
 
-// ===== ArchiveXL `#51` 51d v3 — `blob` do `OnMorphTargetResourceLoad` (`CopyRenderBlob` do morph, 2026-09-12) =====
-// Referência: com blob no patch e `Modifies(blob, alvo tem blob)`, e o blob do patch sendo `rendRenderMorphTargetMeshBlob`, o alvo recebe um blob novo — se o
-// `baseBlob` do patch é `rendRenderMeshBlob`: o header do patch (cópia), o `baseBlob` copiado (o `CopyRenderBlob` do mesh), os `DataBuffer` `diffsBuffer` e
-// `mappingBuffer` copiados e o `DeferredDataBuffer` `textureDiffsBuffer` clonado; senão o blob novo fica vazio. Aqui o header
-// (`rend::RenderMorphTargetMeshBlobHeader`, 0x80 B com listas de listas) e o `textureDiffsBuffer` saem pelo `Assign` do tipo do motor (`vt+0x58`, conferido ao
-// vivo na A#44) — o operador de cópia que a referência emula —; o `baseBlob` e os `DataBuffer`, pelas cópias da 51i-3.
+pub(crate) fn render_blob_muda(props: u32, patch_tem: bool, alvo_tem: bool) -> bool {
+    blob_muda(props, A17_PROP_RENDERBLOB, patch_tem, alvo_tem)
+}
+
 pub(crate) static MORPH_BLOB_OFFSETS_OK: AtomicBool = AtomicBool::new(false);
 
-/// Blob do morph muda com blob no patch e, com props escritas, a prop `blob`; com `-`, só se o alvo não tem blob (o `Modifies(p, alvo tem blob)`).
 pub(crate) fn morph_blob_muda(props: u32, patch_tem: bool, alvo_tem: bool) -> bool {
-    patch_tem && if props == u32::MAX { !alvo_tem } else { props & A17_PROP_BLOB != 0 }
+    blob_muda(props, A17_PROP_BLOB, patch_tem, alvo_tem)
 }
 
-// ===== ArchiveXL `#48` — `MeshExtension`, lógica pura (2026-09-13) =====
-// Nomes da `MeshExtension` da referência, sem motor: material de template começa com `@`, material dinâmico tem `@` em qualquer ponto, e a aparência sem
-// `chunkMaterials` é expandida a partir da aparência de origem (a da tag de expansão do `#51`, senão a do atributo `appearance_expansion_source` do contexto,
-// senão a 1ª). Os hooks (`FindAppearance`/`AddStubAppearance`/`ShouldPreloadAppearances`/`LoadMaterialsAsync`) usam isto em cima da memória do `CMesh`.
 pub(crate) const MARCADOR_DE_TEMPLATE: char = '@';
 
-/// `IsTemplateMaterial`: o nome começa com `@`.
 pub(crate) fn material_de_template(nome: &str) -> bool {
     nome.starts_with(MARCADOR_DE_TEMPLATE)
 }
 
-/// `IsDynamicMaterial`: o nome tem `@` em qualquer ponto.
 pub(crate) fn material_dinamico(nome: &str) -> bool {
     nome.contains(MARCADOR_DE_TEMPLATE)
 }
 
-/// `IsDynamicMesh`: sem entradas de material, com entrada de template, sem aparências, com aparência sem `chunkMaterials` ou com material dinâmico.
+/// Mesh pede o estado dinâmico se não tem material, tem material de template, não tem aparência, tem aparência sem chunk ou algum chunk usa
+/// `@`. Material com `@` no meio (não template) sozinho não torna o mesh dinâmico.
 pub(crate) fn mesh_dinamico<M, C>(materiais: &[M], aparencias: &[Vec<C>], template: impl Fn(&M) -> bool, dinamico: impl Fn(&C) -> bool) -> bool {
     materiais.is_empty()
-        || materiais.iter().any(&template)
+        || materiais.iter().any(template)
         || aparencias.is_empty()
         || aparencias.iter().any(|chunks| chunks.is_empty() || chunks.iter().any(&dinamico))
 }
@@ -7639,75 +6153,79 @@ pub(crate) static MATERIAL_VAZIO: AtomicPtr<[u64; 2]> = AtomicPtr::new(std::ptr:
 const BIT_MATERIAL_DINAMICO: u8 = 1 << 0;
 const BIT_MATERIAL_DE_TEMPLATE: u8 = 1 << 1;
 
-/// Bits do texto do CName: 1 = tem `@`, 2 = começa com `@`. Com cache por hash, porque o `PostLoad` confere todos os nomes de cada mesh; sem texto: 0, fora do
-/// cache.
+/// Teto do cache de `bits_de_arroba`: cada nome de material visto fica nele.
+const BITS_DE_ARROBA_MAX: usize = 1 << 20;
+
+/// [`BIT_MATERIAL_DINAMICO`] e [`BIT_MATERIAL_DE_TEMPLATE`] do texto do CName, guardados por hash: o mesmo nome é consultado em toda carga de
+/// mesh. Hash 0 ou sem texto dá 0, sem guardar (o texto pode aparecer depois no pool).
 pub(crate) unsafe fn bits_de_arroba(hash: u64) -> u8 {
-    static CACHE: std::sync::Mutex<Option<std::collections::HashMap<u64, u8>>> = std::sync::Mutex::new(None);
+    static CACHE: std::sync::OnceLock<Mutex<std::collections::HashMap<u64, u8>>> = std::sync::OnceLock::new();
     if hash == 0 {
         return 0;
     }
-    if let Some(v) = CACHE.lock().ok().and_then(|g| g.as_ref().and_then(|m| m.get(&hash).copied())) {
-        return v;
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(b) = cache.lock().ok().and_then(|m| m.get(&hash).copied()) {
+        return b;
     }
-    let Some(t) = texto_do_cname(hash) else { return 0 };
-    let v = material_dinamico(&t) as u8 * BIT_MATERIAL_DINAMICO | material_de_template(&t) as u8 * BIT_MATERIAL_DE_TEMPLATE;
-    if let Ok(mut g) = CACHE.lock() {
-        let m = g.get_or_insert_with(std::collections::HashMap::new);
-        if m.len() < 1 << 20 {
-            m.insert(hash, v);
+    let Some(texto) = crate::cname::name_of(hash) else { return 0 };
+    let bits = if material_dinamico(&texto) { BIT_MATERIAL_DINAMICO } else { 0 } | if material_de_template(&texto) { BIT_MATERIAL_DE_TEMPLATE } else { 0 };
+    if let Ok(mut m) = cache.lock() {
+        if m.len() < BITS_DE_ARROBA_MAX {
+            m.insert(hash, bits);
         }
     }
-    v
+    bits
 }
 
-/// Hashes de um `DynArray<CName>` em `obj + off`.
+/// Teto de itens nas leituras de listas do mesh.
+const LISTA_DO_MESH_MAX: usize = 65536;
+
+/// Os `CName` de um `DynArray<CName>` em `obj + off`; vazio com buffer nulo, ilegível ou acima do teto.
 pub(crate) unsafe fn cnames_do_dynarray(obj: *const u8, off: usize) -> Vec<u64> {
-    let (b, n, _) = dynarray_no_campo(obj, off);
-    if b.is_null() || n > 0x1_0000 {
+    let (b, n, _) = crate::jogo::listas::dynarray_no_campo(obj, off);
+    if b.is_null() || n > LISTA_DO_MESH_MAX || !crate::memoria::is_readable(b as *const c_void, n * 8) {
         return Vec::new();
     }
     (0..n).map(|i| (b.add(i * 8) as *const u64).read_unaligned()).collect()
 }
 
-/// Instâncias das aparências do mesh (nula na entrada vazia).
+/// Instâncias de `CMesh.appearances` (nula na entrada vazia).
 pub(crate) unsafe fn aparencias_do_mesh(mesh: *const u8) -> Vec<*mut u8> {
-    let (b, n, _) = dynarray_no_campo(mesh, CMESH_APPEARANCES_OFF);
-    if b.is_null() || n > 0x1_0000 {
+    let (b, n, _) = crate::jogo::listas::dynarray_no_campo(mesh, CMESH_APPEARANCES_OFF);
+    if b.is_null() || n > LISTA_DO_MESH_MAX || !crate::memoria::is_readable(b as *const c_void, n * 16) {
         return Vec::new();
     }
     (0..n).map(|i| (b.add(i * 16) as *const u64).read_unaligned() as *mut u8).collect()
 }
 
-/// Nomes das entradas de material do mesh.
+/// `name` de cada `CMesh.materialEntries`.
 pub(crate) unsafe fn nomes_dos_materiais_do_mesh(mesh: *const u8) -> Vec<u64> {
-    let (b, n, _) = dynarray_no_campo(mesh, CMESH_MATERIALENTRIES_OFF);
-    if b.is_null() || n > 0x1_0000 {
+    let (b, n, _) = crate::jogo::listas::dynarray_no_campo(mesh, CMESH_MATERIALENTRIES_OFF);
+    if b.is_null() || n > LISTA_DO_MESH_MAX || !crate::memoria::is_readable(b as *const c_void, n * CMESHMATERIALENTRY_TAMANHO) {
         return Vec::new();
     }
     (0..n).map(|i| (b.add(i * CMESHMATERIALENTRY_TAMANHO + 0x20) as *const u64).read_unaligned()).collect()
 }
 
-/// `MeshState` sem contexto (48d-2): entradas de template (`@…`) e comuns, por nome, e as malhas de patch registradas como origem (48d-1).
+/// Estado de mesh com materiais de template e comuns por nome, origens de patch e contexto.
 #[derive(Default)]
 pub(crate) struct EstadoDoMesh {
     pub(crate) templates: std::collections::HashMap<u64, usize>,
     pub(crate) materiais: std::collections::HashMap<u64, usize>,
-    /// `sources` do `RegisterMeshPatch`: tag de origem (hash do caminho do patch) → `WeakHandle<CMesh>` (com 1 fraco nosso).
+    /// Tag de origem (hash do caminho do patch) → `WeakHandle<CMesh>` (com 1 fraco nosso).
     pub(crate) origens: std::collections::HashMap<u64, [u64; 2]>,
-    /// `appearance_expansion_source` do contexto (48d-2); 0 sem contexto.
+    /// `appearance_expansion_source` do contexto; 0 sem contexto.
     pub(crate) fonte_expansao: u64,
-    /// 48d-2: o `@context` já foi consultado (`EnsureContextReady` roda uma vez).
     pub(crate) contexto_lido: bool,
-    /// 48d-2 `contextAttrs`: nome do parâmetro `CName` em snake_case → valor.
+    /// Nome do parâmetro `CName` em snake_case → valor.
     pub(crate) atributos: std::collections::HashMap<u64, u64>,
-    /// 48d-2 `contextParams`: nomes de todos os parâmetros da instância de contexto (os valores ficam pro 48c).
     pub(crate) parametros_contexto: Vec<u64>,
-    /// 48c-2: a instância do `@context` (fraca, com 1 fraco nosso), pros valores dos parâmetros no clone.
+    /// Instância do contexto (fraca, com 1 fraco nosso).
     pub(crate) contexto: [u64; 2],
 }
 
 impl EstadoDoMesh {
-    /// `FillMaterials`: refaz o mapa de entradas comuns; os templates acumulam, como na referência.
+    /// Refaz os materiais comuns (nome → índice); os de template (`@` no começo) acumulam em `templates` entre chamadas.
     pub(crate) unsafe fn preencher_materiais(&mut self, mesh: *const u8) {
         self.materiais.clear();
         for (i, nome) in nomes_dos_materiais_do_mesh(mesh).into_iter().enumerate() {
@@ -7724,7 +6242,7 @@ pub(crate) fn estado_do_mesh(caminho: u64) -> Option<std::sync::Arc<std::sync::M
     ESTADOS_DOS_MESHES.read().ok()?.as_ref()?.get(&caminho).cloned()
 }
 
-/// `PrepareMeshState` no `PostLoad` do mesh (thread de job, antes da original): estado novo pro mesh dinâmico, só com leitura de memória.
+/// Cria o estado do mesh dinâmico na carga (só leitura de memória); o 1º estado guardado para o caminho fica.
 pub(crate) unsafe fn preparar_estado_do_mesh(mesh: *mut c_void) {
     if !MESH_DINAMICO_ATIVO.load(Ordering::Relaxed) || mesh.is_null() {
         return;
@@ -7734,98 +6252,109 @@ pub(crate) unsafe fn preparar_estado_do_mesh(mesh: *mut c_void) {
     if caminho == 0 || estado_do_mesh(caminho).is_some() {
         return;
     }
-    let aparencias: Vec<Vec<u64>> = aparencias_do_mesh(m).iter().filter(|a| !a.is_null()).map(|a| cnames_do_dynarray(*a, MESHAPPEARANCE_CHUNKMATERIALS_OFF)).collect();
-    if !mesh_dinamico(&nomes_dos_materiais_do_mesh(m), &aparencias, |n| bits_de_arroba(*n) & BIT_MATERIAL_DE_TEMPLATE != 0, |c| bits_de_arroba(*c) & BIT_MATERIAL_DINAMICO != 0) {
+    let materiais = nomes_dos_materiais_do_mesh(m);
+    let aparencias: Vec<Vec<u64>> =
+        aparencias_do_mesh(m).into_iter().filter(|a| !a.is_null()).map(|a| cnames_do_dynarray(a, MESHAPPEARANCE_CHUNKMATERIALS_OFF)).collect();
+    let dinamico = mesh_dinamico(
+        &materiais,
+        &aparencias,
+        |n| bits_de_arroba(*n) & BIT_MATERIAL_DE_TEMPLATE != 0,
+        |c| bits_de_arroba(*c) & BIT_MATERIAL_DINAMICO != 0,
+    );
+    if !dinamico {
         return;
     }
     let mut estado = EstadoDoMesh::default();
     estado.preencher_materiais(m);
     if let Ok(mut g) = ESTADOS_DOS_MESHES.write() {
-        g.get_or_insert_with(std::collections::HashMap::new)
-            .entry(caminho)
-            .or_insert_with(|| std::sync::Arc::new(std::sync::Mutex::new(estado)));
-        A48_ESTADOS_CRIADOS.fetch_add(1, Ordering::Relaxed);
+        g.get_or_insert_with(Default::default).entry(caminho).or_insert_with(|| std::sync::Arc::new(Mutex::new(estado)));
     }
 }
 
-/// 48d-1 `RegisterMeshPatch`, no `PostLoad` do alvo (51i-2, antes de clonar as aparências do patch): estados do alvo e do patch, o patch guardado fraco
-/// no alvo pela tag de origem (o hash do caminho do patch) e, com o alvo já tendo entradas, uma entrada local com o nome da tag apontando o material
-/// vazio. Devolve a tag; 0 com o 48a desligado ou patch sem `materialEntries`. Divergência: a entrada da tag não repete quando o mesmo patch registra de
-/// novo no mesmo mesh.
+/// Liga o patch ao mesh alvo pela tag de origem (o caminho do patch): o estado do alvo guarda a referência FRACA ao patch sob a tag e, se o
+/// alvo já tem materiais, ganha uma entrada local com o nome da tag apontando o material vazio. Devolve a tag (0 sem efeito).
 pub(crate) unsafe fn registrar_patch_de_mesh(alvo: *mut u8, patch: *mut u8) -> u64 {
     let vazio = MATERIAL_VAZIO.load(Ordering::Relaxed);
-    if !MESH_DINAMICO_ATIVO.load(Ordering::Relaxed) || alvo.is_null() || patch.is_null() || vazio.is_null() || dynarray_no_campo(patch, CMESH_MATERIALENTRIES_OFF).1 == 0 {
+    if !MESH_DINAMICO_ATIVO.load(Ordering::Relaxed) || alvo.is_null() || patch.is_null() || vazio.is_null() {
         return 0;
     }
+    if crate::jogo::listas::dynarray_no_campo(patch, CMESH_MATERIALENTRIES_OFF).1 == 0 {
+        return 0;
+    }
+    let (Some(estado_alvo), Some(_)) = (adquirir_estado_do_mesh(alvo), adquirir_estado_do_mesh(patch)) else { return 0 };
     let tag = (patch.add(CMESH_CAMINHO_OFF) as *const u64).read_unaligned();
-    let (Some(estado), Some(_)) = (adquirir_estado_do_mesh(alvo), adquirir_estado_do_mesh(patch)) else { return 0 };
-    let mut forte = handle_forte_de(patch);
-    if tag == 0 || forte[0] == 0 {
+    let mut forte = crate::jogo::objetos::handle_forte_de(patch);
+    if tag == 0 || forte[0] == 0 || forte[1] == 0 {
+        if forte[0] != 0 {
+            crate::jogo::objetos::soltar_handle(&mut forte);
+        }
         return 0;
     }
-    let Ok(mut e) = estado.lock() else {
-        crate::jogo::objetos::soltar_handle(&mut forte);
+    (*((forte[1] + 4) as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
+    let fraco = forte;
+    crate::jogo::objetos::soltar_handle(&mut forte);
+    let Ok(mut estado) = estado_alvo.lock() else {
+        let mut f = fraco;
+        crate::jogo::objetos::soltar_fraco(&mut f);
         return 0;
     };
-    let mut fraco = [0u64; 2];
-    gravar_handle_fraco(fraco.as_mut_ptr(), forte);
-    if let Some(mut antigo) = e.origens.insert(tag, fraco) {
-        crate::jogo::objetos::soltar_fraco(&mut antigo);
+    if let Some(mut anterior) = estado.origens.insert(tag, fraco) {
+        crate::jogo::objetos::soltar_fraco(&mut anterior);
     }
-    crate::jogo::objetos::soltar_handle(&mut forte);
-    if dynarray_no_campo(alvo, CMESH_MATERIALENTRIES_OFF).1 > 0 && !e.materiais.contains_key(&tag) {
-        criar_entradas_locais(alvo, &mut e, &[tag], vazio.read());
+    let tem_materiais = crate::jogo::listas::dynarray_no_campo(alvo, CMESH_MATERIALENTRIES_OFF).1 > 0;
+    if tem_materiais && !estado.materiais.contains_key(&tag) {
+        criar_entradas_locais(alvo, &mut estado, &[tag], *vazio);
     }
-    A48_PATCHES_REGISTRADOS.fetch_add(1, Ordering::Relaxed);
     tag
 }
 
-/// Entradas locais novas pros `nomes` apontando `material` (forte e fraco), sob o `MaterialLock` do mesh — o `LoadMaterialsAsync` do motor lê as entradas
-/// com ele. Trava ocupada por tempo demais: nada entra (conta).
+/// Tentativas da trava de material do mesh antes de desistir: a carga não pode esperar um mesh que outro job segura.
+const TENTATIVAS_DA_TRAVA_DE_MATERIAL: u32 = 10_000;
+
+pub(crate) static ENTRADAS_LOCAIS_SEM_TRAVA: AtomicU64 = AtomicU64::new(0);
+
+/// Entradas locais novas em `materialEntries` (uma por nome, com `material` forte e fraco, `isLocalInstance` = 1), sob a trava de material do
+/// mesh, registradas em `estado.materiais`.
 pub(crate) unsafe fn criar_entradas_locais(mesh: *mut u8, estado: &mut EstadoDoMesh, nomes: &[u64], material: [u64; 2]) -> bool {
-    if nomes.is_empty() {
+    if nomes.is_empty() || mesh.is_null() {
         return false;
     }
     let trava = mesh.add(CMESH_MATERIALLOCK_OFF);
-    let tentar: unsafe extern "C" fn(*mut u8) -> bool = std::mem::transmute(crate::rebase(TRAVA_TENTAR_ESCRITA_VM));
-    let mut pegou = false;
-    for _ in 0..10_000 {
-        if tentar(trava) {
-            pegou = true;
-            break;
-        }
-        std::hint::spin_loop();
-    }
-    if !pegou {
-        A48_TRAVA_OCUPADA.fetch_add(1, Ordering::Relaxed);
+    let tentar: unsafe extern "C" fn(*mut u8) -> bool = std::mem::transmute(crate::rebase(crate::jogo::travas::TRAVA_TENTAR_ESCRITA_VM));
+    if !(0..TENTATIVAS_DA_TRAVA_DE_MATERIAL).any(|_| tentar(trava)) {
+        ENTRADAS_LOCAIS_SEM_TRAVA.fetch_add(1, Ordering::Relaxed);
         return false;
     }
-    let mut feito = false;
     let lista = mesh.add(CMESH_MATERIALENTRIES_OFF);
-    let (_, tam, cap) = dynarray_no_campo(lista, 0);
-    let novo = tam + nomes.len();
-    if novo > cap {
-        crate::jogo::listas::reservar(lista as *mut c_void, novo as u32, CMESHMATERIALENTRY_TAMANHO as u32, 8, std::ptr::null());
+    let (_, n, cap) = crate::jogo::listas::dynarray_no_campo(lista, 0);
+    let total = n + nomes.len();
+    if cap < total {
+        // Entrada é movida byte a byte (handles mudam de lugar sem mudar contagem): mover nulo.
+        crate::jogo::listas::reservar(lista as *mut c_void, total as u32, CMESHMATERIALENTRY_TAMANHO as u32, 8, std::ptr::null());
     }
-    if dynarray_no_campo(lista, 0).2 >= novo {
-        let b = dynarray_no_campo(lista, 0).0;
-        let [inst, bloco] = material;
-        for (k, nome) in nomes.iter().enumerate() {
-            let e = b.add((tam + k) * CMESHMATERIALENTRY_TAMANHO);
-            std::ptr::write_bytes(e, 0, CMESHMATERIALENTRY_TAMANHO);
-            handle_strong_soma(&[inst, bloco], 1);
-            (*((bloco as usize + 4) as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
-            for (off, v) in [(0x00, inst), (0x08, bloco), (0x10, inst), (0x18, bloco), (0x20, *nome)] {
-                (e.add(off) as *mut u64).write_unaligned(v);
-            }
-            e.add(0x2a).write(1);
-            estado.materiais.insert(*nome, tam + k);
+    let (b, _, cap) = crate::jogo::listas::dynarray_no_campo(lista, 0);
+    if b.is_null() || cap < total {
+        crate::jogo::travas::soltar_escrita(trava);
+        return false;
+    }
+    for (i, &nome) in nomes.iter().enumerate() {
+        let e = b.add((n + i) * CMESHMATERIALENTRY_TAMANHO);
+        std::ptr::write_bytes(e, 0, CMESHMATERIALENTRY_TAMANHO);
+        if material[1] != 0 {
+            handle_strong_soma(&material, 1);
+            (*((material[1] + 4) as *const std::sync::atomic::AtomicU32)).fetch_add(1, Ordering::SeqCst);
         }
-        (lista.add(0x0c) as *mut u32).write_unaligned(novo as u32);
-        feito = true;
+        for off in [0x00, 0x10] {
+            (e.add(off) as *mut u64).write_unaligned(material[0]);
+            (e.add(off + 8) as *mut u64).write_unaligned(material[1]);
+        }
+        (e.add(0x20) as *mut u64).write_unaligned(nome);
+        e.add(0x2a).write(1);
+        estado.materiais.insert(nome, n + i);
     }
-    crate::jogo::travas::soltar_escrita((trava) as *mut u8);
-    feito
+    (lista.add(0x0c) as *mut u32).write_unaligned(total as u32);
+    crate::jogo::travas::soltar_escrita(trava);
+    true
 }
 
 /// Hook do job do builder, antes da original: despacha o `Entity/Extract` com o builder travado e devolve (builder, bloco) pra soltar depois da original.
@@ -8097,13 +6626,6 @@ pub(crate) unsafe fn sufixo_generico(reg: &crate::rtti::Registry, dono_h: &[u64;
     texto
 }
 
-// ===== ArchiveXL `#23` — estado do `DynamicAppearanceController` (2026-09-12) =====
-// `UpdateState(entidade, item equipado)`: `gender`/`camera`/`body`/`arms`/`feet`/`sleeves`/`hair_type` pelo `GetSuffixData` (o valor do sufixo do `#9`,
-// com `Male` → `m` e o resto em snake_case) e `skin_color`/`hair_color`/`eyes_color` pelo `GetCustomizationData` (aparência dos componentes de corpo e olhos,
-// último na ordem reversa vence; cor do cabelo pelo `GetHairColor`). Condições = FNV-1a64 de `atributo=valor` (o encadeado da referência dá o mesmo hash).
-// `ResolveName`/`ResolvePath`: `ProcessString` com os valores do estado como globais e a variante como locais. `GetHairColor` também é inlinado no Mac
-// (`0x102045888`, chamado pelo ItemFactory em `0x10200defc`/`0x102014998`): estado pela `vt+0x1f8(sistema, é masculino)` (sret), e a cor é o 1º `CName` do
-// flat `ItemFactory.HairColors.hairColors` que passa na `vt+0x240` do estado.
 pub(crate) const ATRIBUTOS_DE_SUFIXO: [(&str, &str); 7] = [
     ("gender", "itemsFactoryAppearanceSuffix.Gender"),
     ("camera", "itemsFactoryAppearanceSuffix.Camera"),
@@ -8114,40 +6636,38 @@ pub(crate) const ATRIBUTOS_DE_SUFIXO: [(&str, &str); 7] = [
     ("hair_type", "itemsFactoryAppearanceSuffix.HairType"),
 ];
 
-/// Resultado do `ProcessString`.
+/// Resultado da expansão de texto dinâmico.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct TextoProcessado {
     pub valid: bool,
     pub missed: bool,
     pub optional: bool,
     pub value: String,
-    /// `result.attributes`: hash de cada `{atributo}` lido, com ou sem valor (a reserva do `ResolvePath`, ArchiveXL `#20` 20g, escolhe entre eles).
+    /// Hash de cada `{atributo}` lido, com ou sem valor.
     pub atributos: std::collections::BTreeSet<u64>,
 }
 
-/// `DynamicAppearanceController::ProcessString`: `{atributo}` pelo local, senão pelo global (sem nenhum, `missed`); `*` inicial pulado; `?` final vira
-/// `optional`; texto sem nenhum `{}` ou com par aberto é inválido; saída até 512 bytes.
+/// O local vence o global; valor vazio presente conta como achado.
 pub(crate) fn processar_texto_dinamico(globais: &std::collections::HashMap<u64, String>, locais: &std::collections::HashMap<u64, String>, entrada: &str) -> TextoProcessado {
     process_dynamic_string_com(entrada, |h| locais.get(&h).or_else(|| globais.get(&h)).map(String::as_str))
 }
 
-/// Condição do estado: `FNV1a64(valor, FNV1a64("=", atributo))` = FNV-1a64 de `atributo=valor`.
+/// Condição do estado = CName de `atributo=valor`, o texto que o critério `&atributo=valor` dos mods escreve.
 pub(crate) fn condicao_do_estado(atributo: &str, valor: &str) -> u64 {
-    bwms_primitives::fnv1a64(format!("{atributo}={valor}").as_bytes())
+    let ate_o_igual = bwms_primitives::fnv1a64_seeded(b"=", bwms_primitives::fnv1a64(atributo.as_bytes()));
+    bwms_primitives::fnv1a64_seeded(valor.as_bytes(), ate_o_igual)
 }
 
-/// `ResolveName`: nome sem `*` volta igual; inválido volta igual; opcional com atributo faltando vira vazio.
+/// Nome sem `*` ou texto inválido volta igual; opcional com atributo faltando vira vazio (o mod pediu "só se existir").
 pub(crate) fn resolver_nome_dinamico(valores: &std::collections::HashMap<u64, String>, locais: &std::collections::HashMap<u64, String>, nome: &str) -> String {
-    if !nome.starts_with('*') {
+    if !is_dynamic_value(nome) {
         return nome.to_string();
     }
-    let r = processar_texto_dinamico(valores, locais, nome);
-    if !r.valid {
-        nome.to_string()
-    } else if r.optional && r.missed {
-        String::new()
-    } else {
-        r.value
+    let t = processar_texto_dinamico(valores, locais, nome);
+    match (t.valid, t.optional && t.missed) {
+        (false, _) => nome.to_string(),
+        (true, true) => String::new(),
+        (true, false) => t.value,
     }
 }
 
@@ -8167,74 +6687,83 @@ impl EstadoDinamico {
     }
 }
 
-/// `GetSuffixData`: com registro de sufixo, o valor do `#9` pro item `{equipado}`; Gender vira `m`/`w`, os outros snake_case.
+/// `(valor no estado, texto cru do sufixo)` do item `equipado` (TweakDBID; 0 = nenhum) para o dono. Registro de sufixo ausente → cru vazio.
+/// `Gender` vira `m`/`w` (o que os `.app` de mod escrevem em `{gender}`); os outros, snake case do cru.
 pub(crate) unsafe fn dado_do_sufixo(reg: &crate::rtti::Registry, dono_h: &[u64; 2], sufixo: u64, equipado: u64) -> (String, String) {
-    let mut suf = String::new();
-    let mut rec = a9_registro(sufixo);
-    if rec[0] != 0 {
-        crate::jogo::objetos::soltar_handle(&mut rec);
-        // `ItemID{tdbid}`: semente 2 (o padrão do SDK), resto zerado.
+    let mut registro = a9_registro(bwms_primitives::tweak_db_id_chave(sufixo));
+    let cru = if registro[0] == 0 {
+        String::new()
+    } else {
+        crate::jogo::objetos::soltar_handle(&mut registro);
         let mut item = [0u8; 16];
         item[..8].copy_from_slice(&equipado.to_le_bytes());
         item[8..12].copy_from_slice(&2u32.to_le_bytes());
-        suf = a9_valor_do_sufixo(reg, dono_h, &item, sufixo);
-    }
-    let valor = if bwms_primitives::tweak_db_id_chave(sufixo) == bwms_primitives::tweak_db_id("itemsFactoryAppearanceSuffix.Gender") {
-        if suf == "Male" { "m" } else { "w" }.to_string()
-    } else if suf.is_empty() {
-        String::new()
-    } else {
-        para_snake_case(&suf)
+        a9_valor_do_sufixo(reg, dono_h, &item, sufixo)
     };
-    (valor, suf)
+    let genero = bwms_primitives::tweak_db_id_chave(bwms_primitives::tweak_db_id("itemsFactoryAppearanceSuffix.Gender"));
+    let valor = if bwms_primitives::tweak_db_id_chave(sufixo) == genero {
+        if cru == "Male" { "m" } else { "w" }.to_string()
+    } else {
+        para_snake_case(&cru)
+    };
+    (valor, cru)
 }
 
-/// `meshAppearance` do componente pelo RTTI da classe dele (mesh, skinned e morph target); vazio sem o campo.
+/// Texto do `meshAppearance` do componente pelo RTTI da classe dele; vazio sem o campo, sem leitura ou com valor 0.
 pub(crate) unsafe fn nome_da_aparencia_do_componente(comp: *mut c_void) -> String {
-    let Some((off, _, _)) = crate::rtti::resolve_prop_in_class(crate::rtti::class_of(comp), "meshAppearance") else { return String::new() };
-    let p = (comp as *const u8).add(off as usize) as *const u64;
-    if !crate::memoria::is_readable(p as *const c_void, 8) {
+    if !rtti::sane(comp) {
         return String::new();
     }
-    let h = p.read_unaligned();
-    if h == 0 { String::new() } else { crate::cname::resolve_cname(h) }
+    let classe = rtti::class_of(comp);
+    let Some((off, _, _)) = (if classe.is_null() { None } else { rtti::resolve_prop_in_class(classe, "meshAppearance") }) else { return String::new() };
+    let campo = (comp as *const u8).add(off as usize);
+    if !crate::memoria::is_readable(campo as *const c_void, 8) {
+        return String::new();
+    }
+    match (campo as *const u64).read_unaligned() {
+        0 => String::new(),
+        h => crate::cname::name_of(h).unwrap_or_default(),
+    }
 }
 
-/// Componentes de unha do V (ArchiveXL 1.27 `{nails_color}`): masculino, feminino em primeira pessoa e feminino em terceira.
+/// Componentes de unha do V (`{nails_color}`): masculino, feminino em primeira pessoa e feminino em terceira.
 pub(crate) const COMPONENTES_DE_UNHA: [u64; 3] = [
     crate::cname::cname("a0_000_pma_base__nails_l"),
     crate::cname::cname("a0_000_pwa_fpp__nails_l"),
     crate::cname::cname("a0_000_pwa_base_nails_l"),
 ];
 
-/// `GetCustomizationData` sem a cor do cabelo: `(é masculino, pele, olhos, unhas)` pelos componentes em ordem reversa.
+/// Componentes que carregam a cor dos olhos do V.
+const COMPONENTES_DE_OLHOS: [u64; 2] = [crate::cname::cname("he_000_pma__basehead"), crate::cname::cname("MorphTargetSkinnedMesh3637")];
+
+/// `(é masculino, pele, olhos, unhas)` pelos componentes do corpo do V em `Entity+0xA0`. A lista é visitada do fim para o começo e o último
+/// visitado sobrescreve: com mais de um componente do mesmo papel, vence o de menor índice.
 pub(crate) unsafe fn dados_de_customizacao(entidade: *mut c_void) -> (bool, String, String, String) {
-    let (mut masc, mut pele, mut olhos, mut unhas) = (false, String::new(), String::new(), String::new());
-    let arr = (entidade as *const u8).add(0xA0);
-    if !crate::memoria::is_readable(arr as *const c_void, 0x10) {
-        return (masc, pele, olhos, unhas);
+    let vazio = (false, String::new(), String::new(), String::new());
+    if !rtti::sane(entidade) {
+        return vazio;
     }
-    let (dados, n) = ((arr as *const u64).read_unaligned(), (arr.add(0x0c) as *const u32).read_unaligned() as u64);
-    if dados == 0 || n > 4096 || !crate::memoria::is_readable(dados as *const c_void, (n * 16) as usize) {
-        return (masc, pele, olhos, unhas);
+    let (e, n, cap) = dynarray_em((entidade as *mut u8).add(0xA0) as *mut c_void);
+    if e == 0 || n > 4096 || !dynarray_coerente(e, n, cap) || !crate::memoria::is_readable(e as *const c_void, n as usize * 16) {
+        return vazio;
     }
-    let h = |s: &str| bwms_primitives::fnv1a64(s.as_bytes());
-    for i in (0..n).rev() {
-        let comp = ((dados + i * 16) as *const u64).read_unaligned();
-        if comp == 0 || !crate::memoria::is_readable((comp + 0x40) as *const c_void, 8) {
+    let (mut masc, mut pele, mut olhos, mut unhas) = vazio;
+    for i in (0..n as usize).rev() {
+        let comp = ((e as usize + i * 16) as *const u64).read_unaligned() as *mut c_void;
+        if comp.is_null() || !crate::memoria::is_readable(comp as *const c_void, 0x48) {
             continue;
         }
-        let nome = ((comp + 0x40) as *const u64).read_unaligned();
-        if nome == h("t0_000_pma_base__full") {
+        let nome = ((comp as *const u8).add(0x40) as *const u64).read_unaligned();
+        if nome == CORPO_MASCULINO {
             masc = true;
-            pele = nome_da_aparencia_do_componente(comp as *mut c_void);
-        } else if nome == h("t0_000_pwa_base__full") || nome == h("t0_000_pwa_fpp__torso") {
+            pele = nome_da_aparencia_do_componente(comp);
+        } else if CORPOS_FEMININOS.contains(&nome) {
             masc = false;
-            pele = nome_da_aparencia_do_componente(comp as *mut c_void);
-        } else if nome == h("he_000_pma__basehead") || nome == h("MorphTargetSkinnedMesh3637") {
-            olhos = nome_da_aparencia_do_componente(comp as *mut c_void);
+            pele = nome_da_aparencia_do_componente(comp);
+        } else if COMPONENTES_DE_OLHOS.contains(&nome) {
+            olhos = nome_da_aparencia_do_componente(comp);
         } else if COMPONENTES_DE_UNHA.contains(&nome) {
-            unhas = nome_da_aparencia_do_componente(comp as *mut c_void);
+            unhas = nome_da_aparencia_do_componente(comp);
         }
     }
     (masc, pele, olhos, unhas)
@@ -8268,41 +6797,48 @@ pub(crate) unsafe fn cor_do_cabelo(reg: &crate::rtti::Registry, player: *mut c_v
     achada.map(crate::cname::resolve_cname).unwrap_or_default()
 }
 
-/// `UpdateState(entidade, item equipado)` pro player (game thread).
+/// Estado dinâmico do V (thread do jogo): os 7 sufixos do item `equipado` (0 = nenhum) e as cores de pele, olhos, unhas e cabelo. As cores
+/// guardam o cru vazio. Condição = `atributo=valor` de todo atributo com valor.
 pub(crate) unsafe fn estado_dinamico_do_player(reg: &crate::rtti::Registry, player: *mut c_void, equipado: u64) -> Option<EstadoDinamico> {
     if player.is_null() {
         return None;
     }
     let mut dono = [0u64; 2];
-    crate::rtti::make_handle(dono.as_mut_ptr() as *mut c_void, player);
+    rtti::make_handle(dono.as_mut_ptr() as *mut c_void, player);
     if dono[0] == 0 {
         return None;
     }
-    let mut e = EstadoDinamico::default();
-    let mut nomes: Vec<(&str, String)> = Vec::new();
-    for (atributo, sufixo) in ATRIBUTOS_DE_SUFIXO {
-        let (v, s) = dado_do_sufixo(reg, &dono, bwms_primitives::tweak_db_id(sufixo), equipado);
-        nomes.push((atributo, v.clone()));
-        e.valores.insert(bwms_primitives::fnv1a64(atributo.as_bytes()), (v, s));
+    let mut estado = EstadoDinamico::default();
+    let mut gravar = |atributo: &str, valor: String, cru: String| {
+        estado.valores.insert(bwms_primitives::fnv1a64(atributo.as_bytes()), (valor, cru));
+    };
+    for (atributo, registro) in ATRIBUTOS_DE_SUFIXO {
+        let (valor, cru) = dado_do_sufixo(reg, &dono, bwms_primitives::tweak_db_id(registro), equipado);
+        gravar(atributo, valor, cru);
     }
     crate::jogo::objetos::soltar_handle(&mut dono);
     let (masc, pele, olhos, unhas) = dados_de_customizacao(player);
-    let cabelo = cor_do_cabelo(reg, player, masc);
     let unhas = if unhas.is_empty() {
         let sistema = crate::jogo::sessao::sistema_pelo_getter_do_jogador(reg, player, "GetCharacterCustomizationSystem");
         cor_da_unha_pela_customizacao(sistema as u64, masc)
     } else {
         unhas
     };
-    for (atributo, v) in [("skin_color", pele), ("hair_color", cabelo), ("eyes_color", olhos), ("nails_color", unhas)] {
-        nomes.push((atributo, v.clone()));
-        e.valores.insert(bwms_primitives::fnv1a64(atributo.as_bytes()), (v, String::new()));
-    }
-    e.condicoes = nomes.iter().filter(|(_, v)| !v.is_empty()).map(|(a, v)| condicao_do_estado(a, v)).collect();
-    Some(e)
+    gravar("skin_color", pele, String::new());
+    gravar("eyes_color", olhos, String::new());
+    gravar("nails_color", unhas, String::new());
+    gravar("hair_color", cor_do_cabelo(reg, player, masc), String::new());
+    let condicoes = ATRIBUTOS_DE_SUFIXO
+        .iter()
+        .map(|(a, _)| *a)
+        .chain(["skin_color", "eyes_color", "nails_color", "hair_color"])
+        .filter_map(|a| Some(estado.valor(a)).filter(|v| !v.is_empty()).map(|v| condicao_do_estado(a, v)))
+        .collect();
+    estado.condicoes = condicoes;
+    Some(estado)
 }
 
-// ArchiveXL 1.27 `{nails_color}` no estado dinâmico NATIVO da 2.5: o `CollectStateData` do motor (`0x101cc3660`, x0 mapa de estados por entidade, x1
+// `{nails_color}` no estado dinâmico NATIVO da 2.5: o `CollectStateData` do motor (`0x101cc3660`, x0 mapa de estados por entidade, x1
 // entidade) grava pele/cabelo/olhos pelo `GetCustomizationData` (`0x101cc4598`, só corpo e cabeça) e refaz as condições no fim (`0x101cc5994`, estado
 // `+0x30`). O hook grava `nails_color` no mapa de atributos da entidade antes da original, e as condições já saem com a unha.
 pub(crate) const COLETAR_ESTADO_VM: u64 = 0x1_01cc_3660;
@@ -8315,7 +6851,7 @@ const ESTADO_DA_ENTIDADE_VM: u64 = 0x1_01cc_53d4;
 /// `Map<CName, DynamicAttributeData>::operator[]` (x1 `&CName`, x2 rascunho): valor = 2 `std::string` da libc++, valor em `+0` e sufixo em `+0x18`.
 const ATRIBUTO_DO_ESTADO_VM: u64 = 0x1_01cc_5f30;
 
-/// `ComponentWrapper(Handle<IComponent>&)` (x0 saída de 0x18 B) e o `GetAppearanceName` dele (campo `+0x190`, `+0x230` ou `+0x238` pelo tipo).
+/// Embrulho de componente do motor 2.5 (`Handle<IComponent>&`, x0 saída de 0x18 B) e o leitor de aparência dele (campo `+0x190`, `+0x230` ou `+0x238` pelo tipo).
 const EMBRULHO_DO_COMPONENTE_VM: u64 = 0x1_01cd_7a08;
 
 const APARENCIA_DO_EMBRULHO_VM: u64 = 0x1_01cd_84f4;
@@ -8401,7 +6937,7 @@ unsafe fn sistema_de_customizacao_do_motor() -> u64 {
 
 /// `definition` da opção de unha nos grupos dos braços do estado de customização (`+0x90`; grupo 0x28 B com nome `+0`, opções `+0x8` e contagem
 /// `+0x14`; opção 0x28 B com nome `+0x10` e `definition` `+0x20`, como o `GetArmsAppearances` `0x104bbfc78` lê); 0 sem ela. O grupo é o último
-/// com o nome, como na referência.
+/// com o nome.
 pub(crate) unsafe fn definicao_da_unha_no_estado(estado: u64) -> u64 {
     let arr = (estado + 0x90) as *const u8;
     if !crate::memoria::is_readable(arr as *const c_void, 0x10) {
@@ -8482,7 +7018,7 @@ unsafe fn gravar_cor_da_unha(estados: u64, entidade: u64) {
     }
     let mut chave = CNAME_COR_DA_UNHA.load(Ordering::Relaxed);
     if chave == 0 {
-        // Como o `CName` construído do texto na referência: o nome fica legível no pool do motor.
+        // Registrado no pool do motor: o mapa de atributos do estado nativo é lido por nome.
         chave = crate::cname::registrar_no_pool("nails_color");
         CNAME_COR_DA_UNHA.store(chave, Ordering::Relaxed);
     }
@@ -8580,7 +7116,7 @@ mod testes_da_unha {
     }
 }
 
-// ArchiveXL 1.27 nome composto de material: `a+b+c` dá `{material.1}`..`{material.N}` no caminho dinâmico do material, além do `{material}`. Na 2.5
+// Nome composto de material: `a+b+c` dá `{material.1}`..`{material.N}` no caminho dinâmico do material, além do `{material}`. Na 2.5
 // o `ExpandResourcePath` nativo (`0x101ce2d38`) monta os locais do `ProcessString` (`0x101ce4040`) só com `{material, nome}`, pelo construtor de
 // `std::map<CName, CName>` (`0x101ce84ac`: x0 saída, x1 pares de 16 B, x2 contagem), que só ele chama. O hook troca esse par único pelos pares com
 // as partes.
@@ -8597,7 +7133,7 @@ pub(crate) fn partes_do_material(nome: &str) -> Vec<&str> {
     nome.split('+').filter(|p| !p.is_empty()).collect()
 }
 
-/// Pares `{material, nome}` seguidos de `{material.N, parte N}`, com cada nome registrado no pool do motor como o `ExtractDynamicName` da referência.
+/// Pares `{material, nome}` seguidos de `{material.N, parte N}`, com cada nome registrado no pool do motor: o expansor nativo lê os nomes pelo pool.
 unsafe fn pares_do_material_composto(valor: u64) -> Vec<[u64; 2]> {
     let mut pares = vec![[ATRIBUTO_MATERIAL, valor]];
     let nome = crate::cname::resolve_cname(valor);
@@ -8661,7 +7197,7 @@ mod testes_do_material_composto {
 }
 
 /// `ResolveName`/`ResolvePath` de produção (`BwmsAparencia.ResolveName`/`ResolvePath` e o `ApplyAppearanceOverride` do `#22`): nome sem `*` volta igual sem
-/// calcular estado; com `*`, o estado da entidade na hora, sem item equipado (a referência usa o último `UpdateState` da entidade, feito por item de roupa).
+/// calcular estado; com `*`, o estado da entidade na hora, sem item equipado: a native não sabe qual item está sendo montado.
 pub(crate) unsafe fn resolver_nome_da_entidade(reg: &crate::rtti::Registry, entidade: *mut c_void, nome: &str) -> String {
     if !nome.starts_with('*') {
         return nome.to_string();
@@ -8672,11 +7208,11 @@ pub(crate) unsafe fn resolver_nome_da_entidade(reg: &crate::rtti::Registry, enti
     }
 }
 
-// ArchiveXL `#11`: `ChangeAppearance`/`ChangeAppearances` do `RuntimeSystemEntityAppearanceChanger` com o `ApplyAppOverride` antes da original
-// (`Customization/Extension.cpp:155-195`; tabela em `app_overrides`). Desmonte de 2026-09-14: `ChangeAppearance` `0x101a59e30` (x0 sistema, x1
+// `ChangeAppearance`/`ChangeAppearances` do `RuntimeSystemEntityAppearanceChanger` com o `ApplyAppOverride` antes da original
+// (tabela em `app_overrides`). Desmonte de 2026-09-14: `ChangeAppearance` `0x101a59e30` (x0 sistema, x1
 // `AppearanceChangeRequest*` de 0x38 B {WeakHandle @0, velho @0x10, novo @0x20, flags @0x30}, x2 `std::function&`, w3); `ChangeAppearances` `0x101a5c6e0`
 // (x0 sistema, x1 `Handle<Puppet>&`, as 2 `Range<AppearanceDescriptor>` por valor em x2/x3 e x4/x5, início e fim, 16 B por elemento, x6
-// `std::function&`, w7 u8 — o `Range&` e o `a5` da referência são o ABI do Windows). Quem chama: o `gameuiAttachmentSlotsListener` do V (slots
+// `std::function&`, w7 u8). Quem chama: o `gameuiAttachmentSlotsListener` do V (slots
 // Chest/Legs/Torso/Outfit/Underwear, `0x104ba9ef8`–`0x104bafcb8`) e o `Entity.ScheduleAppearanceChange` (`0x1019ad5d8` → `0x101a59da0`, pedido com
 // recurso 0, que o `operator bool` do descritor deixa de fora).
 pub(crate) const CHANGE_APPEARANCE_VM: u64 = 0x1_01a5_9e30;
@@ -8727,7 +7263,7 @@ pub(crate) unsafe extern "C" fn change_appearances_hook(
     f(sistema, boneco, velho_ini, velho_fim, novo_ini, novo_fim, funcao, flag)
 }
 
-/// No `on_load`: os 2 hooks, sempre (com a tabela vazia só repassam, como na referência); com `~/.bwms-hook-a11-teste`, as anotações e o `resource.link`.
+/// No `on_load`: os 2 hooks, sempre (com a tabela vazia só repassam); com `~/.bwms-hook-a11-teste`, as anotações e o `resource.link`.
 pub(crate) unsafe fn install_app_overrides() {
     let teste = marcador_individual("a11-teste");
     A11_TESTE.store(teste, Ordering::Relaxed);
@@ -8850,9 +7386,9 @@ pub(crate) unsafe fn extrair_pacote_do_cabecalho(cabecalho: u64, flags: [u8; 5],
 /// Ordem padrão dos sufixos de aparência (o registro cuja lista `appearanceSuffixes` o motor percorre).
 pub(crate) const ORDEM_PADRAO_DE_SUFIXOS: &str = "itemsFactoryAppearanceSuffix.ItemsFactoryAppearanceSuffixOrderDefault";
 
-// ===== ArchiveXL `#29` — `PuppetStateHandler` (2026-09-12) =====
+// ===== `PuppetStateHandler` (2026-09-12) =====
 // O handler é redscript (`ponte-puppetstate-armsdetect.reds`): o listener nativo de script repassa os eventos de slot por nome. Aqui ficam os 4
-// registros de sufixo que a referência cria no `OnTweakDBReady` (`CreateSuffixRecord` + `ActivateSuffixRecords`) e o teste, que chama os 5 passos do
+// registros de sufixo que o handler responde e o teste, que chama os 5 passos do
 // `BwmsPuppetStateTeste` e confere pelo caminho do motor (`a9_valor_do_sufixo`: flats do registro → sistema de script → função) que o sufixo devolve o
 // estado do handler.
 const REGISTROS_DE_SUFIXO: [(&str, &str); 4] = [
@@ -8869,8 +7405,8 @@ pub(crate) const VALORES_DE_BRACOS: [&str; 4] = ["BaseArms", "MantisBlades", "Mo
 pub(crate) const VALORES_DE_PES: [&str; 5] = ["", "Flat", "Lifted", "HighHeels", "FlatShoes"];
 pub(crate) static REGISTROS_DE_SUFIXO_OK: AtomicBool = AtomicBool::new(false);
 
-/// ArchiveXL `#29`: os 4 registros de sufixo, uma vez por processo, no 1º tick com o TweakDB carregado e o executor livre (no menu, antes do load do
-/// save, como o `OnTweakDBReady` da referência). Registro que já existe fica como está, e o id só entra no fim da ordem padrão se faltar.
+/// Os 4 registros de sufixo, uma vez por processo, no 1º tick com o TweakDB carregado e o executor livre (no menu, antes do load do
+/// save). Registro que já existe fica como está, e o id só entra no fim da ordem padrão se faltar.
 pub(crate) fn registros_de_sufixo_tick() {
     static FEITO: AtomicBool = AtomicBool::new(false);
     if FEITO.load(Ordering::Relaxed) || crate::inicio::boot::exec_nested() {
@@ -8976,5 +7512,807 @@ pub(crate) fn cargas_de_definicao_tick() {
             }
             crate::veredito_dev!("[a51f2] carga do compiledData pedida em {n} definição(ões) do .app de patch {patch:#018x} ({r:#x})");
         }
+    }
+}
+
+/// Nome e texto dinâmico de aparência.
+#[cfg(test)]
+mod testes_do_nome_dinamico {
+    use super::*;
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+    fn h(s: &str) -> u64 {
+        bwms_primitives::fnv1a64(s.as_bytes())
+    }
+
+    fn conjunto(itens: &[&str]) -> BTreeSet<u64> {
+        itens.iter().map(|s| if s.is_empty() { 0 } else { h(s) }).collect()
+    }
+
+    fn criterio(texto: &str) -> (u64, u64, BTreeSet<u64>, BTreeSet<u64>, bool, bool, i32) {
+        let r = DynamicAppearanceRef::parse(texto);
+        (r.value, r.name, r.variants, r.conditions, r.is_dynamic, r.is_conditional, r.weight)
+    }
+
+    #[test]
+    fn criterio_separa_variantes_e_condicoes() {
+        assert_eq!(criterio(""), (0, 0, conjunto(&[]), conjunto(&[]), false, false, 0));
+        assert_eq!(criterio("torso"), (h("torso"), h("torso"), conjunto(&[]), conjunto(&[]), false, false, 0));
+        assert_eq!(criterio("torso!v1!v2&c1&c2"), (h("torso!v1!v2&c1&c2"), h("torso"), conjunto(&["v1", "v2"]), conjunto(&["c1", "c2"]), true, true, 102));
+        assert_eq!(criterio("eyes&male"), (h("eyes&male"), h("eyes"), conjunto(&[]), conjunto(&["male"]), true, true, 1));
+        assert_eq!(criterio("&cond1").1, 0);
+        assert_eq!(criterio("!"), (h("!"), 0, conjunto(&[]), conjunto(&[]), true, false, 0));
+        assert_eq!(criterio("!!").2, conjunto(&[""]));
+        assert_eq!(criterio("&&").3, conjunto(&[""]));
+        assert_eq!((criterio("a!").5, criterio("a&").5), (false, false));
+        assert_eq!(criterio("a!!b").2, conjunto(&["", "b"]));
+        assert_eq!(criterio("a!b!!c").2, conjunto(&["", "b", "c"]));
+        assert_eq!((criterio("a&b&&c").3, criterio("a&b&&c").6), (conjunto(&["", "b", "c"]), 3));
+        assert_eq!((criterio("a!b&").2, criterio("a!b&").3), (conjunto(&["b"]), conjunto(&[])));
+        assert_eq!((criterio("a!&c").2, criterio("a!&c").3), (conjunto(&[]), conjunto(&["c"])));
+        assert_eq!(criterio("a&c!v").3, conjunto(&["c!v"]));
+        assert_eq!((criterio("a!v&c!w").2, criterio("a!v&c!w").3), (conjunto(&["v"]), conjunto(&["c!w"])));
+        assert_eq!(criterio("a!v1!v1").2, conjunto(&["v1"]));
+        assert_eq!(criterio("a!b%3").2, conjunto(&["b%3"]));
+        assert_eq!(criterio("a%3!b").1, h("a%3"));
+        assert_eq!(criterio("ç!ã&é"), (h("ç!ã&é"), h("ç"), conjunto(&["ã"]), conjunto(&["é"]), true, true, 101));
+        assert_eq!(dynref_extract_name_hash(""), 0);
+        assert_eq!(dynref_extract_name_hash("a!b"), h("a!b"));
+    }
+
+    /// Peso sem estouro: com variante, qualquer número de condições continua acima de qualquer critério sem variante com menos de 100.
+    #[test]
+    fn peso_conta_variante_e_cada_condicao_sem_estouro() {
+        let com = |n: usize, variante: bool| {
+            let mut t = String::from(if variante { "x!v" } else { "x" });
+            for i in 0..n {
+                t.push_str(&format!("&c{i}"));
+            }
+            let r = DynamicAppearanceRef::parse(&t);
+            (r.weight, r.is_conditional)
+        };
+        assert_eq!(com(26, false), (26, true));
+        assert_eq!(com(27, true), (127, true));
+        assert_eq!(com(28, true), (128, true));
+        assert_eq!(com(128, false), (128, true));
+        assert_eq!(com(156, true), (256, true));
+        assert_eq!(com(256, true), (356, true));
+    }
+
+    #[test]
+    fn criterio_casa_variante_e_condicoes_com_overrides() {
+        let r = DynamicAppearanceRef::parse("torso!v1&c1&c2");
+        assert!(r.matches_variant(h("v1")));
+        assert!(!r.matches_variant(h("v2")) && !r.matches_variant(0) && !r.matches_variant(h("torso")));
+        assert!(!r.matches_conditions_with_overrides(&conjunto(&["c1"]), &conjunto(&[])));
+        assert!(r.matches_conditions_with_overrides(&conjunto(&["c1"]), &conjunto(&["c2"])));
+        assert!(r.matches_conditions_with_overrides(&conjunto(&[]), &conjunto(&["c1", "c2"])));
+        assert!(DynamicAppearanceRef::parse("torso!v1").matches_conditions_with_overrides(&conjunto(&[]), &conjunto(&[])));
+    }
+
+    fn partes(pares: &[(&str, &str)]) -> BTreeMap<u64, u64> {
+        pares.iter().map(|(k, v)| (h(k), if v.is_empty() { 0 } else { h(v) })).collect()
+    }
+
+    #[test]
+    fn nome_le_variante_partes_overrides_e_contexto() {
+        let n = DynamicAppearanceName::parse("torso!v1+color=red+size=xl");
+        assert_eq!((n.name, n.variant, n.is_dynamic), (h("torso"), h("v1+color=red+size=xl"), true));
+        assert_eq!(n.parts, partes(&[("color", "red"), ("size", "xl"), ("variant", "v1+color=red+size=xl"), ("variant.1", "v1")]));
+        assert_eq!(n.overrides, conjunto(&["colo", "siz"]));
+        let n = DynamicAppearanceName::parse("casaco!azul+gola=alta+curta&gender=w%123");
+        assert_eq!((n.variant, n.context), (h("azul+gola=alta+curta"), 123));
+        assert_eq!(n.parts, partes(&[("gola", "alta"), ("variant", "azul+gola=alta+curta"), ("variant.1", "azul"), ("variant.2", "curta")]));
+        assert_eq!(n.overrides, conjunto(&["gola="]));
+        let n = DynamicAppearanceName::parse("torso!azul++x=");
+        assert_eq!(n.parts, partes(&[("variant", "azul++x="), ("variant.1", "azul"), ("x", "")]));
+        assert_eq!(n.overrides, conjunto(&["x"]));
+        let n = DynamicAppearanceName::parse("a!=v");
+        assert_eq!((n.parts.get(&0).copied(), n.overrides.clone()), (Some(h("v")), conjunto(&["=v"])));
+        assert_eq!(DynamicAppearanceName::parse("a!k=v=w").overrides, conjunto(&["k=v="]));
+        assert_eq!(DynamicAppearanceName::parse("a!+k=v").overrides, conjunto(&["k="]));
+        assert_eq!(DynamicAppearanceName::parse("ç!ã+é=ü").overrides, conjunto(&["é="]));
+        let doze = DynamicAppearanceName::parse("a!p0+p1+p2+p3+p4+p5+p6+p7+p8+p9+p10+p11");
+        assert_eq!((doze.parts.get(&h("variant.:")).copied(), doze.parts.get(&h("variant.<")).copied()), (Some(h("p9")), Some(h("p11"))));
+    }
+
+    #[test]
+    fn nome_corta_no_contexto_e_na_condicao_e_nao_entra_em_panico() {
+        let ctx = |t: &str| DynamicAppearanceName::parse(t).context;
+        assert_eq!(ctx("torso!v1&cond1%42"), 42);
+        assert_eq!(ctx("torso!v1%42&cond1"), 0);
+        assert_eq!((ctx("a!b%abc"), ctx("a!b%12x"), ctx("a!b%-1"), ctx("a!b%18446744073709551616"), ctx("a!b%")), (0, 0, 0, 0, 0));
+        assert_eq!(ctx("a!b%18446744073709551615"), u64::MAX);
+        let n = DynamicAppearanceName::parse("a!b%3%4");
+        assert_eq!((n.variant, n.context), (h("b%3"), 4));
+        assert_eq!(DynamicAppearanceName::parse("a!b&c&d").variant, h("b"));
+        assert_eq!(DynamicAppearanceName::parse("a!b!c").variant, h("b!c"));
+        for t in ["%1&c!v1", "a&b!c", "a%5!b", "torso", ""] {
+            let n = DynamicAppearanceName::parse(t);
+            assert_eq!((n.name, n.is_dynamic, n.variant), (n.value, false, 0), "{t}");
+        }
+        let vazio = DynamicAppearanceName::parse("torso!");
+        assert_eq!((vazio.is_dynamic, vazio.variant, vazio.parts.len()), (true, 0, 0));
+        assert_eq!(DynamicAppearanceName::parse("!v").name, 0);
+    }
+
+    #[test]
+    fn criterio_casa_nome_pela_variante_e_pelas_condicoes() {
+        let casa = |r: &str, a: &str, c: Option<&[&str]>| {
+            let condicoes = c.map(conjunto);
+            appearance_matches_reference_com(&DynamicAppearanceRef::parse(r), &DynamicAppearanceName::parse(a), condicoes.as_ref())
+        };
+        assert!(casa("torso!v1!v2", "torso!v1", None));
+        assert!(!casa("torso!v1!v2", "torso!v9", None) && !casa("torso!v1!v2", "torso", None));
+        assert!(!casa("torso!v1&c1", "torso!v1", None));
+        assert!(casa("torso!v1&c1", "torso!v1", Some(&["c1"])));
+        assert!(!casa("torso!v1&c1&c2", "torso!v1", Some(&["c1"])));
+        assert!(casa("torso&gender=w", "outro!qualquer", Some(&["gender=w"])));
+        assert!(!casa("torso&gender=w", "outro!qualquer", Some(&["gender=m"])));
+        assert!(casa("torso", "x!y", None));
+        for r in ["a!v1&cor", "a!v1&cor=", "a!v1&cor=red"] {
+            assert!(!casa(r, "b!v1+cor=red", Some(&[])), "{r}");
+        }
+        assert!(appearance_matches_reference(&DynamicAppearanceRef::parse("torso"), &DynamicAppearanceName::parse("x!y")));
+    }
+
+    fn texto(attr: &str, valor: &str, entrada: &str) -> (bool, bool, bool, String) {
+        let t = process_dynamic_string_single_attr(attr, valor, entrada);
+        (t.valid, t.missed, t.optional, t.value)
+    }
+
+    #[test]
+    fn texto_troca_atributos_marca_falta_e_opcional() {
+        assert_eq!(texto("gender", "fem", "*t0_{gender}_body"), (true, false, false, "t0_fem_body".into()));
+        assert_eq!(texto("gender", "fem", "*t0_{outroattr}_body"), (true, true, false, "t0__body".into()));
+        assert_eq!(texto("gender", "fem", "*sem_marcador"), (false, false, false, String::new()));
+        assert_eq!(texto("gender", "fem", "*t0_{gender_sem_fechar"), (false, false, false, String::new()));
+        assert_eq!(texto("gender", "fem", "*t0_{gender}?"), (true, false, true, "t0_fem".into()));
+        assert_eq!(texto("gender", "fem", ""), (false, false, false, String::new()));
+        assert_eq!(texto("x", "1", "{x}"), (true, false, false, "1".into()));
+        assert_eq!(texto("x", "1", "**{x}"), (true, false, false, "*1".into()));
+        assert_eq!(texto("", "", "*a_{x}"), (true, true, false, "a_".into()));
+        assert_eq!(texto("x", "", "*a_{x}_b"), (true, false, false, "a__b".into()));
+        assert_eq!(texto("x", "1", "*{x}{x}{x}"), (true, false, false, "111".into()));
+        assert_eq!(texto("x", "1", "*a{{x}}b"), (true, true, false, "a}b".into()));
+        assert_eq!(texto("x", "1", "*a}{x}"), (true, false, false, "a}1".into()));
+        assert_eq!(texto("x", "1", "*a{x}b}c"), (true, false, false, "a1b}c".into()));
+        assert_eq!(texto("X", "1", "*{x}"), (true, true, false, String::new()));
+        assert_eq!(texto("x", "1", "*fim?{x}?"), (true, false, true, "fim?1".into()));
+        assert_eq!(process_dynamic_string_single_attr("x", "1", "*{}").atributos, BTreeSet::from([bwms_primitives::FNV1A64_OFFSET]));
+        assert_eq!(process_dynamic_string_single_attr("x", "1", "*a{{x}}b").atributos, conjunto(&["{x"]));
+    }
+
+    /// Texto literal que passa do teto invalida; valor de atributo que estoura no fim é truncado.
+    #[test]
+    fn texto_no_teto_de_512_bytes() {
+        let com = |antes: &str, valor: &str, depois: &str| {
+            let t = process_dynamic_string_single_attr("x", valor, &format!("*{antes}{{x}}{depois}"));
+            (t.valid, t.value.len(), t.value.get(t.value.len().saturating_sub(4)..).unwrap_or("").to_string())
+        };
+        assert_eq!(com(&"a".repeat(600), "1", ""), (false, 0, String::new()));
+        assert_eq!(com(&"a".repeat(511), "1", ""), (true, 512, "aaa1".into()));
+        assert_eq!(com(&"a".repeat(512), "1", ""), (false, 0, String::new()));
+        assert_eq!(com("", "1", &"b".repeat(600)), (false, 0, String::new()));
+        assert_eq!(com(&"a".repeat(510), "zz", ""), (true, 512, "aazz".into()));
+        assert_eq!(com("", &"v".repeat(600), ""), (true, 512, "vvvv".into()));
+    }
+
+    #[test]
+    fn texto_com_estado_prefere_local_e_resolve_nome() {
+        let globais: HashMap<u64, String> = [(h("gender"), "w".into()), (h("camera"), "fpp".into()), (h("skin_color"), String::new())].into();
+        let locais: HashMap<u64, String> = [(h("variant"), "azul".into()), (h("gender"), "LOCAL".into())].into();
+        let t = processar_texto_dinamico(&globais, &locais, "*{gender}_{camera}");
+        assert_eq!((t.valid, t.missed, t.value.as_str()), (true, false, "LOCAL_fpp"));
+        let t = processar_texto_dinamico(&globais, &locais, "*{skin_color}_x");
+        assert_eq!((t.missed, t.value.as_str()), (false, "_x"));
+        let t = processar_texto_dinamico(&globais, &locais, "*x_{camera}_{nada}?");
+        assert_eq!((t.valid, t.missed, t.optional, t.value.as_str()), (true, true, true, "x_fpp_"));
+        assert!(!processar_texto_dinamico(&globais, &locais, "plano").valid);
+        let g: HashMap<u64, String> = [(h("gender"), "w".into())].into();
+        let l: HashMap<u64, String> = [(h("variant"), "azul".into())].into();
+        let r = |n: &str| resolver_nome_dinamico(&g, &l, n);
+        assert_eq!((r("plano"), r("*{gender}_{variant}"), r("*x_{nada}?"), r("*x_{nada}")), ("plano".into(), "w_azul".into(), String::new(), "x_".into()));
+        assert_eq!((r("*sem_chaves"), r("*aberto_{gender"), r("*{gender}?"), r(""), r("*")), ("*sem_chaves".into(), "*aberto_{gender".into(), "w".into(), String::new(), "*".into()));
+    }
+
+    #[test]
+    fn nome_base_unico_dinamico_e_condicao_do_estado() {
+        for (t, base) in [("torso!v1", "torso"), ("torso%42", "torso"), ("torso&cond", "torso"), ("torso", "torso"), ("", ""), ("!x", ""), ("a&b!c", "a"), ("a%1!b", "a"), ("ç!ã", "ç")] {
+            assert_eq!(get_base_appearance_name(t), base, "{t}");
+        }
+        for t in ["default", "random", "empty_appearance_default"] {
+            assert!(!is_unique_appearance_name(h(t)), "{t}");
+        }
+        assert!(!is_unique_appearance_name(0));
+        assert!(is_unique_appearance_name(h("Default")) && is_unique_appearance_name(h("None")) && is_unique_appearance_name(h("t0_000_fem_body")));
+        assert!(is_dynamic_value("*{attr}_x") && is_dynamic_value("*"));
+        assert!(!is_dynamic_value("valor_fixo") && !is_dynamic_value("") && !is_dynamic_value(" *x") && !is_dynamic_value("x*"));
+        assert_eq!(condicao_do_estado("gender", "w"), 0xa141_a980_10ec_99b0);
+        assert_eq!(condicao_do_estado("skin_color", "01_ca_pale"), h("skin_color=01_ca_pale"));
+        assert_eq!((condicao_do_estado("", ""), condicao_do_estado("a", "")), (h("="), h("a=")));
+    }
+
+    /// O snake case que o estado aplica nos sufixos (`texto_e_numeros::para_snake_case`).
+    #[test]
+    fn snake_case_dos_sufixos_do_estado() {
+        for (t, s) in [
+            ("FPP", "fpp"),
+            ("BaseBody", "base_body"),
+            ("foo_Bar", "foo_bar"),
+            ("v2Model", "v2_model"),
+            ("çãoFoo", "ção_foo"),
+            ("ãB", "ã_b"),
+            ("", ""),
+            ("aB_C", "a_b_c"),
+            ("_A", "_a"),
+            ("A_", "a_"),
+            ("__X", "__x"),
+            ("XMLHttp", "xmlhttp"),
+            ("a b C", "a b _c"),
+        ] {
+            assert_eq!(para_snake_case(t), s, "{t}");
+        }
+    }
+
+    #[test]
+    fn criterio_vivo_le_o_texto_internado() {
+        assert_eq!(unsafe { parse_reference_live(0) }, DynamicAppearanceRef::default());
+        let nome = crate::cname::intern("bwms_b4_torso!v1&c1");
+        assert_eq!(unsafe { parse_reference_live(nome) }, DynamicAppearanceRef::parse("bwms_b4_torso!v1&c1"));
+    }
+}
+
+/// Loja de override por componente, tags, prefixo, condicionais, offsets de roupa e override de aparência de customização.
+/// Cada teste usa entidades próprias: as lojas são do processo.
+#[cfg(test)]
+mod testes_da_loja_de_override {
+    use super::*;
+    use bwms_primitives::override_state::ComponentState;
+
+    fn h(s: &str) -> u64 {
+        bwms_primitives::fnv1a64(s.as_bytes())
+    }
+
+    /// Componente em memória: nome `+0x40`, `appearanceName` `+0x48`, `appearancePath` `+0x68`, máscara de teste `+0x80`, `isEnabled` `+0x8b`.
+    fn componente(nome: &str, mascara: u64) -> *mut u8 {
+        let c: &'static mut [u64; 32] = Box::leak(Box::new([0u64; 32]));
+        c[0x40 / 8] = crate::cname::intern(nome);
+        c[0x80 / 8] = mascara;
+        let p = c.as_mut_ptr() as *mut u8;
+        unsafe { p.add(0x8b).write(7) };
+        p
+    }
+
+    /// Entidade com a lista de componentes em `+0xA0`.
+    fn entidade(componentes: &[*mut u8]) -> *mut c_void {
+        let handles: &'static mut Vec<[u64; 2]> = Box::leak(Box::new(componentes.iter().map(|c| [*c as u64, 0]).collect()));
+        let e: &'static mut [u64; 32] = Box::leak(Box::new([0u64; 32]));
+        e[0xA0 / 8] = if handles.is_empty() { 0 } else { handles.as_mut_ptr() as u64 };
+        e[0xA8 / 8] = (handles.len() as u64) | ((handles.len() as u64) << 32);
+        e.as_mut_ptr() as *mut c_void
+    }
+
+    unsafe fn mascara(c: *mut u8) -> u64 {
+        (c.add(0x80) as *const u64).read_unaligned()
+    }
+
+    /// A aplicação dos testes: a decisão da loja gravada na máscara de teste, com a original do cache.
+    unsafe fn aplicar(e: u64, c: *mut c_void) -> bool {
+        let id = es20_id_do_componente((0x48, 0x68), c as *const u8);
+        let alvo = (c as *mut u8).add(0x80) as *mut u64;
+        match es20_decidir_mascara(e, c as *const u8, || es20_original(e, id, 0, || alvo.read_unaligned())) {
+            Some(m) => {
+                alvo.write_unaligned(m);
+                true
+            }
+            None => false,
+        }
+    }
+
+    #[test]
+    fn tabela_tem_as_14_tags_com_as_chaves_de_cada_uma() {
+        let contagem: Vec<(u64, usize)> = TAGS_EMBUTIDAS.iter().map(|(t, e)| (*t, e.len())).collect();
+        let esperado = [
+            ("hide_Head", 12),
+            ("hide_Arms", 3),
+            ("hide_Torso", 8),
+            ("hide_LowerAbdomen", 3),
+            ("hide_UpperAbdomen", 3),
+            ("hide_CollarBone", 3),
+            ("hide_Chest", 4),
+            ("hide_Legs", 5),
+            ("hide_Thighs", 3),
+            ("hide_Calves", 8),
+            ("hide_Ankles", 9),
+            ("hide_Feet", 8),
+            ("HighHeels", 5),
+            ("FlatShoes", 5),
+        ];
+        assert_eq!(contagem, esperado.map(|(t, n)| (h(t), n)).to_vec());
+        for (t, _) in esperado {
+            assert!(tag_por_hash(h(t)).is_some(), "{t}");
+        }
+        assert!(tag_por_hash(h("tag_que_nao_existe")).is_none() && tag_por_hash(0).is_none() && tag_por_hash(h("hide_torso")).is_none());
+        let efeito = |tag: &str, chave: &str| tag_por_hash(h(tag)).and_then(|t| t.iter().find(|(c, _, _)| c.valor() == h(chave)).map(|&(_, m, x)| (m, x)));
+        assert_eq!(efeito("hide_Head", "beard_"), Some((false, 0)), "esconder tudo = máscara 0");
+        assert_eq!(efeito("hide_Torso", "n0_"), Some((false, 0)));
+        assert_eq!(efeito("hide_Torso", "t0_000_pma_base__full"), Some((false, !0b1111)));
+        assert_eq!(efeito("hide_Chest", "t0_000_pwa_fpp__torso"), Some((false, !0b1)));
+        assert_eq!(efeito("hide_Thighs", "t0_000_pwa_base__full"), Some((false, !0b1_0000)));
+        assert_eq!(efeito("HighHeels", "l0_000_pwa_base__high_heels"), Some((true, 0b111)));
+        assert_eq!(efeito("FlatShoes", "t0_000_pma_base__full"), Some((false, !0b1110_0000)));
+        assert_eq!(efeito("hide_Feet", "l0_000_pwa_base__cs_flat"), Some((false, !0b100)));
+        assert_eq!(efeito("hide_Ankles", "t0_000_pma_base__full"), Some((false, !0b100_0000)));
+        assert_eq!(efeito("hide_Ankles", "s0_"), Some((false, 0)));
+    }
+
+    #[test]
+    fn fonte_da_tag_e_o_texto_com_semente_do_mod() {
+        assert_eq!(fonte_da_tag("HighHeels", 0), 0x4516_9748_795a_cdd3);
+        assert_eq!(fonte_da_tag("HighHeels", 0xa), 0xc165_675f_06b3_88f9);
+        assert_eq!(fonte_da_tag("hide_Legs", 0x5a5a_5a5a_5a5a_5a5a), 0x3dc5_60d5_f3e6_860e);
+        assert_eq!(fonte_da_tag("hide_Torso", 0x5a5a_5a5a_5a5a_5a5a), 0x4bfc_0df6_1293_a04a);
+        assert_ne!(fonte_da_tag("HighHeels", 0), h("HighHeels"));
+    }
+
+    #[test]
+    fn prefixo_e_o_trecho_ate_o_sublinhado_nas_posicoes_2_a_5() {
+        for (nome, prefixo) in [
+            ("n0_something", Some("n0_")),
+            ("abcde_resto", Some("abcde_")),
+            ("abcdef_resto", None),
+            ("abcdefgh", None),
+            ("ab", None),
+            ("a_bcdefgh", None),
+            ("_abc_x", Some("_abc_")),
+            ("ab_", Some("ab_")),
+            ("heb_000_pma__basehead", Some("heb_")),
+            ("beard_x", Some("beard_")),
+            ("beard", None),
+            ("MorphTargetSkinnedMesh3637", None),
+            ("", None),
+            ("abc", None),
+            ("ab__cd", Some("ab_")),
+            ("éa_b", Some("éa_")),
+        ] {
+            assert_eq!(component_prefix_of(nome), prefixo.map(h), "{nome}");
+        }
+        assert_eq!(component_prefix_of("n0_something"), Some(0x21d1_ed19_25f3_ecc4));
+    }
+
+    #[test]
+    fn componentes_da_tag_casam_por_nome_base_ou_prefixo() {
+        let nomes = ["n0_000_pma_fpp__neck2814", "x9_nada", "t0_000_pma_base__full", "t0_000_pma_base__full!pele", "l0_000_pma_base__high_heels"];
+        let comps: Vec<*mut u8> = nomes.iter().map(|n| componente(n, 0)).collect();
+        let e = entidade(&comps);
+        let indices = |tag: &str| {
+            unsafe { componentes_da_tag(e, tag_por_hash(h(tag)).unwrap_or(&[])) }
+                .map(|(v, b)| (v, b.iter().map(|p| comps.iter().position(|c| *c as *mut c_void == *p).unwrap_or(99)).collect::<Vec<_>>()))
+        };
+        assert_eq!(indices("hide_Torso"), Some((5, vec![0, 2, 3])));
+        for tag in ["hide_Legs", "hide_Calves", "HighHeels"] {
+            assert_eq!(indices(tag), Some((5, vec![2, 3, 4])), "{tag}");
+        }
+        assert_eq!(indices("hide_Head"), Some((5, vec![])));
+        assert!(unsafe { componentes_da_tag(std::ptr::null_mut(), &[]) }.is_none());
+        assert!(unsafe { componentes_da_tag(entidade(&[]), &[]) }.is_none());
+        let incoerente = entidade(&comps);
+        unsafe { (incoerente as *mut u8).add(0xA8).cast::<u32>().write_unaligned(2) };
+        let sem_nada = |_: *mut c_void| true;
+        assert!(unsafe { tag_aplicar_na_loja(incoerente, "hide_Torso", 0xB4A2_0701, sem_nada) }.is_none());
+        assert!(es20_estado(incoerente as u64, h("n0_")).is_none(), "lista incoerente não entra na loja");
+        assert!(unsafe { tag_aplicar_na_loja(e, "tag_que_nao_existe", 0, sem_nada) }.is_none());
+    }
+
+    /// V08: remover tira só a fonte (tag, mod) e só nas chaves da tag; o torso volta à parte de `hide_Torso`.
+    #[test]
+    fn tag_aplicada_e_removida_so_pela_propria_fonte() {
+        let (torso, pescoco, salto) = (componente("t0_000_pma_base__full", !0), componente("n0_000_pma_fpp__neck2814", !0), componente("l0_000_pma_base__high_heels", !0));
+        let e = entidade(&[torso, pescoco, salto]);
+        let ent = e as u64;
+        let ap = |inst: *mut c_void| unsafe { aplicar(ent, inst) };
+        const M: u64 = 0xB4A2_0801;
+        let fora = CName::cname("bwms_fora_da_tag");
+        crate::cname::intern("bwms_fora_da_tag");
+        es20_adicionar_mascara(ent, fonte_da_tag("hide_Legs", M), fora, !1, false);
+        assert!(es20_adicionar_aparencia(ent, 0x17E4, CName::cname("t0_000_pma_base__full"), CName::cname("bwms_item_aparencia")));
+        assert_eq!(unsafe { tag_aplicar_na_loja(e, "hide_Torso", M, ap) }, Some((3, 2, 2)));
+        assert_eq!(unsafe { tag_aplicar_na_loja(e, "hide_Legs", M, ap) }, Some((3, 2, 2)));
+        assert_eq!(unsafe { (mascara(torso), mascara(pescoco), mascara(salto)) }, (0xffff_ffff_ffff_ff00, 0, 0));
+        assert_eq!(unsafe { tag_remover_da_loja(e, "hide_Legs", M, ap) }, Some((5, 5, 2)));
+        assert_eq!(unsafe { (mascara(torso), mascara(pescoco), mascara(salto)) }, (0xffff_ffff_ffff_fff0, 0, !0));
+        let l0 = es20_estado(ent, h("l0_")).map(|s| (s.fontes(), s.muda_mascara()));
+        assert_eq!(l0, Some((0, true)));
+        assert_eq!(es20_estado(ent, fora.valor()).map(|s| s.fontes()), Some(1), "a mesma fonte fora da tag fica");
+        assert!(es20_estado(ent, h("t0_000_pma_base__full")).and_then(|s| s.aparencia_sobrescrita()).is_some());
+        assert_eq!(unsafe { tag_remover_da_loja(e, "hide_Legs", M, ap) }, Some((5, 0, 0)));
+        unsafe { tag_remover_da_loja(e, "hide_Torso", M, ap) };
+        assert_eq!(unsafe { (mascara(torso), mascara(pescoco), mascara(salto)) }, (!0, !0, !0));
+        assert_eq!(unsafe { tag_remover_da_loja(entidade(&[torso]), "hide_Legs", M, |_| true) }, Some((0, 0, 0)));
+    }
+
+    /// V08 com a tabela real: `HighHeels` mostra os chunks 0-2 do salto e esconde 5-7 do torso; `hide_Calves` esconde o chunk 0 do salto, e
+    /// esconder vence mostrar no mesmo chunk em qualquer ordem das fontes.
+    #[test]
+    fn esconder_de_uma_tag_vence_o_mostrar_de_outra_em_qualquer_ordem() {
+        const MOD_A: u64 = 0xB4A2_0811;
+        const MOD_B: u64 = 0xB4A2_0812;
+        let montar = || {
+            let comps = ["l0_000_pma_base__high_heels", "t0_000_pma_base__full", "n0_000_pma_fpp__neck2814", "x9_nada"].map(|n| componente(n, 0xF1));
+            (entidade(&comps), comps)
+        };
+        let mascaras = |c: [*mut u8; 4]| unsafe { c.map(|x| mascara(x)) };
+
+        let (e, comps) = montar();
+        let ap = |inst: *mut c_void| unsafe { aplicar(e as u64, inst) };
+        assert_eq!(unsafe { tag_aplicar_na_loja(e, "HighHeels", MOD_A, ap) }, Some((4, 2, 2)));
+        assert_eq!(mascaras(comps), [0xF7, 0x11, 0xF1, 0xF1]);
+        assert_eq!(unsafe { tag_aplicar_na_loja(e, "hide_Calves", MOD_B, ap) }, Some((4, 2, 2)));
+        assert_eq!(mascaras(comps), [0xF6, 0x11, 0xF1, 0xF1]);
+
+        let (e, comps) = montar();
+        let ap = |inst: *mut c_void| unsafe { aplicar(e as u64, inst) };
+        assert_eq!(unsafe { tag_aplicar_na_loja(e, "hide_Calves", MOD_B, ap) }, Some((4, 2, 2)));
+        assert_eq!(unsafe { tag_aplicar_na_loja(e, "HighHeels", 0, ap) }, Some((4, 2, 2)));
+        assert_eq!(mascaras(comps), [0xF6, 0x11, 0xF1, 0xF1], "ordem inversa");
+        assert_eq!(unsafe { tag_aplicar_na_loja(e, "HighHeels", 0, ap) }, Some((4, 2, 2)));
+        assert_eq!(mascaras(comps), [0xF6, 0x11, 0xF1, 0xF1], "reaplicar a mesma fonte é idempotente");
+    }
+
+    #[test]
+    fn loja_por_entidade_e_nome() {
+        const E: u64 = 0xB4A2_0901;
+        let nome = CName::cname("bwms_b4a2_v09");
+        assert!(es20_estado(E, nome.valor()).is_none());
+        assert!(es20_adicionar_aparencia(E, 0xAA, nome, CName::lido_do_motor(0x111)));
+        assert!(es20_adicionar_aparencia(E, 0xAA, nome, CName::lido_do_motor(0x222)));
+        assert_eq!(es20_estado(E, nome.valor()).and_then(|s| s.aparencia_sobrescrita()), Some(0x222));
+        assert!(!es20_adicionar_aparencia(E, 0xAA, nome, CName::lido_do_motor(0)));
+        assert!(!es20_adicionar_aparencia(E, 0xAA, nome, CName::lido_do_motor(CNAME_DEFAULT)));
+        assert!(!es20_adicionar_aparencia(E, 0xAA, CName::lido_do_motor(0), CName::lido_do_motor(0x111)));
+        es20_adicionar_mascara(E, 0xAA, CName::lido_do_motor(0), !1, false);
+        assert!(es20_estado(E, 0).is_none());
+        es20_adicionar_mascara(E, 0xAA, nome, !1, false);
+        es20_adicionar_mascara(E, 0xBB, nome, 4, true);
+        let s = es20_estado(E, nome.valor()).unwrap_or_default();
+        assert_eq!((s.fontes(), s.mascara_de_mostrar(), s.mascara_de_esconder()), (2, 4, !1));
+        let bracos = tag_por_hash(h("hide_Arms")).unwrap_or(&[]);
+        es20_registrar_tag(E, 0xCC, bracos);
+        assert!(bracos.iter().all(|(c, _, _)| es20_estado(E, c.valor()).map(|s| s.fontes()) == Some(1)));
+        assert_eq!(es20_remover_mascara(E, 0xCC, bracos), (3, 3));
+        assert_eq!(es20_remover_mascara(E, 0xCC, bracos), (3, 0));
+        assert_eq!(es20_remover_mascara(E, 0xCC, tag_por_hash(h("hide_Torso")).unwrap_or(&[])), (0, 0));
+        es20_adicionar_aparencia(E, 0xAA, CName::cname("bwms_b4a2_v09_b"), CName::lido_do_motor(0x333));
+        assert_eq!(es20_remover_componentes(E, 0xAA), 2);
+        let s = es20_estado(E, nome.valor()).unwrap_or_default();
+        assert_eq!((s.fontes(), s.aparencia_sobrescrita(), s.muda_mascara(), s.muda_aparencia()), (1, None, true, true));
+        assert_eq!(es20_remover_componentes(E, 0xAA), 0);
+        assert_eq!(es20_remover_componentes(E + 1, 0xBB), 0);
+        assert!(es20_estado(E + 1, nome.valor()).is_none());
+        es20_esquecer(E);
+        assert!(es20_estado(E, nome.valor()).is_none());
+    }
+
+    #[test]
+    fn ligacoes_componente_parte_e_aparencia() {
+        const E: u64 = 0xB4A2_1001;
+        let base = h("bwms_b4a2_base");
+        assert_eq!(es22_parte_do_componente(E, base), None);
+        assert!(es22_ligar_componente(E, base, 0x10));
+        assert!(es22_ligar_componente(E, base, 0x20));
+        assert_eq!(es22_parte_do_componente(E, base), Some(0x20));
+        assert_eq!(es22_parte_do_componente(E + 1, base), None);
+        es22_ligar_parte(E, 0x20, "bwms_apar!azul");
+        let ativa = |p: u64| ES22_RESOURCE_STATE.lock().ok().and_then(|g| g.iter().find(|(k, _)| *k == (E, p)).map(|(_, s)| s.value));
+        assert_eq!(ativa(0x20), Some(0xc369_0441_e1ae_f8ca));
+        es22_ligar_parte(E, 0x20, "bwms_apar!verde");
+        assert_eq!(ativa(0x20), Some(h("bwms_apar!verde")));
+        assert_eq!(ativa(0x99), None);
+        let c = componente("bwms_b4a2_comp!var&cond", 0);
+        assert_eq!(unsafe { es20_nome_base(c) }, crate::cname::cname("bwms_b4a2_comp"));
+        let simples = componente("bwms_b4a2_simples", 0);
+        assert_eq!(unsafe { es20_nome_base(simples) }, h("bwms_b4a2_simples"));
+        assert_eq!(unsafe { es20_nome_base(componente("", 0)) }, 0);
+        assert_eq!(unsafe { es20_ligar_componente(E, c, 0x40) }, h("bwms_b4a2_comp"));
+        assert_eq!(es22_parte_do_componente(E, h("bwms_b4a2_comp")), Some(0x40));
+        assert_eq!(es20_nomes_da_parte(E, 0x40), vec![h("bwms_b4a2_comp!var&cond")]);
+        unsafe {
+            es20_ligar_componente(E, simples, 0x40);
+            es20_ligar_componente(E, c, 0x40);
+        }
+        assert_eq!(es20_nomes_da_parte(E, 0x40).len(), 2);
+        assert!(es20_nomes_da_parte(E, 0x41).is_empty());
+        assert!(es20_estado(E, h("bwms_b4a2_comp")).is_none(), "ligar não cria estado na loja");
+        crate::diagnostico::es20_restaurar_parte(E, base, Some(0x10));
+        assert_eq!(es22_parte_do_componente(E, base), Some(0x10));
+        crate::diagnostico::es20_restaurar_parte(E, base, None);
+        assert_eq!(es22_parte_do_componente(E, base), None);
+    }
+
+    #[test]
+    fn identidade_e_original_do_componente() {
+        let c: &'static mut [u64; 32] = Box::leak(Box::new([0u64; 32]));
+        (c[0x40 / 8], c[0x48 / 8], c[0x68 / 8]) = (0x1111, 0x2222, 0x3333);
+        let p = c.as_ptr() as *const u8;
+        let id = unsafe { es20_id_do_componente((0x48, 0x68), p) };
+        assert_eq!(id, 0xb807_f11d_8957_3e8f);
+        c[0x68 / 8] = 0x3334;
+        assert_ne!(unsafe { es20_id_do_componente((0x48, 0x68), p) }, id, "caminho diferente, identidade diferente");
+        const E: u64 = 0xB4A2_1101;
+        assert_eq!(es20_original(E, id, 0, || 0x55), 0x55);
+        assert_eq!(es20_original(E, id, 0, || 0x99), 0x55);
+        assert_eq!(es20_original(E, id, 1, || 0x77), 0x77);
+        assert_eq!(es20_original(E + 1, id, 0, || 0x66), 0x66);
+        // Leitura que falha (componente sem vtable): 0 e nada no cache.
+        let sem_vtable = componente("bwms_b4a2_sem_vtable", 0);
+        let id2 = unsafe { es20_id_do_componente((0x48, 0x68), sem_vtable) };
+        assert_eq!(unsafe { es20_original_da_aparencia((0x48, 0x68), E, sem_vtable as *mut c_void, GarmentComponentKind::MeshComponent) }, 0);
+        assert!(es20_originais().lock().map(|m| !m.contains_key(&(E, id2, 1))).unwrap_or(false));
+    }
+
+    #[test]
+    fn desempate_de_condicionais_deixa_o_primeiro_de_maior_peso() {
+        let d = |e: &[(u64, i32, bool)]| {
+            let mut v = toggle_conditional_group_disable_indices(e);
+            v.sort_unstable();
+            v
+        };
+        assert!(d(&[(1, 0, true), (2, 0, true)]).is_empty());
+        assert!(d(&[(1, 100, false), (1, 100, false)]).is_empty());
+        assert!(d(&[(1, 102, true)]).is_empty());
+        assert_eq!(d(&[(7, 100, true), (7, 102, true)]), [0]);
+        assert_eq!(d(&[(7, 102, true), (7, 100, true)]), [1]);
+        assert_eq!(d(&[(9, 100, true), (9, 100, true), (9, 100, true)]), [1, 2]);
+        assert_eq!(d(&[(9, 101, true), (9, 100, true), (9, 101, true)]), [1, 2]);
+        assert_eq!(d(&[(1, 100, true), (1, 102, true), (2, 50, true), (2, 51, true)]), [0, 2]);
+        assert_eq!(d(&[(3, 0, true), (3, 101, true)]), [0]);
+        assert!(d(&[(3, 0, true), (3, 0, true), (3, 0, true)]).is_empty());
+        assert!(d(&[(4, -5, true), (4, -3, true)]).is_empty());
+        assert_eq!(d(&[(5, 101, true), (5, 101, false), (5, 100, true)]), [2]);
+        assert!(d(&[]).is_empty());
+    }
+
+    #[test]
+    fn condicionais_seguem_a_aparencia_da_parte_e_as_condicoes() {
+        let nomes = ["cap!azul", "cap!verde", "cap!azul&male", "cap", "luva&male", "semparte!azul"];
+        let comps: Vec<*mut u8> = nomes.iter().map(|n| componente(n, 0)).collect();
+        let e = entidade(&comps);
+        let ent = e as u64;
+        for base in ["cap", "luva"] {
+            es22_ligar_componente(ent, crate::cname::intern(base), 0x500);
+        }
+        es22_ligar_parte(ent, 0x500, "itemx!azul");
+        let reg = std::mem::MaybeUninit::<crate::rtti::Registry>::uninit();
+        let rodar = |condicoes: Option<&std::collections::BTreeSet<u64>>| {
+            for c in &comps {
+                unsafe { c.add(0x8b).write(7) };
+            }
+            let (_, total) = unsafe { run_toggle_conditional_components_com(&*reg.as_ptr(), e, condicoes) };
+            (total, comps.iter().map(|c| unsafe { c.add(0x8b).read() }).collect::<Vec<_>>())
+        };
+        let vazio = std::collections::BTreeSet::new();
+        assert_eq!(rodar(Some(&vazio)), (5, vec![1, 0, 0, 0, 0, 7]));
+        let homem = std::collections::BTreeSet::from([h("male")]);
+        assert_eq!(rodar(Some(&homem)), (5, vec![0, 0, 1, 0, 1, 7]));
+        assert_eq!(rodar(None), (5, vec![1, 0, 0, 0, 0, 7]));
+        es22_ligar_parte(ent, 0x500, "itemx!verde+male");
+        assert_eq!(rodar(Some(&vazio)), (5, vec![0, 0, 0, 7, 0, 7]));
+        assert_eq!(unsafe { run_toggle_conditional_components_com(&*reg.as_ptr(), std::ptr::null_mut(), None) }.1, -1);
+        assert_eq!(unsafe { run_toggle_conditional_components_com(&*reg.as_ptr(), entidade(&[]), None) }.1, -1);
+    }
+
+    #[test]
+    fn decisao_de_mascara_e_aparencia_pelo_nome_base_e_prefixo() {
+        const E: u64 = 0xB4A2_1501;
+        let c = componente("bwms_b4a2_x!var", 0);
+        let lida = std::cell::Cell::new(false);
+        let original = |v: u64| {
+            let lida = &lida;
+            move || {
+                lida.set(true);
+                v
+            }
+        };
+        assert_eq!(unsafe { es20_decidir_mascara(E, c, original(0xF0)) }, None);
+        assert!(!lida.get());
+        es20_adicionar_mascara(E, 0xA, CName::cname("bwms_b4a2_x"), !0x10, false);
+        es20_adicionar_mascara(E, 0xB, CName::cname("bwms_"), 0x1, true);
+        assert_eq!(unsafe { es20_decidir_mascara(E, c, original(0xF0)) }, Some(0xE1));
+        assert!(lida.get());
+        let d = unsafe { es22_decidir_aparencia(E, c, || 0x999) };
+        assert_eq!((d.fontes, d.aparencia, d.parte), ((None, None), None, None));
+        es20_adicionar_aparencia(E, 0xC, CName::cname("bwms_"), CName::lido_do_motor(0x444));
+        let d = unsafe { es22_decidir_aparencia(E, c, || 0x999) };
+        assert_eq!((d.fontes, d.aparencia), ((None, Some(0x444)), Some(0x444)));
+        es20_adicionar_aparencia(E, 0xBB, CName::cname("bwms_b4a2_x"), CName::lido_do_motor(0x222));
+        es20_adicionar_aparencia(E, 0xAA, CName::cname("bwms_b4a2_x"), CName::lido_do_motor(0x111));
+        es22_ligar_componente(E, h("bwms_b4a2_x"), 0x30);
+        let d = unsafe { es22_decidir_aparencia(E, c, || 0x999) };
+        assert_eq!((d.fontes, d.aparencia, d.parte), ((Some(0x111), Some(0x444)), Some(0x111), Some(0x30)));
+        let pescoco = crate::cname::intern("n0_000_pma_fpp__neck2814");
+        assert_eq!(unsafe { chaves_do_componente(pescoco) }, (pescoco, Some(h("n0_"))));
+        assert_eq!(unsafe { chaves_do_componente(crate::cname::intern("bwms_b4a2_x!var")) }, (h("bwms_b4a2_x"), Some(h("bwms_"))));
+    }
+
+    /// A aparência que veio da native e a do registro de item caem na MESMA loja: menor hash vence nas duas ordens.
+    #[test]
+    fn aparencia_de_duas_vias_na_mesma_loja_vence_o_menor_hash() {
+        for (e, ordem) in [(0xB4A2_1502u64, [(0xAAu64, 0x111u64), (0xBB, 0x222)]), (0xB4A2_1503, [(0xBB, 0x222), (0xAA, 0x111)])] {
+            let c = componente("bwms_b4a2_duas_vias", 0);
+            for (fonte, ap) in ordem {
+                es20_adicionar_aparencia(e, fonte, CName::cname("bwms_b4a2_duas_vias"), CName::lido_do_motor(ap));
+            }
+            assert_eq!(unsafe { es22_decidir_aparencia(e, c, || 0x999) }.aparencia, Some(0x111));
+        }
+    }
+
+    #[test]
+    fn guardas_de_tag_e_de_estado_devolvem_a_loja_de_antes() {
+        const E: u64 = 0xB4A2_1201;
+        let base = h("bwms_b4a2_guarda");
+        crate::cname::intern("bwms_b4a2_guarda");
+        es20_adicionar_mascara(E, 0x1, CName::lido_do_motor(base), !1, false);
+        let antes = es20_estado(E, base);
+        assert!(crate::diagnostico::es20_guardar_tags(E));
+        es20_registrar_tag(E, 0x2, tag_por_hash(h("hide_Arms")).unwrap_or(&[]));
+        es20_remover_mascara(E, 0x2, tag_por_hash(h("hide_Arms")).unwrap_or(&[]));
+        es20_adicionar_mascara(E, 0x3, CName::lido_do_motor(base), !2, false);
+        assert!(crate::diagnostico::es20_restaurar_tags());
+        assert_eq!(es20_estado(E, base), antes);
+        assert!(es20_estado(E, h("a0_")).is_none());
+        assert!(!crate::diagnostico::es20_restaurar_tags(), "sem guarda");
+
+        const PARTE: u64 = 0xB4A2_1230;
+        assert!(crate::diagnostico::es22_guardar_estado(E, base, PARTE));
+        es20_adicionar_aparencia(E, 0x4, CName::lido_do_motor(base), CName::lido_do_motor(0x444));
+        es22_ligar_componente(E, base, PARTE);
+        es22_ligar_parte(E, PARTE, "bwms_b4a2!teste");
+        assert!(crate::diagnostico::es22_restaurar_estado());
+        assert_eq!(es20_estado(E, base), antes);
+        assert_eq!(es22_parte_do_componente(E, base), None);
+        assert!(ES22_RESOURCE_STATE.lock().map(|g| !g.iter().any(|(k, _)| *k == (E, PARTE))).unwrap_or(false));
+        let _: Option<ComponentState> = es20_estado(E, base);
+    }
+
+    #[test]
+    fn offset_de_roupa_vence_o_primeiro_mod_que_entrou() {
+        let mut s = Es67ResourceOffset::default();
+        assert_eq!(s.get_overridden_offset(), 0);
+        s.add_offset_override(0xAAAA, 42);
+        s.add_offset_override(0xAAAA, 20);
+        assert_eq!((s.get_overridden_offset(), s.overrides.len()), (20, 1));
+        let mut s = Es67ResourceOffset::default();
+        s.add_offset_override(0xBBBB, 5);
+        s.add_offset_override(0xAAAA, 99);
+        assert_eq!(s.get_overridden_offset(), 5);
+        s.add_offset_override(0xBBBB, 7);
+        assert_eq!(s.get_overridden_offset(), 7);
+        assert!(s.remove_offset_override(0xBBBB));
+        assert_eq!(s.get_overridden_offset(), 99);
+        assert!(!s.remove_offset_override(0xBBBB));
+        s.add_offset_override(0xBBBB, 8);
+        assert_eq!(s.get_overridden_offset(), 99);
+        s.add_offset_override(0xAAAA, -3);
+        assert_eq!(s.get_overridden_offset(), -3);
+
+        const E: u64 = 0xB4A2_1601;
+        unsafe {
+            assert_eq!(get_offset_override(E, 0x1111), 0);
+            add_offset_override(E, 0xAAAA, 0x1111, 100);
+            add_offset_override(E, 0xAAAA, 0x2222, 200);
+            add_offset_override(E, 0xBBBB, 0x2222, 300);
+            add_offset_override(E + 1, 0xAAAA, 0x1111, 999);
+            assert_eq!((get_offset_override(E, 0x1111), get_offset_override(E, 0x2222), get_offset_override(E + 1, 0x1111)), (100, 200, 999));
+            assert_eq!(remove_offset_overrides(E, 0xAAAA), 2);
+            assert_eq!((get_offset_override(E, 0x1111), get_offset_override(E, 0x2222), get_offset_override(E + 1, 0x1111)), (0, 300, 999));
+            assert_eq!(remove_offset_overrides(E, 0xAAAA), 0);
+            assert_eq!(remove_offset_overrides(E + 7, 0xAAAA), 0);
+        }
+    }
+
+    #[test]
+    fn override_de_aparencia_de_customizacao_troca_so_o_recurso() {
+        let tabela = |r: u64, a: u64| (r == 11 && a == 22).then_some(33);
+        let troca = |d: [u64; 2]| {
+            let mut d = d;
+            (trocar_por_app_override(&mut d, tabela), d)
+        };
+        assert_eq!(troca([11, 22]), (true, [33, 22]));
+        for d in [[0, 22], [11, 0], [11, 44], [0, 0]] {
+            assert_eq!(troca(d), (false, d));
+        }
+        let mut d = [0, 22];
+        assert!(!trocar_por_app_override(&mut d, |_, _| Some(33)), "recurso 0 nunca troca");
+        assert_eq!(descritores_do_range(0x1000, 0x1030), Some(3));
+        assert_eq!(descritores_do_range(0x1000, 0x1000), Some(0));
+        assert_eq!(descritores_do_range(0x1000, 0x11000), Some(4096));
+        for (i, f) in [(0, 0), (0x1000, 0x1008), (0x1010, 0x1000), (0x1000, 0x11010), (0, 0x10)] {
+            assert_eq!(descritores_do_range(i, f), None, "{i:#x}..{f:#x}");
+        }
+        const R: u64 = 0xB4A2_17AA;
+        registrar_app_override(R, 0xB4A2_17BB, 0xB4A2_17CC);
+        let mut buf = [R, 0xB4A2_17CC, R, 0xB4A2_17DD, 0, 0xB4A2_17CC];
+        assert_eq!(unsafe { aplicar_app_overrides(buf.as_mut_ptr(), 3) }, 1);
+        assert_eq!(buf, [0xB4A2_17BB, 0xB4A2_17CC, R, 0xB4A2_17DD, 0, 0xB4A2_17CC]);
+        registrar_app_override(R, 0xB4A2_17EE, 0xB4A2_17CC);
+        let mut buf = [R, 0xB4A2_17CC];
+        unsafe { aplicar_app_overrides(buf.as_mut_ptr(), 1) };
+        assert_eq!(buf, [0xB4A2_17EE, 0xB4A2_17CC]);
+        assert_eq!(unsafe { aplicar_app_overrides(std::ptr::null_mut(), 3) }, 0);
+        assert!(remover_app_override(R, 0xB4A2_17CC));
+        assert!(!remover_app_override(R, 0xB4A2_17CC));
+    }
+}
+
+/// Peças puras do patch de recurso e do mesh.
+#[cfg(test)]
+mod testes_do_patch_de_recurso {
+    use super::*;
+
+    #[test]
+    fn cabecalho_conta_objetos_inteiros_entre_inicio_e_fim() {
+        let cab = |i: u64, f: u64| {
+            let mut c = [0u8; 0x70];
+            c[0x20..0x28].copy_from_slice(&i.to_le_bytes());
+            c[0x28..0x30].copy_from_slice(&f.to_le_bytes());
+            objetos_do_cabecalho(&c)
+        };
+        assert_eq!((cab(0, 0x40), cab(0x1000, 0x1047), cab(0x1000, 0x1008), cab(0x1000, 0x1000)), (0, 8, 1, 0));
+    }
+
+    #[test]
+    fn definicao_do_patch_casos_de_borda() {
+        assert_eq!(definicao_do_patch(&[], 7), None);
+        assert_eq!(definicao_do_patch(&[7, 7], 7), Some(0));
+        assert_eq!(definicao_do_patch(&[5, 6], 0), None);
+        assert_eq!(definicao_do_patch(&[0, 0], 0), Some(0));
+    }
+
+    #[test]
+    fn blob_muda_pela_prop_ou_so_no_alvo_sem_blob() {
+        use crate::arquivos_do_jogo::{A17_PROP_APPEARANCES as AP, A17_PROP_BLOB as B, A17_PROP_RENDERBLOB as R, A17_PROP_TARGETS as T};
+        for (props, patch, alvo, render, morph) in [
+            (u32::MAX, false, true, false, false),
+            (u32::MAX, true, false, true, true),
+            (u32::MAX, true, true, false, false),
+            (R, true, true, true, false),
+            (R, false, false, false, false),
+            (B, true, true, false, true),
+            (T, true, false, false, false),
+            (AP, true, false, false, false),
+            (0, true, false, false, false),
+            (B | R, true, true, true, true),
+        ] {
+            assert_eq!((render_blob_muda(props, patch, alvo), morph_blob_muda(props, patch, alvo)), (render, morph), "{props:#x} {patch} {alvo}");
+        }
+    }
+
+    #[test]
+    fn material_com_arroba_e_mesh_dinamico() {
+        for (nome, template, dinamico) in [("", false, false), ("@", true, true), ("skin@", false, true), ("skin", false, false), (" @x", false, true), ("ＡＢ@", false, true)] {
+            assert_eq!((material_de_template(nome), material_dinamico(nome)), (template, dinamico), "{nome}");
+        }
+        let d = |m: &[&str], a: &[&[&str]]| {
+            let ap: Vec<Vec<&str>> = a.iter().map(|c| c.to_vec()).collect();
+            mesh_dinamico(m, &ap, |n| material_de_template(n), |c| material_dinamico(c))
+        };
+        assert!(d(&[], &[&["a"]]));
+        assert!(d(&["a"], &[]));
+        assert!(!d(&["a"], &[&["a"]]));
+        assert!(d(&["a", "@t"], &[&["a"]]));
+        assert!(d(&["a"], &[&["a"], &[]]));
+        assert!(d(&["a"], &[&["a", "x@y"]]));
+        assert!(!d(&["a", "b"], &[&["a", "b"], &["b"]]));
+        assert!(!d(&["x@y"], &[&["a"]]));
+    }
+
+    #[test]
+    fn tags_do_patch_sao_os_cnames_do_formato() {
+        assert_eq!(tag_appearance_parts(), 0xff98_df43_873a_42b3);
+        assert_eq!(tag_resource_patch(), 0xad1f_0871_ff62_0e19);
+        assert_eq!(instancias_anexadas(&[PassoDaMescla::Anexa, PassoDaMescla::Anexa], &[[10, 1]]), vec![10]);
+        assert!(definicao_inclui_partes(3, &[tag_appearance_parts()], true, tag_appearance_parts()));
+        assert!(!definicao_inclui_partes(1, &[18417716157256188596], false, tag_appearance_parts()));
     }
 }

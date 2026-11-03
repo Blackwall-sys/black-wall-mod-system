@@ -1,4 +1,4 @@
-// ponte-fachada-de-recursos.reds — a fachada de script do ArchiveXL (`App::Facade`, `Facade.hpp:25-32`): os 8 métodos que mods do Windows chamam.
+// ponte-fachada-de-recursos.reds — a classe-fachada de recursos: os 8 métodos que mods do Windows chamam.
 // As funções que o BWMS criou sobre aparência dinâmica, tags visuais e deslocamento de roupa ficam em `bwms-aparencia.reds`.
 //
 // Controle: `RegisterArchive`/`RegisterDir` carregam `.archive` em runtime (o diretório sem recursão); `Reload` relê as tabelas que o

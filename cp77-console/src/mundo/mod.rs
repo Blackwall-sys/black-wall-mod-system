@@ -1,8 +1,6 @@
-//! Mundo: clima, distrito, setores de streaming, nós da cena, traçado de raio e estado do mundo. Missões, journal e mapa estão em `missoes_e_mapa`.
+//! Mundo: clima, setores de streaming, nós da cena, traçado de raio e estado do mundo. Missões, journal e mapa estão em `missoes_e_mapa`.
 
 #![allow(dead_code)]
-
-pub(crate) mod distrito;
 
 use crate::jogo::sessao::*;
 use crate::jogo::sessao::sistema_da_sessao;
@@ -73,7 +71,7 @@ pub(crate) fn pedaco_utf8(s: &str, i: usize) -> String {
 
 
 
-/// Codeware `#142` — coleta SEGURA do endereço da vtable da `MappinSystem`, pelo CANAL.
+/// Coleta SEGURA do endereço da vtable da `MappinSystem`, pelo CANAL.
 ///
 /// **Por que pelo canal e não por smoke (medido 2026-09-05).** Com os gates de smoke desligados o
 /// boot chega à gameplay de forma confiável; com QUALQUER smoke ligado em `OnGameAttached` ele
@@ -116,33 +114,13 @@ pub(crate) unsafe fn run_poi_vtable() {
         n * 8
     );
     crate::veredito_dev!(
-        "[poivtable] o `0x3D0` do Codeware é o slot {} — {} numa tabela de {n}",
+        "[poivtable] o `0x3D0` é o slot {} — {} numa tabela de {n}",
         0x3D0usize / 8,
         if 0x3D0usize / 8 < n { "DENTRO" } else { "FORA" }
     );
     crate::veredito_dev!(
         "[poivtable] analisar offline: re-xref <bin> vtable-dump {vt_estatico:#x} {n}"
     );
-}
-
-// Codeware `App::DistrictResolver::GetDistrict`/`GetArea` (item `#151`, agente de pesquisa
-// 2026-08-11) — algoritmo 100% puro (`crate::mundo::distrito`), zero endereço nativo. `resolve_cname`
-// usa o CNamePool NATIVO do motor (`VM_CNAMEPOOL_GET`) — resolve QUALQUER CName real do jogo, não
-// só nomes já vistos pelo nosso pool próprio.
-pub(crate) unsafe extern "C" fn tramp_district_get_district(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
-    let args = rtti::read_params_consuming(current_native_func(), frame);
-    let name_hash = args.first().map(|(v, _)| *v).unwrap_or(0);
-    let name = crate::cname::resolve_cname(name_hash);
-    let d = crate::mundo::distrito::get_district(&name);
-    write_uint_ret(out, d as u64, 4);
-}
-
-pub(crate) unsafe extern "C" fn tramp_district_get_area(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
-    let args = rtti::read_params_consuming(current_native_func(), frame);
-    let name_hash = args.first().map(|(v, _)| *v).unwrap_or(0);
-    let name = crate::cname::resolve_cname(name_hash);
-    let a = crate::mundo::distrito::get_area(&name);
-    write_uint_ret(out, a as u64, 4);
 }
 
 /// Última resolução de `setor_por_path`: `(quando, tick, hash do path, recurso)`.
@@ -176,7 +154,7 @@ pub(crate) unsafe fn setor_por_path(path: &str) -> *mut c_void {
 ///
 /// **CORREÇÃO 2026-09-06:** havia DUAS constantes pro mesmo campo — esta valia `0x48` e a
 /// `SECTOR_NODES` (usada pelos acessores novos) valia `0x68`. `0x48` veio da entrada
-/// `axl-streaming-apply` de 2026-07-26, que descreve o objeto recebido pelo hook de **PostLoad**,
+/// aplicação no streaming de 2026-07-26, que descreve o objeto recebido pelo hook de **PostLoad**,
 /// não o do cache; na verdade `0x48` é `0x40+0x08`, o campo **size do `DataBuffer` de
 /// `nodeSetups`` — o log ao vivo mostrou `entries=0x1000211e00`, exatamente o slot do DataBuffer.
 /// O crivo de coerência salvou (devolvia `-2`, nunca número falso), mas o acessor ficava inútil:
@@ -521,7 +499,7 @@ pub(crate) unsafe fn sector_setups(sec: *mut c_void) -> Option<(usize, u32)> {
 ///
 /// Leitura arbitrária DENTRO do elemento, com limite duplo — índice contra `size` e offset contra
 /// `0x90` —, pra ninguém ler fora do elemento por engano. O mapa dos offsets dos campos está no
-/// doc do `tramp_sector_setup_f32` (Codeware `#83`).
+/// doc do `tramp_sector_setup_f32`.
 ///
 /// `-1` = setor fora do cache · `-2` = array incoerente · `-3` = índice ou offset fora de faixa.
 /// Três negativos distintos porque confundi-los é como um achado falso nasce.
@@ -551,14 +529,14 @@ pub(crate) unsafe extern "C" fn tramp_sector_setup(_c: *mut c_void, frame: *mut 
     write_i32_ret(out, rd_u32(p as *const c_void, 0) as i32);
 }
 
-/// Codeware `#83` (`WorldNodeSetupWrapper`) — leitura TIPADA dentro do setup `i`.
+/// `WorldNodeSetupWrapper` — leitura TIPADA dentro do setup `i`.
 ///
 /// O item pede 13 getters. Em vez de 13 nativas (uma por campo), 2 leitores tipados + os offsets
-/// do header, e os getters viram composição do lado redscript — os offsets já são conhecidos e
+/// do layout, e os getters viram composição do lado redscript — os offsets já são conhecidos e
 /// fixos, então o que faltava era só ler no tipo certo. `BwmsSectorSetup` (u32) já cobria os
 /// inteiros; faltavam float (transform/scale/distâncias) e u64 (globalNodeID/proxyNodeID).
 ///
-/// Mapa dos campos dentro dos `0x90` (`Red::CompiledNodeInstanceSetupInfo`, header vendorizado):
+/// Mapa dos campos dentro dos `0x90` (`CompiledNodeInstanceSetupInfo`):
 /// `transform@0x00` (`position:Vector4@0x00`, `orientation:Quaternion@0x10`), `scale@0x20`,
 /// `secondaryRefPointPosition@0x2C`, `streamingRefPoint@0x38`, `node*@0x50`, `globalNodeID@0x58`,
 /// `proxyNodeID@0x60`, `nodeIndex` nos 19 bits de baixo do u64 de `0x70`, `secondaryRefPointDistance@0x78`,
@@ -600,7 +578,7 @@ pub(crate) unsafe fn setup_field_ptr(path: &str, i: usize, off: usize, largura: 
     crate::memoria::is_readable(p as *const c_void, largura).then_some(p)
 }
 
-// ===== Codeware `#83` — os 12 setters do `WorldNodeSetupWrapper` =====
+// ===== Os 12 setters do `WorldNodeSetupWrapper` =====
 //
 // Compostos no redscript (`bwms-world-node-setup.reds`) sobre 3 escritores tipados, como os getters sobre os leitores. Os escritores de campo recusam o
 // ponteiro do nó (`+0x50`), que só troca pelo `SetNodeIndex`, junto do índice, com o nó do array `nodes` do setor.
@@ -646,7 +624,7 @@ pub(crate) unsafe extern "C" fn tramp_sector_setup_set_u64(_c: *mut c_void, fram
 }
 
 /// `BwmsSectorSetupSetNodeIndex(path, i, index) -> Bool`: índice (os 19 bits do campo) e ponteiro do nó do array `nodes`. O índice é conferido contra a
-/// quantidade de nós; a referência confere contra a de setups, que é maior (15072 contra 5689 no `always_loaded_0`) e deixaria ler fora do array.
+/// quantidade de nós; conferir contra a de setups, que é maior (15072 contra 5689 no `always_loaded_0`), deixaria ler fora do array.
 pub(crate) unsafe extern "C" fn tramp_sector_setup_set_node_index(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let (path, i, indice, _) = setup_escrita_args(frame);
     let ok = match setup_e_no(&path, i, indice) {
@@ -695,7 +673,7 @@ pub(crate) unsafe extern "C" fn tramp_sector_setup_stride(_c: *mut c_void, frame
 /// (`#86`, provado 2026-09-05). Sem isto, a família inteira de itens que depende de vtable de
 /// SETOR fica fora do alcance da verificação read-only que o `#58` estabeleceu.
 ///
-/// **Primeiro uso — ArchiveXL `#49`:** o item precisa hookar `OnSectorPostLoad` ->
+/// **Primeiro uso — pós-carga de setor:** o item precisa hookar
 /// `worldStreamingSector::PostLoad`, endereço `0x101c05360` já resolvido em 2026-07-25 e
 /// RECONFIRMADO offline em 2026-09-06 por `re-xref vtable-of` (índice 6 = offset `0x30`, o mesmo
 /// slot de PostLoad de outras 3 classes). Comparar `BwmsSectorVtableSlot(path, 0x30)` contra
@@ -734,10 +712,10 @@ pub(crate) unsafe fn register_sector_86_utils(reg: &Registry, proto: *mut c_void
     let i = register_argful_by_types(reg, proto, &["String", "Int32"], "BwmsSectorNodeClassHash", "BwmsSectorNodeClassHash", tramp_sector_node_class_hash as NativeHandler);
     let j = register_argful_by_types(reg, proto, &["String", "Int32", "Int32"], "BwmsSectorSetup", "BwmsSectorSetup", tramp_sector_setup as NativeHandler);
     let k = registro_de_prova!(register_argful_by_types(reg, proto, &["String"], "BwmsSectorSetupStride", "BwmsSectorSetupStride", corpo_de_prova!(tramp_sector_setup_stride)));
-    // Codeware `#83`: leitores tipados sobre o MESMO setup — os 13 getters compõem daqui.
+    // Leitores tipados sobre o MESMO setup — os 13 getters compõem daqui.
     let sf = register_argful_by_types(reg, proto, &["String", "Int32", "Int32"], "BwmsSectorSetupF32", "BwmsSectorSetupF32", tramp_sector_setup_f32 as NativeHandler);
     let su = register_argful_by_types(reg, proto, &["String", "Int32", "Int32"], "BwmsSectorSetupU64", "BwmsSectorSetupU64", tramp_sector_setup_u64 as NativeHandler);
-    // Codeware `#83`: os 3 escritores dos 12 setters (`bwms-world-node-setup.reds`).
+    // Os 3 escritores dos 12 setters (`bwms-world-node-setup.reds`).
     let escritores = [
         register_argful_by_types(reg, proto, &["String", "Int32", "Int32", "Float"], "BwmsSectorSetupSetF32", "BwmsSectorSetupSetF32", tramp_sector_setup_set_f32 as NativeHandler),
         register_argful_by_types(reg, proto, &["String", "Int32", "Int32", "Uint64"], "BwmsSectorSetupSetU64", "BwmsSectorSetupSetU64", tramp_sector_setup_set_u64 as NativeHandler),
@@ -750,24 +728,24 @@ pub(crate) unsafe fn register_sector_86_utils(reg: &Registry, proto: *mut c_void
             tramp_sector_setup_set_node_index,
         ),
     ];
-    crate::log_dev!("[reg] register_all: cw-83 escritores do setup {}/3 registrados", escritores.iter().filter(|x| **x).count());
+    crate::log_dev!("[reg] register_all: setup-83 escritores do setup {}/3 registrados", escritores.iter().filter(|x| **x).count());
     let l = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable"], "BwmsFirstComponentId", "BwmsFirstComponentId", corpo_de_prova!(tramp_first_component_id)));
-    // Codeware `#96`: o único pedaço NATIVO do item — o resto (`GetWorldWidgetComponent`) é
+    // Widget de mundo: o único pedaço NATIVO do item — o resto (`GetWorldWidgetComponent`) é
     // redscript puro sobre tipos que já existem no corpus.
     let w96 = register_argful_by_types(reg, proto, &["handle:IScriptable"], "BwmsInkWorldWidgetComponent", "BwmsInkWorldWidgetComponent", tramp_ink_world_widget_component as NativeHandler);
     let wp = register_argful_by_types(reg, proto, &["handle:IScriptable"], "BwmsWidgetParent", "BwmsWidgetParent", tramp_widget_parent as NativeHandler);
-    // Codeware `#30`: o `.mesh` do componente como HASH — a cadeia hash→depot→CResource* já existe.
+    // O `.mesh` do componente como HASH — a cadeia hash→depot→CResource* já existe.
     // `BwmsMeshRefHash`/`BwmsMeshRefAppearance` foram REMOVIDAS: `BwmsPropU64(obj, "mesh")` e
     // `BwmsPropU64(obj, "meshAppearance")` fazem o mesmo e valem pra qualquer propriedade. Manter
     // as três seria manter três grafias da mesma coisa — foi assim que o offset duplicado do
     // `#86` sobreviveu semanas.
     let s30 = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable", "Int32"], "BwmsMeshRefScan", "BwmsMeshRefScan", corpo_de_prova!(tramp_mesh_ref_scan)));
-    // Via GENÉRICA: o offset vem do RTTI desta build, não de tabela. Cobre os ~1.107 campos que o
-    // Codeware expõe por `@addField` e que o Mac não tem como property script-visível.
+    // Via GENÉRICA: o offset vem do RTTI desta build, não de tabela. Cobre os ~1.107 campos que mods
+    // leem por `@addField` e que o Mac não tem como property script-visível.
     let po = register_argful_by_types(reg, proto, &["handle:IScriptable", "String"], "BwmsPropOffset", "BwmsPropOffset", tramp_prop_offset as NativeHandler);
     let pu = register_argful_by_types(reg, proto, &["handle:IScriptable", "String", "Int32"], "BwmsPropU64", "BwmsPropU64", tramp_prop_u64 as NativeHandler);
     let ps = register_argful_by_types(reg, proto, &["handle:IScriptable", "String", "Int32", "Uint64"], "BwmsPropSetU64", "BwmsPropSetU64", tramp_prop_set_u64 as NativeHandler);
-    crate::veredito_dev!("[reg] cw-91 escrita de campo: BwmsPropSetU64={ps}");
+    crate::veredito_dev!("[reg] campo-91 escrita de campo: BwmsPropSetU64={ps}");
     // leitura pura de slot de vtable — fecha o loop com `re-xref vtable-of` (ver o tramp).
     let vs = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable", "Int32"], "BwmsVtableSlot", "BwmsVtableSlot", corpo_de_prova!(tramp_vtable_slot)));
     // estático -> runtime (slide de ASLR). Sem isso, comparar endereço de catálogo com
@@ -775,7 +753,7 @@ pub(crate) unsafe fn register_sector_86_utils(reg: &Registry, proto: *mut c_void
     let rb = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64"], "BwmsRebase", "BwmsRebase", corpo_de_prova!(tramp_rebase)));
     // variante por PATH: setor não é alcançável como handle a partir do redscript.
     let svs = registro_de_prova!(register_argful_by_types(reg, proto, &["String", "Int32"], "BwmsSectorVtableSlot", "BwmsSectorVtableSlot", corpo_de_prova!(tramp_sector_vtable_slot)));
-    // Codeware `#43`: materiais/aparências de um CMesh, tudo com offset vindo do RTTI.
+    // Materiais/aparências de um CMesh, tudo com offset vindo do RTTI.
     let mc = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64"], "BwmsMeshMaterialCount", "BwmsMeshMaterialCount", corpo_de_prova!(tramp_mesh_material_count)));
     let mi = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64", "Int32", "Int32"], "BwmsMeshMaterialInfo", "BwmsMeshMaterialInfo", corpo_de_prova!(tramp_mesh_material_info)));
     let ac = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64"], "BwmsMeshAppearanceCount", "BwmsMeshAppearanceCount", corpo_de_prova!(tramp_mesh_appearance_count)));
@@ -784,7 +762,7 @@ pub(crate) unsafe fn register_sector_86_utils(reg: &Registry, proto: *mut c_void
     let tc = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64", "Int32"], "BwmsMeshAppearanceTagCount", "BwmsMeshAppearanceTagCount", corpo_de_prova!(tramp_mesh_appearance_tag_count)));
     let mp = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64", "Int32", "Int32"], "BwmsMeshMaterialParam", "BwmsMeshMaterialParam", corpo_de_prova!(tramp_mesh_material_param)));
     crate::log_dev!("[reg] register_all: BwmsVtableSlot={vs} BwmsRebase={rb} BwmsSectorVtableSlot={svs}");
-    crate::log_dev!("[reg] register_all: Codeware.#86 SectorNodeCount={a} SectorClass={b} SectorScan={c} SectorClassify={d} SectorStride={e} Count={f} NodeRef={h} NodeClassHash={i} Setup={j} SetupStride={k} SetupF32={sf} SetupU64={su} FirstComponentId={l} InkWorldWidgetComponent={w96} WidgetParent={wp} MeshRefScan={s30} PropOffset={po} PropU64={pu} MeshMaterialCount={mc} MeshMaterialInfo={mi} MeshAppearanceCount={ac} MeshAppearanceName={an} MeshAppearanceChunkCount={cc} MeshAppearanceTagCount={tc} MeshMaterialParam={mp}");
+    crate::log_dev!("[reg] register_all: setor-86 SectorNodeCount={a} SectorClass={b} SectorScan={c} SectorClassify={d} SectorStride={e} Count={f} NodeRef={h} NodeClassHash={i} Setup={j} SetupStride={k} SetupF32={sf} SetupU64={su} FirstComponentId={l} InkWorldWidgetComponent={w96} WidgetParent={wp} MeshRefScan={s30} PropOffset={po} PropU64={pu} MeshMaterialCount={mc} MeshMaterialInfo={mi} MeshAppearanceCount={ac} MeshAppearanceName={an} MeshAppearanceChunkCount={cc} MeshAppearanceTagCount={tc} MeshMaterialParam={mp}");
 }
 
 
@@ -850,7 +828,7 @@ pub(crate) unsafe fn register_mappinsystem_poi_phase_natives(reg: &Registry, pro
         false
     };
     crate::log_dev!(
-        "[reg] register_all: cw-mappinsystem-poi-phase (#142/#232) BwmsMappinSystemSetPoiPhase={ok_set} BwmsMappinSystemGetPoiPhase={ok_get}"
+        "[reg] register_all: mappinsystem-poi-phase BwmsMappinSystemSetPoiPhase={ok_set} BwmsMappinSystemGetPoiPhase={ok_get}"
     );
     let okslot = registro_de_prova!(register_argful_by_types(
         reg,
@@ -860,7 +838,7 @@ pub(crate) unsafe fn register_mappinsystem_poi_phase_natives(reg: &Registry, pro
         "BwmsMappinScanPoiSlot", corpo_de_prova!(tramp_mappin_scan_poi_slot),
     ));
     crate::log_dev!(
-        "[reg] register_all: Codeware.#142 BwmsMappinScanPoiSlot={okslot} (acha o slot por comportamento, gabarito vanilla)"
+        "[reg] register_all: poi-142 BwmsMappinScanPoiSlot={okslot} (acha o slot por comportamento, gabarito vanilla)"
     );
     let okver = registro_de_prova!(register_argful_by_types(reg, proto, &["String", "Int32"], "BwmsVeredito", "BwmsVeredito", corpo_de_prova!(tramp_veredito)));
     crate::log_dev!("[reg] register_all: BwmsVeredito={okver} (canal de veredito imune ao throttle)");
@@ -911,10 +889,10 @@ pub(crate) unsafe fn mappin_cooked_count(sys: *mut c_void, handle_off: usize, ar
 
 
 
-// `FindNode` do registro de instâncias de nó do mundo (RE `proofs/20260912-archivexl-44-parte7d2b3-volume-offline.log`, seção 3): `GameInstance+0x78` →
+// `FindNode` do registro de instâncias de nó do mundo (prova de 2026-09-12, RE offline do volume de mappin da parte 7d-2b-3, seção 3): `GameInstance+0x78` →
 // `+0x230` (vptr `0x1078e4610`), `vt[0x198]` `0x101b191c8(registro, id)` com o Handle da instância por sret — a mesma chamada do `GetNodeTransform` vanilla,
-// só na game thread (trava de leitura do registro). O Handle volta com referência e é solto pela sequência do motor. Usado pelo C#85 (instância pelo id) e
-// pela A#44 7d-2b-3b (volume do nó de área).
+// só na game thread (trava de leitura do registro). O Handle volta com referência e é solto pela sequência do motor. Usado pela instância de nó pelo id e
+// pelo volume do nó de área (7d-2b-3b).
 pub(crate) const GAMEINSTANCE_RUNTIME_OFF: usize = 0x78;
 
 pub(crate) const RUNTIME_NODEREGISTRY_OFF: usize = 0x230;
@@ -943,7 +921,7 @@ pub(crate) unsafe fn node_registry() -> Option<(*mut c_void, usize)> {
     Some((r, f))
 }
 
-// Codeware `#85` parte 85b (2026-09-12, RE `proofs/20260912-codeware-85-node-instance-layout-offline.log`, seção 4): campos do `worldInstancedMeshNode` num
+// Instância de nó, parte 85b (2026-09-12, RE offline do layout da instância de nó, seção 4): campos do `worldInstancedMeshNode` num
 // setor do cache do depot, só leitura, contra o CR2W do mesmo setor. O nó sai da lista `nodes` do setor (`SECTOR_NODES`) pelo vptr `0x1078e5130`; cada campo
 // é lido no offset do registro RTTI desta build, conferido com o da RE. O cozido omite o campo igual ao padrão da classe, então o censo separa os valores
 // iguais ao padrão de uma instância nova (pelo `CreateInstance`, AL-2c), que o CR2W não grava, dos diferentes, que são os gravados.
@@ -1400,24 +1378,20 @@ pub(crate) unsafe extern "C" fn tramp_sector_node_array_u32(_c: *mut c_void, fra
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `WeatherSystem` (catálogo `#81`/`#140`, sessão 2026-08-12, agente dedicado Codeware,
-// 100% offline) — leitura pura de campo, ZERO RawFunc/AddressLib, achado lendo
-// `enablers/Codeware/src/Red/RuntimeScene.hpp` real:
+// `WeatherSystem` (sessão 2026-08-12, 100% offline) — leitura pura de campo, zero endereço de função:
 //
-//   namespace Raw::WeatherScriptInterface { using System = Core::OffsetPtr<0x40,
-//       Red::worldRuntimeSystemWeather*>; }
-//   namespace Raw::RuntimeSystemWeather {
-//     using CycleWeather        = Core::OffsetPtr<0x8C, bool>;
-//     using CurrentStateIndex   = Core::OffsetPtr<0x90, uint32_t>;
-//     using CurrentSource       = Core::OffsetPtr<0x98, Red::CName>;
-//     using PreviouseStateIndex = Core::OffsetPtr<0xB8, uint32_t>;
-//     // + SetWeatherByName/SetWeatherByIndex/GetEnvironmentDefinition/GetWeatherState, todos
-//     // Core::RawFunc (AddressLib hash) — os endereços Mac saíram de desmonte offline, e os 4
-//     // métodos do Codeware (SetWeather/ResetWeather/GetEnvironmentDefinition/GetWeatherState)
-//     // estão mais abaixo (`BwmsWeatherSystemSetWeather` e seguintes).
+//   WeatherSystem+0x40        = worldRuntimeSystemWeather*
+//   RuntimeSystemWeather+0x8C = CycleWeather (bool)
+//   RuntimeSystemWeather+0x90 = CurrentStateIndex (u32)
+//   RuntimeSystemWeather+0x98 = CurrentSource (CName)
+//   RuntimeSystemWeather+0xB8 = PreviousStateIndex (u32)
 //
-// `Raw::WeatherScriptInterface::System` e os 4 campos de `Raw::RuntimeSystemWeather` são TODOS
-// `Core::OffsetPtr` (campo de dado cru, não `RawFunc`/vtable) — dois ponteiros encadeados, zero
+// SetWeatherByName/SetWeatherByIndex/GetEnvironmentDefinition/GetWeatherState são funções do motor:
+// os endereços Mac saíram de desmonte offline, e os 4 métodos de script (SetWeather/ResetWeather/
+// GetEnvironmentDefinition/GetWeatherState) estão mais abaixo (`BwmsWeatherSystemSetWeather` e seguintes).
+//
+// O ponteiro do sistema e os 4 campos são TODOS
+// campo de dado cru (não função/vtable) — dois ponteiros encadeados, zero
 // chamada de função em qualquer etapa (mais seguro até que o padrão de vtable-dispatch já usado
 // pra `MappinSystem`/`#142` acima, que ao menos CHAMA um function pointer; aqui só lemos bytes).
 // `WeatherSystem` confirmado vanilla real e redscript-visível (`orphans.script:43653`,
@@ -1425,16 +1399,16 @@ pub(crate) unsafe extern "C" fn tramp_sector_node_array_u32(_c: *mut c_void, fra
 // já existe, `orphans.script:11547`) — validado por scratch-compile (`@addMethod(WeatherSystem)`
 // resolve limpo contra o bundle real, zero UNRESOLVED_REF).
 //
-// Capacidade nova exposta (fora do escopo original dos 4 métodos do Codeware, mas prática): ler
-// o estado de clima ATUAL sem precisar de nenhum dos 4 RawFuncs — índice do estado de clima
+// Capacidade nova exposta (fora do escopo original dos 4 métodos, mas prática): ler
+// o estado de clima ATUAL sem precisar de nenhuma das 4 funções — índice do estado de clima
 // corrente/fonte(CName)/índice do estado anterior. Suficiente pra um mod CONSULTAR o clima
-// (ex.: "está chovendo?"/"qual clima tocou antes?"). TROCAR passa pelos RawFuncs do motor
+// (ex.: "está chovendo?"/"qual clima tocou antes?"). TROCAR passa pelas funções do motor
 // (`BwmsWeatherSystemSetWeather`/`ResetWeather`, abaixo).
-pub(crate) const WEATHER_RUNTIME_PTR_OFF: usize = 0x40; // WeatherScriptInterface::System (dentro de WeatherSystem)
+pub(crate) const WEATHER_RUNTIME_PTR_OFF: usize = 0x40; // worldRuntimeSystemWeather* (dentro de WeatherSystem)
 
 /// Núcleo PURO (testável offline, sem memória real): decodifica os 3 campos de estado de clima
 /// a partir de um buffer que espelha os primeiros `WEATHER_RUNTIME_CHUNK_LEN` bytes do
-/// `worldRuntimeSystemWeather*` real. Espelha byte-a-byte os offsets do header vendorizado.
+/// `worldRuntimeSystemWeather*` real, nos offsets acima.
 pub(crate) fn decode_weather_runtime_state(buf: &[u8]) -> Option<(u32, u64, u32)> {
     if buf.len() < WEATHER_RUNTIME_CHUNK_LEN {
         return None;
@@ -1513,20 +1487,20 @@ pub(crate) unsafe fn register_weathersystem_state_natives(reg: &Registry, proto:
         false
     };
     crate::log_dev!(
-        "[reg] register_all: cw-weathersystem-state (#81/#140) BwmsWeatherSystemGetCurrentStateIndex={ok1} BwmsWeatherSystemGetCurrentSource={ok2} BwmsWeatherSystemGetPreviousStateIndex={ok3}"
+        "[reg] register_all: weathersystem-state BwmsWeatherSystemGetCurrentStateIndex={ok1} BwmsWeatherSystemGetCurrentSource={ok2} BwmsWeatherSystemGetPreviousStateIndex={ok3}"
     );
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#81` — `WeatherSystem.SetWeather`/`ResetWeather` (2026-09-11). Endereços achados offline:
+// `WeatherSystem.SetWeather`/`ResetWeather` (2026-09-11). Endereços achados offline:
 // `SetWeatherByName` = `0x101a730fc` (x0 sistema, x1 clima, x2 fonte, s0 blend, w3, w4 prioridade; lê
 // `CurrentSource@0x98`, procura o estado pelo nome e chama o `SetWeatherByIndex` = `0x101a70298`), e
-// `0x101a719ec` = `strb w1, [x0, #0x8c]` (o `CycleWeather`). O motor já tem o `SetWeather` do Codeware
+// `0x101a719ec` = `strb w1, [x0, #0x8c]` (o `CycleWeather`). O motor já tem o `SetWeather`
 // pronto em `0x102921138`: ByName(sistema, clima, fonte, blend, 0, prioridade) e, se deu certo,
 // ciclo = false. O nó de quest `0x102921180` usa a mesma sequência e, no ramo de reset, ciclo = true.
 //
 // O `ResetWeather` chama o `SetWeatherByIndex` com 0 em tudo. No Mac o 5º e o 6º argumentos saem de
-// x3/x4 (o ByName repassa assim); o Codeware declara o 5º como float. A assinatura abaixo zera s1 E
+// x3/x4 (o ByName repassa assim); o 5º também pode ser lido como float. A assinatura abaixo zera s1 E
 // x3/x4, então as duas leituras recebem 0.
 pub(crate) const WEATHER_SETWEATHER_HELPER_VM: u64 = 0x1_0292_1138;
 
@@ -1602,12 +1576,12 @@ pub(crate) unsafe fn register_weathersystem_set_natives(reg: &Registry, proto: *
         false
     };
     crate::log_dev!(
-        "[reg] register_all: cw-weathersystem-set (#81) BwmsWeatherSystemSetWeather={ok_set} BwmsWeatherSystemResetWeather={ok_reset}"
+        "[reg] register_all: weathersystem-set BwmsWeatherSystemSetWeather={ok_set} BwmsWeatherSystemResetWeather={ok_reset}"
     );
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#81`/`#140` — `GetEnvironmentDefinition`/`GetWeatherState` (2026-09-14). Desmonte: `0x101a71abc` pega a definição pelo token em `[sys+0x60]`
+// `GetEnvironmentDefinition`/`GetWeatherState` (2026-09-14). Desmonte: `0x101a71abc` pega a definição pelo token em `[sys+0x60]`
 // (`0x101b695cc`) e devolve o `Handle` por `x8` com +1 forte; `0x101a71548` escolhe o índice (`[sys+0x88]` com o byte `[sys+0x84]` ligado, senão o
 // `CurrentStateIndex` `[sys+0x90]`) e salta pro `0x101a72ccc`, que devolve por `x8` o `Handle` da entrada do índice em `[def+0x188]` (16 B, tamanho em
 // `+0x194`). Os 2 objetos não derivam de `IScriptable`: sobem pro script dentro de um `BwmsSerializable`.
@@ -1659,7 +1633,7 @@ pub(crate) unsafe fn register_weathersystem_read_natives(reg: &Registry, proto: 
     );
 }
 
-// Codeware `#81`/`#140` (teste da troca, 2026-09-15): leituras do `worldRuntimeSystemWeather` pelas mesmas funções que o `SetWeatherByName` usa
+// Clima (teste da troca, 2026-09-15): leituras do `worldRuntimeSystemWeather` pelas mesmas funções que o `SetWeatherByName` usa
 // (`0x101a730fc`: quantos estados, estado por índice por sret e nome do estado).
 #[cfg(feature = "devtools")]
 pub(crate) const WEATHER_STATE_COUNT_VM: u64 = 0x1_01a7_1058;
@@ -1754,7 +1728,7 @@ pub(crate) unsafe fn journal_filhos(container: *mut c_void) -> Vec<*mut c_void> 
 
 
 
-// ArchiveXL `#44` parte 4 (2026-09-11): root de um `.journal` carregado por caminho. `gameJournalResource` (`0x58`) guarda o root em
+// Journal de mod, parte 4 (2026-09-11): root de um `.journal` carregado por caminho. `gameJournalResource` (`0x58`) guarda o root em
 // `entry` (`Handle<gameJournalEntry>`, `0x40`), pelo registro RTTI (`mov w2,#0x40` antes de `bl 0x1010a04ec`, nome "entry").
 pub(crate) const JOURNAL_RESOURCE_ENTRY_OFF: usize = 0x40;
 
@@ -1824,7 +1798,7 @@ pub(crate) unsafe fn questphase_grafo_de(res: *mut c_void) -> Option<*const u8> 
     (rtti::sane(graph as *mut c_void) && crate::memoria::is_readable(graph, GRAPHDEF_NODES_OFF + 0x10)).then_some(graph as *const u8)
 }
 
-// ArchiveXL `#35` parte 35c-2d-3 (2026-09-12): o mesmo patch roda no hook da rota de carga de fase (`0x1029e8c48`), em thread de job, onde RTTI já
+// Fase de quest, parte 35c-2d-3 (2026-09-12): o mesmo patch roda no hook da rota de carga de fase (`0x1029e8c48`), em thread de job, onde RTTI já
 // travou o load (boot 55). O que o patch pedia ao RTTI sai de um contexto resolvido na game thread — na leitura da tabela (1ª iteração do tick) ou na
 // native —: classes pro `CreateInstance`, offsets conferidos contra a RE da 35c-2, largura e valores do `questSocketType`, tipo dos campos da conexão e
 // movers. No caminho do patch sobram leitura de memória, vptr contra constante e funções que o próprio loader usa (`CreateInstance`, Handle, reserve,
@@ -1944,9 +1918,9 @@ pub(crate) struct PatchDaTabela {
 
 pub(crate) static PATCHES_DA_TABELA: std::sync::Mutex<Vec<PatchDaTabela>> = std::sync::Mutex::new(Vec::new());
 
-// ArchiveXL `#34`/`#35`/`#55` — nós de fase de mod forçados (`QuestPhaseExtension::OnQuestStart`/`OnGameRestored`), 2026-09-18.
+// Nós de fase de mod forçados (no início da quest e no `OnGameRestored`), 2026-09-18.
 //
-// A referência guarda, pra cada `.quest` que recebeu um nó de fase de mod no `PatchPhase`, os ids desses nós (`s_forced`). No início de uma quest
+// Pra cada `.quest` que recebeu um nó de fase de mod no patch de fase, guardam-se os ids desses nós (`FASES_FORCADAS`). No início de uma quest
 // (`QuestRootInstance::Start`, hook antes) marca o fact de cada nó forçado: a quest começa do zero e o grafo já passa pelo nó de mod. Na carga de save
 // (`QuestsSystem::OnGameRestored`) o save pode ser de antes do mod: pra cada nó forçado sem fact, põe o caminho `{questId}` no `NodeHashMap`, força o
 // início do nó pelo `ForceStartNode` com o socket `In1` e marca o fact. No Mac o FactManager fica em `[QuestsSystem+0xf8]` (`GetFact` vt+0x18,
@@ -1991,7 +1965,7 @@ pub(crate) unsafe fn fact_gravar(sys: *const c_void, fact: u32, valor: i32) -> b
     true
 }
 
-/// `OnQuestStart` da referência, com o QuestsSystem do contexto: marca o fact de cada nó forçado das quests forçadas que estão na QuestList. Devolve
+/// Início de quest, com o QuestsSystem do contexto: marca o fact de cada nó forçado das quests forçadas que estão na QuestList. Devolve
 /// quantos facts gravou. Roda na thread do Tick do sistema, dentro das travas `+0x128`/`+0x60`: só lê memória e chama o FactManager.
 pub(crate) unsafe fn questphase_forcados_no_inicio(sys: *const c_void) -> usize {
     let forcadas: Vec<(u64, Vec<u16>)> = match FASES_FORCADAS.lock() {
@@ -2011,12 +1985,12 @@ pub(crate) unsafe fn questphase_forcados_no_inicio(sys: *const c_void) -> usize 
     gravados
 }
 
-// `OnGameRestored` (A#55, e o início forçado do A#35). NodeHashMap em `sys+0x78` (`HashMap<u32, DynArray<u16>>`, nó `{próximo, hash +4, chave +8,
+// `OnGameRestored` (e o início forçado do teste de fase). NodeHashMap em `sys+0x78` (`HashMap<u32, DynArray<u16>>`, nó `{próximo, hash +4, chave +8,
 // caminho +0x10}`); a inserção do motor (`0x102810994`, a mesma da `Initialize` da fase) copia o caminho e roda sob a trava `sys+0x60`. O
 // `ForceStartNode` (`0x102a0d6a0`) toma a trava sozinho, acha o caminho pela chave (chave ausente derruba o jogo), pega `root.children[caminho[0]]` sem
-// conferir, acha o nó por varredura linear do `nodes` do grafo da fase e o executa na hora com um contexto de modo 6. O hash da chave segue a
-// referência (FNV padrão do caminho, igual ao motor só no questId 0: o motor semeia pela tabela `0x1073cc600`), então a chave da referência pode faltar
-// e é inserida, como lá.
+// conferir, acha o nó por varredura linear do `nodes` do grafo da fase e o executa na hora com um contexto de modo 6. O hash da chave é o
+// FNV padrão do caminho (igual ao motor só no questId 0: o motor semeia pela tabela `0x1073cc600`), então a chave pode faltar
+// e é inserida.
 pub(crate) const NODEHASHMAP_OFF: usize = 0x78;
 
 pub(crate) const NODEHASHMAP_INSERIR_VM: u64 = 0x1_0281_0994;
@@ -2075,7 +2049,7 @@ pub(crate) unsafe fn quest_forcar_no(sys: *mut c_void, chave: u32, no: u16) -> b
     true
 }
 
-/// `OnGameRestored` da referência: pra cada quest forçada na QuestList (com a fase dela no índice), a chave `{questId}` no NodeHashMap e, pra cada nó
+/// `OnGameRestored`: pra cada quest forçada na QuestList (com a fase dela no índice), a chave `{questId}` no NodeHashMap e, pra cada nó
 /// forçado sem fact, o `ForceStartNode` e o fact. Devolve quantos nós forçou.
 pub(crate) unsafe fn questphase_forcar_na_restauracao(sys: *mut c_void) -> usize {
     let forcadas: Vec<(u64, Vec<u16>)> = match FASES_FORCADAS.lock() {
@@ -2190,7 +2164,7 @@ pub(crate) unsafe fn quest_grafo_truncar(sys: *mut c_void, grafo: usize, tamanho
 /// Lê `bwms-questphase.txt` (`<mod> | <fase pai> | <fase do mod> | <nó de entrada> | <socket de entrada> | <nó de saída> | <socket de saída> |
 /// <intercept>`, ids separados por espaço, `-` ou vazio = sem valor; `bwms_primitives::tabelas::Questphase`) e resolve o contexto (game thread). Linha
 /// malformada é ignorada com log. O arquivo ausente esvazia a tabela sem resolver contexto: o `bwms install` o apaga quando nenhum mod gera patch, e a
-/// recarga do `ArchiveXL.Reload` tira os patches anteriores.
+/// recarga do `Reload` da fachada de recursos tira os patches anteriores.
 pub(crate) unsafe fn questphase_tabela(caminho: &str) -> usize {
     let conteudo = match std::fs::read_to_string(caminho) {
         Ok(c) => c,
@@ -2244,7 +2218,7 @@ pub(crate) unsafe fn questphase_patches_na_carga(path: u64, fase: *mut c_void) {
         let saida = (!p.saida.is_empty()).then(|| (&p.saida[..], p.socket_saida.as_deref()));
         let codigo = match questphase_patch_aplicar(obj, &p.fase, (&p.entrada[..], p.socket_entrada.as_deref()), saida, p.intercept, false) {
             Ok(a) => {
-                // Nó de fase de mod num `.quest`: forçado na restauração e marcado no início da quest (`s_forced` da referência).
+                // Nó de fase de mod num `.quest`: forçado na restauração e marcado no início da quest (`FASES_FORCADAS`).
                 if vptr_e(obj as *const u8, QUESTRES_VPTR_VM) && a.no != 0 {
                     let id = ((a.no + QUESTNODE_ID_OFF) as *const u16).read_unaligned();
                     if let Ok(mut f) = FASES_FORCADAS.lock() {
@@ -2295,7 +2269,7 @@ pub(crate) unsafe fn questloader_slot(l: *mut c_void, (slot, vm): (usize, u64)) 
 
 
 
-// ArchiveXL `#44` parte 5c-1 (2026-09-11, RE `proofs/20260911-archivexl-44-parte5c-registro-de-entrada-offline.log`): pré-requisitos do registro
+// Journal de mod, parte 5c-1 (2026-09-11, RE offline do registro de entrada da parte 5c): pré-requisitos do registro
 // de entrada, só leitura. O hash de uma entrada é MurmurHash3_x86_32 com a seed `0x5EEDBA5E` (`bwms_primitives::RECORDS_SEED`) do path
 // "pasta/.../id" montado subindo pelos pais (o motor lê a cauda com sinal; igual pra path ASCII). Pastas e filhos saem pelo layout da parte 3; a
 // classe, pelo nome do tipo (`+0x18` do CClass), porque o `GetEntryByString` vanilla pede a classe; o mover do `DynArray<Handle<JournalEntry>>`
@@ -2311,7 +2285,7 @@ pub(crate) const JOURNAL_ENTRY_MOVER_VM: u64 = 0x1_051f_e924;
 
 
 
-// ArchiveXL `#44` parte 5c-2 (2026-09-11, RE `proofs/20260911-archivexl-44-parte5c-registro-de-entrada-offline.log`): 1 entrada de teste registrada na
+// Journal de mod, parte 5c-2 (2026-09-11, RE offline do registro de entrada da parte 5c): 1 entrada de teste registrada na
 // árvore viva e desfeita na mesma execução de script. Inserir = append nos `entries` da pasta `onscreens` da raiz 0 (trava de byte `+0x70`, reserve do
 // motor com o mover conferido no GOT), vínculo filho→pai no tree (`0x105232f70`, que MOVE os handles) e `jm->vt[0x1e0]` (os índices A/B copiam +1).
 // Desfazer = `jm->vt[0x1e8]`, `0x105232fcc(tree, &filho)` e remoção do `entries`. O objeto (`gameJournalOnscreen`, id `bwms_teste_5c`) tem dono
@@ -2383,16 +2357,16 @@ pub(crate) unsafe fn journal_anexar(jm: *mut c_void, tree: *mut c_void, pasta: *
 
 
 
-// ArchiveXL `#44` parte 7e-2 (2026-09-12): fluxo de produção do journal de mod. A instalação grava `red4ext/bwms-journal.txt` (7e-1, `bwms_primitives::instalacao`); a
+// Journal de mod, parte 7e-2 (2026-09-12): fluxo de produção do journal de mod. A instalação grava `red4ext/bwms-journal.txt` (7e-1, `bwms_primitives::instalacao`); a
 // carga das tabelas lê as linhas `<mod> | <caminho do .journal>` e, em gameplay, no ponto assentado do `OnApply` (sem executor aninhado), cada `.journal`
 // é pedido ao `LoadAsync` quando o caminho existe no depot e, carregado, mesclado na raiz viva 0: entrada com id que já existe e é container nos dois lados
 // desce; entrada nova entra com a subárvore inteira, na ordem do registro do motor na carga de um `.journal` (`0x105202418`: mapa filho→pai e `Register`
 // no container, depois nos filhos) — o topo pelo `journal_anexar` e cada descendente pelo mapa de pais e pelos índices, de cima pra baixo, porque o hash do
-// caminho sobe pelo mapa. As entradas novas passam pelo `ConvertLocKeys` (6b). O `JournalManager` sai do mapa de sistemas do `GameInstance` (só leitura,
-// RED4ext `#472`). Boot 79: tabela lida, carga e mescla em produção (28465 casadas, 1 anexada com 9 descendentes). Com o marcador
+// caminho sobe pelo mapa. As entradas novas passam pela conversão de LocKeys (6b). O `JournalManager` sai do mapa de sistemas do `GameInstance` (só
+// leitura). Boot 79: tabela lida, carga e mescla em produção (28465 casadas, 1 anexada com 9 descendentes). Com o marcador
 // `~/.bwms-hook-journal-7e-teste`, um objetivo da cópia ganha o sufixo `_bwms` antes da mescla (a cópia do `cooked_journal` não tem entrada nova) e a mescla
 // pode ser desfeita pela native de teste; desde a 7e-3c o objetivo é o pai do 1º pin de quest cujo nó é de área, pra existir pin com volume.
-// Parte 7e-3 (2026-09-12): os pins das entradas novas viram pendentes com o hash Murmur3 do caminho, como a referência coleta, e o tick os registra na
+// Parte 7e-3 (2026-09-12): os pins das entradas novas viram pendentes com o hash Murmur3 do caminho, e o tick os registra na
 // tabela de mappins de mod (7d-2a) na posição do nó do NodeRef, resolvido pelo `ResolveNodeRef` vanilla na raiz global e achado pelo `FindNode` — o cozido
 // vanilla guarda a posição do nó, sem o offset (boot 72) —; pin sem NodeRef fica no offset e nó fora do registro espera o streaming.
 #[cfg(feature = "devtools")]
@@ -2409,10 +2383,10 @@ pub(crate) static JOURNAL_7E_TESTE_PINS: std::sync::Mutex<Vec<(String, String)>>
 /// Pins resolvidos por tick, pra um journal grande não pesar num frame só.
 pub(crate) const PINS_POR_TICK: usize = 16;
 
-// ArchiveXL `#44` parte 7e-4 (2026-09-12): edição de entrada existente. Na referência, o último segmento do id de uma entrada do journal de mod terminado
+// Journal de mod, parte 7e-4 (2026-09-12): edição de entrada existente. O último segmento do id de uma entrada do journal de mod terminado
 // em `*` marca edição: com a entrada viva achada e o mesmo tipo, os LocKeys da do mod são convertidos e cada propriedade dela, menos o `id`, vai pra viva
 // pelo `Assign` do tipo; depois a descida nos filhos segue como na mescla. Id com `/` anda pelas pastas vivas a partir da pasta; caminho que não existe é
-// recusado sem anexar. Duas diferenças deliberadas: os `entries` do container não são copiados (trocariam os filhos vivos por fora dos índices do journal —
+// recusado sem anexar. Duas escolhas deliberadas: os `entries` do container não são copiados (trocariam os filhos vivos por fora dos índices do journal —
 // a descida mescla os filhos), e a entrada nova com `/` no id fica com o último segmento como id (com o id inteiro, o caminho montado pelo motor não bate
 // com o hash do pin). Cada valor substituído fica numa cópia do tipo pro desfazer do teste. O `Assign` (`vt+0x58`) é conferido uma vez numa String e num
 // Vector3 temporários antes da 1ª edição; sem a conferência, nada é editado.
@@ -2502,7 +2476,7 @@ pub(crate) static PINS_DE_MOD: std::sync::Mutex<Vec<PinDeModPendente>> = std::sy
 pub(crate) static PINS_DE_MOD_REGISTRADOS: std::sync::Mutex<Vec<(u32, bool)>> = std::sync::Mutex::new(Vec::new());
 
 /// Lê `bwms-journal.txt` (`bwms_primitives::tabelas::Journal`); devolve as linhas aceitas. Só texto (roda na carga das tabelas); journal já na lista não é
-/// trocado. Com `substituir` (o `ArchiveXL.Reload`), o arquivo ausente vale como vazio e a lista vira a do arquivo mais o journal já mesclado (estado 2),
+/// trocado. Com `substituir` (o `Reload` da fachada de recursos), o arquivo ausente vale como vazio e a lista vira a do arquivo mais o journal já mesclado (estado 2),
 /// que está na árvore viva e só sai com o jogo recarregado (o desfazer só mexe no que a mescla anexou ou editou). O que o arquivo não lista sai mesmo com
 /// a carga já pedida (estado 1): ficando, o `journal_mods_tick` o mesclaria na árvore viva na volta seguinte.
 pub(crate) fn journal_tabela(arquivo: &str, substituir: bool) -> usize {
@@ -2926,7 +2900,7 @@ pub(crate) unsafe fn journal_7e4_marcar(modc: *mut c_void, evitar: Option<usize>
 }
 
 
-/// Pin da entrada nova, como a referência coleta: `gameJournalQuestMapPin` com NodeRef (entidade dinâmica fica de fora), `gameJournalQuestMultiMapPin` e
+/// Pin da entrada nova: `gameJournalQuestMapPin` com NodeRef (entidade dinâmica fica de fora), `gameJournalQuestMultiMapPin` e
 /// `gameJournalQuestPointOfInterestMapPin` só com offset, e `gameJournalPointOfInterestMappin` com o `staticNodeRef` na busca de POI.
 pub(crate) unsafe fn journal_pin_de_mod(entrada: *mut c_void, caminho: &str) -> Option<PinDeModPendente> {
     let b = entrada as *const u8;
@@ -3101,7 +3075,7 @@ pub(crate) unsafe fn journal_mods_tick(reg: &Registry, player: *mut c_void) {
     }
 }
 
-// ArchiveXL `#44` parte 7e-6b-1 (2026-09-12): mescla antecipada, só observando. Com `~/.bwms-hook-journal-menu`, o tick do menu (sem player) pede a carga dos
+// Journal de mod, parte 7e-6b-1 (2026-09-12): mescla antecipada, só observando. Com `~/.bwms-hook-journal-menu`, o tick do menu (sem player) pede a carga dos
 // journals da tabela assim que o caminho existe, e cada journal carregado vira um plano: id da raiz do mod, ids de topo e total de entradas. O hook do
 // `Initialize` da raiz (7e-6a, thread de job) compara o plano com as entradas de topo da raiz viva só lendo memória e loga quantas casariam e quantas seriam
 // novas. A observação não escreve nada. Com `~/.bwms-hook-journal-mescla-na-raiz` o mesmo hook mescla na raiz (7e-6b-2, `journal_mescla_na_raiz`);
@@ -3511,7 +3485,7 @@ pub(crate) unsafe fn pins_de_mod_tick(reg: &Registry) {
 
 
 
-// ArchiveXL `#44` partes 7a/7b (2026-09-12): natives do teste da busca de mappin cozido (o hook e a tabela ficam no `selftest.rs`).
+// Journal de mod, partes 7a/7b (2026-09-12): natives do teste da busca de mappin cozido (o hook e a tabela ficam no `selftest.rs`).
 /// A busca de um código de ação/eixo: de 10 em diante é a de POI (7c); abaixo, a de mappin (7b).
 pub(crate) fn busca_do_codigo(codigo: i32) -> &'static crate::missoes_e_mapa::BuscaCozida {
     if codigo >= 10 { &crate::missoes_e_mapa::BUSCA_POI } else { &crate::missoes_e_mapa::BUSCA_MAPPIN }
@@ -3520,9 +3494,9 @@ pub(crate) fn busca_do_codigo(codigo: i32) -> &'static crate::missoes_e_mapa::Bu
 
 
 
-// ArchiveXL `#44` parte 7d-2b-1 (2026-09-12, RE `proofs/20260912-archivexl-44-parte7d2b-coleta-de-mappins-do-journal-offline.log`): coleta dos pins de
-// um `.journal` carregado por caminho, só leitura. A árvore do recurso é percorrida montando o caminho de ids (sem o id da raiz); nas famílias que a
-// referência coleta — `gameJournalQuestMapPin`, `gameJournalQuestMultiMapPin` e `gameJournalQuestPointOfInterestMapPin` (base `QuestMapPinBase`) e
+// Journal de mod, parte 7d-2b-1 (2026-09-12, RE offline da coleta de mappins do journal): coleta dos pins de
+// um `.journal` carregado por caminho, só leitura. A árvore do recurso é percorrida montando o caminho de ids (sem o id da raiz); nas famílias de
+// pin — `gameJournalQuestMapPin`, `gameJournalQuestMultiMapPin` e `gameJournalQuestPointOfInterestMapPin` (base `QuestMapPinBase`) e
 // `gameJournalPointOfInterestMappin` — guarda o hash Murmur3 do caminho (seed `0x5EEDBA5E`, o que o motor consulta), o NodeRef, a entidade dinâmica e o
 // `offset`, pelos offsets do registro RTTI. Critério: o censo offline do `cooked_journal`; a busca cozida vanilla confere o hash de 1 pin e 1 POI.
 pub(crate) const JOURNAL_PINBASE_OFFSET_OFF: usize = 0x108;
@@ -3696,36 +3670,36 @@ pub(crate) unsafe fn register_quest_accessor_natives(reg: &Registry, proto: *mut
     let ok7 = register_argful_by_types(reg, proto, &["handle:IScriptable", "Int32"], "BwmsQuestAccessorPathDepth", "BwmsQuestAccessorPathDepth", tramp_quest_accessor_path_depth as NativeHandler);
     let ok8 = register_argful_by_types(reg, proto, &["handle:IScriptable", "Int32", "Int32"], "BwmsQuestAccessorPathId", "BwmsQuestAccessorPathId", tramp_quest_accessor_path_id as NativeHandler);
     let ok9 = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable", "CName", "Int32"], "BwmsQuestAccessorSyntheticTest", "BwmsQuestAccessorSyntheticTest", corpo_de_prova!(tramp_quest_accessor_synthetic_test)));
-    // ArchiveXL `#35` 35c-2d-3b: loader de quest do QuestsSystem (fila da rota de carga de fase).
+    // Fase de quest, 35c-2d-3b: loader de quest do QuestsSystem (fila da rota de carga de fase).
     let ok_fila_op = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable", "Int32", "Int32"], "BwmsQuestLoaderOp", "BwmsQuestLoaderOp", corpo_de_prova!(tramp_questloader_op)));
     let ok_fila_res = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable", "Int32"], "BwmsQuestLoaderResource", "BwmsQuestLoaderResource", corpo_de_prova!(tramp_questloader_resource)));
     let ok_inicio = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable"], "BwmsQuestGraphStartNode", "BwmsQuestGraphStartNode", corpo_de_prova!(tramp_quest_graph_start_node)));
-    // Codeware `#157`: o `QuestContext` montado e destruído, sem executar nó (o `ExecuteNode` de verdade mexe em progresso).
+    // O `QuestContext` montado e destruído, sem executar nó (o `ExecuteNode` de verdade mexe em progresso).
     let ok_ctx = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable"], "BwmsC157Contexto", "BwmsC157Contexto", corpo_de_prova!(tramp_c157_contexto)));
     let ok_exec = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:IScriptable"], "BwmsC157Executar", "BwmsC157Executar", corpo_de_prova!(tramp_c157_executar)));
-    crate::log_dev!("[reg] register_all: cw-157 QuestContexto={ok_ctx} ExecuteNodeSintetico={ok_exec}");
-    // Codeware `#48`: `QuestsSystem.ExecuteNode` com a trava, o construtor de nó e o teste.
+    crate::log_dev!("[reg] register_all: questctx-157 QuestContexto={ok_ctx} ExecuteNodeSintetico={ok_exec}");
+    // `QuestsSystem.ExecuteNode` com a trava, o construtor de nó e o teste.
     let ok_en = register_argful_by_types(reg, proto, &["handle:QuestsSystem", "handle:IScriptable", "CName"], "BwmsQuestsSystemExecuteNode", "BwmsQuestsSystemExecuteNode", tramp_quests_execute_node as NativeHandler);
     let ok_nn = registro_de_prova!(register_argful_by_types(reg, proto, &["CName"], "BwmsQuestNodeNew", "BwmsQuestNodeNew", corpo_de_prova!(tramp_quest_node_new)));
     let ok_48 = registro_de_prova!(register_argful_by_types(reg, proto, &["handle:QuestsSystem", "handle:IScriptable", "Int32"], "BwmsC48Medir", "BwmsC48Medir", corpo_de_prova!(tramp_c48_medir)));
-    crate::log_dev!("[reg] register_all: cw-48 QuestsSystemExecuteNode={ok_en} QuestNodeNew={ok_nn} C48Medir={ok_48}");
-    crate::log_dev!("[reg] register_all: axl-35 2d-3b QuestLoaderOp={ok_fila_op} QuestLoaderResource={ok_fila_res} QuestGraphStartNode={ok_inicio}");
+    crate::log_dev!("[reg] register_all: executenode-48 QuestsSystemExecuteNode={ok_en} QuestNodeNew={ok_nn} C48Medir={ok_48}");
+    crate::log_dev!("[reg] register_all: fase-35 2d-3b QuestLoaderOp={ok_fila_op} QuestLoaderResource={ok_fila_res} QuestGraphStartNode={ok_inicio}");
     crate::log_dev!(
-        "[reg] register_all: cw-160 QuestPhaseResourceGraph={ok1} AccessorCount={ok2} At={ok3} FindCount={ok4} FindAt={ok5} PathCount={ok6} PathDepth={ok7} PathId={ok8} SyntheticTest={ok9}"
+        "[reg] register_all: grafo-160 QuestPhaseResourceGraph={ok1} AccessorCount={ok2} At={ok3} FindCount={ok4} FindAt={ok5} PathCount={ok6} PathDepth={ok7} PathId={ok8} SyntheticTest={ok9}"
     );
 }
 
-// Codeware `#84` — o `WorldStateSystem` sem classe de sistema forjada, 2026-09-18.
+// O `WorldStateSystem` sem classe de sistema forjada, 2026-09-18.
 //
-// A referência cria um sistema de jogo novo com 13 métodos. No Mac os 9 de comunidade e spawner já são o `CommunitySystem` do motor por vtable (`#77`) e
-// aqui ganham o `CommunitySystem::Update(sys, true)` (`0x10472c880`) que a referência chama depois de cada mutação: ele esvazia na hora a fila de pedidos
+// O sistema tem 13 métodos. No Mac os 9 de comunidade e spawner já são o `CommunitySystem` do motor por vtable (`#77`) e
+// aqui ganham o `CommunitySystem::Update(sys, true)` (`0x10472c880`) depois de cada mutação: ele esvazia na hora a fila de pedidos
 // em `+0x48` que os slots de comunidade enchem (sem ele o pedido espera o próximo tick; os slots de spawner repassam pra `[sys+0xd8]`, que o `Update` não
 // processa, como no Windows). Os outros 4:
-// - `IsReady`: a referência junta "mundo anexado" e "fases registradas"; aqui é o `QuestsSystem` da sessão com a fase raiz (`[sys+0x68]`) e o streaming
+// - `IsReady`: "mundo anexado" e "fases registradas"; aqui é o `QuestsSystem` da sessão com a fase raiz (`[sys+0x68]`) e o streaming
 //   world carregado.
 // - `GetStreamingWorld`: o `Handle<worldStreamingWorld>` em `+0x270` do runtime system 27, `worldRuntimeSystemWorldStreaming` (o getter do motor
 //   `0x101bfe958` é `add x0, x0, #0x270`).
-// - `ToggleNode`/`ToggleVariant`: como a referência, um `questWorldDataManagerNodeDefinition` com o tipo `questShowWorldNode_NodeType` (`objectRef`,
+// - `ToggleNode`/`ToggleVariant`: um `questWorldDataManagerNodeDefinition` com o tipo `questShowWorldNode_NodeType` (`objectRef`,
 //   `show`) ou `questTogglePrefabVariant_NodeType` (`params[0]` com o prefab e 1 estado de variante), executado pelo `ExecuteNode` do motor na fase raiz
 //   (`quests_execute_node_com`, o do `#48`). O `Execute` do tipo (`0x1029c6274` e `0x1029c80cc`) resolve o NodeRef na raiz, aplica no streaming (mapa de
 //   visibilidade do `NodeStreaming`, runtime system 42, em `+0x150`, ou o gerenciador de variantes em `[streaming+0x288]`) e grava no
@@ -3910,9 +3884,9 @@ pub(crate) unsafe fn register_worldstate_natives(reg: &Registry, proto: *mut c_v
     let ok10 = register_argful_by_types(reg, proto, &["NodeRef"], "BwmsWorldStateSpawnerId", "BwmsWorldStateSpawnerId", tramp_worldstate_spawner_id as NativeHandler);
     let ok11 = register_argful_by_types(reg, proto, &[], "BwmsSessionGame", "BwmsSessionGame", tramp_session_game as NativeHandler);
     let ok12 = registro_de_prova!(register_argful_by_types(reg, proto, &[], "BwmsC84Fase", "BwmsC84Fase", corpo_de_prova!(tramp_c84_fase)));
-    crate::log_dev!("[reg] register_all: cw-84 C84Fase={ok12}");
+    crate::log_dev!("[reg] register_all: worldstate-84 C84Fase={ok12}");
     crate::log_dev!(
-        "[reg] register_all: cw-84 WorldStateIsReady={ok1} StreamingWorld={ok2} ToggleNode={ok3} ToggleVariant={ok4} CommunityUpdate={ok5} C84Mundo={ok6} \
+        "[reg] register_all: worldstate-84 WorldStateIsReady={ok1} StreamingWorld={ok2} ToggleNode={ok3} ToggleVariant={ok4} CommunityUpdate={ok5} C84Mundo={ok6} \
          Community={ok7} Spawner={ok8} GetCommunity={ok9} SpawnerId={ok10} SessionGame={ok11}"
     );
 }
@@ -4026,7 +4000,7 @@ pub(crate) unsafe extern "C" fn tramp_traceresult_gethitobject(_c: *mut c_void, 
     let id = srefs.first().copied().and_then(|p| traceresult_result_id(p));
     let mut h = [0u64; 2];
     if let Some(id) = id {
-        // Mesmo laço do Codeware: o resultado guarda até 2 objetos, e o 1º pode vir vazio.
+        // O resultado guarda até 2 objetos, e o 1º pode vir vazio.
         for indice in 0..2u32 {
             h = chamar_handle_sret(PHYSICS_GETHITOBJECT_VM, id, indice);
             if h[0] != 0 {
@@ -4228,23 +4202,22 @@ pub(crate) unsafe extern "C" fn tramp_node_instance_info(_c: *mut c_void, frame:
 
 pub(crate) type CommunitySpawnerFn = unsafe extern "C" fn(*mut c_void, u64);
 
-// `GetCommunity` (Codeware `#77`, 2026-08-14, mesma sessão — slot que faltava nas 7 já
-// implementadas acima). Fonte real (`enablers/Codeware/src/Red/CommunitySystem.hpp`):
+// `GetCommunity` (2026-08-14, mesma sessão — slot que faltava nas 7 já
+// implementadas acima):
 //   GetCommunity@0x228 = void* (ICommunitySystem::*)(WeakPtr<Community>& aOut,
 //                                                     const uint64_t& aCommunityID)
 // Mac = Windows 0x228 + 0x08 (shift Itanium já estabelecido) = 0x230. **A SLOT em si está
 // correta** — o crash real (2026-08-14 14:05, `Cyberpunk2077-2026-08-14-140515.ips`, thread
 // `redDispatcher4`, `EXC_BAD_ACCESS`/`KERN_INVALID_ADDRESS at 0x4`) foi diagnosticado por
 // disassembly REAL do binário Mac na região da falha (não suposição): a função que mora nesse
-// slot (vmaddr estático `0x10472bf60`, faulting insn em `0x10472c0dc`) NÃO usa a ABI que o
-// header do Codeware sugere (2 parâmetros por referência). O corpo real:
+// slot (vmaddr estático `0x10472bf60`, faulting insn em `0x10472c0dc`) NÃO usa a ABI que a
+// assinatura acima sugere (2 parâmetros por referência). O corpo real:
 //   - `this+0x68`/`this+0x74` = ponteiro+contagem de um array ORDENADO de IDs (busca binária via
 //     `0x101667c74`, um comparador TRIVIAL `cmp x0,x1; cset w0,lo; ret` — confirma que os 2
 //     valores comparados são ESCALARES `uint64_t`, nunca deferenciados);
 //   - `x1` (2º argumento) é usado DIRETO nessa comparação, sem NENHUM `ldr` — ou seja,
-//     `aCommunityID` chega **por VALOR em x1**, não por ponteiro (diferente do que o header
-//     documenta — o header descreve a assinatura C++ "de intenção", não necessariamente a ABI
-//     exata desta build);
+//     `aCommunityID` chega **por VALOR em x1**, não por ponteiro (a assinatura C++ é "de intenção",
+//     não necessariamente a ABI exata desta build);
 //   - o "não achado" cai no branch `mov x8,#0; b <store>` → `stp x8, xzr, [x20]`, onde `x20` foi
 //     copiado de **x8 NA ENTRADA DA FUNÇÃO** (`mov x20, x8`, a 1ª instrução real do corpo) — x8
 //     é o REGISTRADOR DE RESULTADO INDIRETO do ARM64 (AAPCS64/Itanium), usado quando o retorno é
@@ -4258,7 +4231,7 @@ pub(crate) type CommunitySpawnerFn = unsafe extern "C" fn(*mut c_void, u64);
 //   crash EXATO em `0x0000000000000004`, o mesmo endereço do relatório.
 //
 // **Fix (mesmo padrão `SretPad32` já provado ao vivo neste projeto pra exatamente este tipo de
-// bug — ArchiveXL `axl-garment-apply`/`axl-inkspawner-apply`, 2026-07-29, ver `selftest.rs`):**
+// bug — `garment-apply`/`inkspawner-apply`, 2026-07-29, ver `selftest.rs`):**
 // declarar o retorno Rust como uma struct >16 bytes força o LLVM/aarch64 a usar sret de verdade
 // (populando x8 sozinho, do jeito que o C++ real espera) — e passar `community_id` POR VALOR
 // (não mais um ponteiro), batendo com o que o comparador provou. Isso elimina o out-buf de 16
@@ -4276,7 +4249,7 @@ pub(crate) const COMMUNITY_UPDATE_PROLOGO: u32 = 0xd102_03ff;
 
 pub(crate) const COMMUNITYSYSTEM_VTBL_VM: u64 = 0x1_07c6_7818;
 
-/// Id global do NodeRef pelo `ResolveNodeRef` vanilla na raiz (o `Red::ResolveNodeRef` da referência); 0 sem ele.
+/// Id global do NodeRef pelo `ResolveNodeRef` vanilla na raiz; 0 sem ele.
 pub(crate) unsafe fn ws_resolver(noderef: u64) -> u64 {
     if noderef == 0 {
         return 0;
@@ -4284,7 +4257,7 @@ pub(crate) unsafe fn ws_resolver(noderef: u64) -> u64 {
     Registry::obtain().and_then(|reg| resolver_noderef(&reg, noderef)).unwrap_or(0)
 }
 
-/// `ActivateCommunity` (0), `DeactivateCommunity` (1), `SetCommunityPhase` (2) e `ResetCommunity` (3, sem entry, como a referência) pelo `CommunitySystem`
+/// `ActivateCommunity` (0), `DeactivateCommunity` (1), `SetCommunityPhase` (2) e `ResetCommunity` (3, sem entry) pelo `CommunitySystem`
 /// da sessão, seguidos do `Update` do motor. Sem passar pelo `GameInstance` do script: pelo tick do BWMS o `GetCommunitySystem(GetGameInstance())`
 /// voltou nulo (boots 247 e 248). `false` com NodeRef que não resolve ou sem o sistema.
 pub(crate) unsafe fn ws_comunidade(op: i32, noderef: u64, entry: CName, fase: CName) -> bool {
@@ -4307,8 +4280,8 @@ pub(crate) unsafe fn ws_comunidade(op: i32, noderef: u64, entry: CName, fase: CN
     community_update(sys)
 }
 
-/// `ActivatePopulationSpawner` (0), `DeactivatePopulationSpawner` (1) e `ResetPopulationSpawner` (2), com o `Update` depois, como a referência (o
-/// `Update` não processa a fila dos spawners, `[sys+0xd8]`, lá também).
+/// `ActivatePopulationSpawner` (0), `DeactivatePopulationSpawner` (1) e `ResetPopulationSpawner` (2), com o `Update` depois (o
+/// `Update` não processa a fila dos spawners, `[sys+0xd8]`).
 pub(crate) unsafe fn ws_spawner(op: i32, noderef: u64) -> bool {
     let (id, sys) = (ws_resolver(noderef), community_da_sessao());
     let slot = match op {
@@ -4354,13 +4327,10 @@ pub(crate) unsafe extern "C" fn tramp_worldstate_spawner_id(_c: *mut c_void, fra
 }
 
 
-// `BwmsCreateNodeRef(path: String) -> NodeRef` — item #63 (`Casts.reds`), última das 13
-// sub-partes, fechada 2026-08-15 (rodada 20). `Raw::NodeRef::Create(StringView) -> NodeRef*`
-// (fonte real: `enablers/Codeware/src/Red/NodeRef.hpp`) NUNCA precisou de endereço Mac — o
-// `RED4ext::NodeRef` é um wrapper de 1 `uint64_t hash` e o algoritmo do hash está 100%
-// documentado no header oficial do SDK (`NodeRef::Hash`, FNV-1a64 com 2 regras de skip), já
-// portado byte-a-byte em `bwms_primitives::node_ref_hash` desde a sessão de RE de 2026-07-16 (nunca
-// conectado a este item até hoje). Composição pura: lê a `String` (mesmo marshalling já usado
+// `BwmsCreateNodeRef(path: String) -> NodeRef` — fechada 2026-08-15 (rodada 20). Criar um NodeRef
+// a partir de texto NUNCA precisou de endereço Mac — o
+// `NodeRef` é um wrapper de 1 `uint64_t hash` e o hash (FNV-1a64 com 2 regras de skip) está
+// em `bwms_primitives::node_ref_hash` desde a sessão de RE de 2026-07-16. Composição pura: lê a `String` (mesmo marshalling já usado
 // dezenas de vezes, ex. `BwmsConfigGet`/`BwmsConfigSet`), computa o hash em Rust, devolve como
 // escalar de 8 bytes — MESMA saída do `tramp_identidade_8_bytes`. Log de diagnóstico
 // (string+hash) inclusos pra facilitar a leitura do proof ao vivo sem precisar de outro comando.
@@ -4450,12 +4420,12 @@ pub(crate) unsafe extern "C" fn tramp_trace_node_instance_check(_c: *mut c_void,
 }
 
 
-/// Início do `StreamingSectorNodeBuffer` (`Raw::StreamingSector::NodeBuffer` = `+0x40` no header
-/// vendorizado). `nodes`/`nodeRefs` acima são este mesmo bloco + `0x30`/`0x40` na 2.5, e batem — foi o
+/// Início do `StreamingSectorNodeBuffer` (`+0x40` do setor).
+/// `nodes`/`nodeRefs` acima são este mesmo bloco + `0x30`/`0x40` na 2.5, e batem — foi o
 /// que confirmou o `+0x40`.
 pub(crate) const SECTOR_NODEBUFFER: usize = 0x40;
 
-/// Tamanho de `CompiledNodeInstanceSetupInfo` (`RED4EXT_ASSERT_SIZE(..., 0x90)`).
+/// Tamanho de `CompiledNodeInstanceSetupInfo` (0x90).
 pub(crate) const SETUP_SIZE: usize = 0x90;
 
 /// Setup `i` do setor (ponteiro dos 0x90 B), o `instance` do nó `k` do array `nodes` (0 fora da faixa) e a quantidade de nós; `None` sem o setup.
@@ -4475,7 +4445,7 @@ pub(crate) unsafe fn setup_e_no(path: &str, i: usize, k: usize) -> Option<(*mut 
     Some(((entries + i * SETUP_SIZE) as *mut u8, no, total))
 }
 
-/// Ponteiro da `RuntimeScene` capturado no `OnWorldAttached` (Codeware `#237`). Só escrita
+/// Ponteiro da `RuntimeScene` capturado no `OnWorldAttached`. Só escrita
 /// atômica no hook; quem lê é `register::cena_base`, fora do caminho crítico, e os runtime systems
 /// saem por índice (`register::runtime_system_at`, comando `rtsys`). O getter da phase
 /// (`inicio::boot::phase_skip_getter`) zera quando a fase sai de 5 (volta ao menu); ele só é
@@ -4484,11 +4454,11 @@ pub(crate) unsafe fn setup_e_no(path: &str, i: usize, k: usize) -> Option<(*mut 
 pub(crate) static IGS_OWA_SCENE_PTR: AtomicU64 = AtomicU64::new(0);
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#44`/`#210` (`Physics/TraceResult.reds`: `GetHitObject`/`GetHitEntity`) — 2026-09-11.
+// `TraceResult`: `GetHitObject`/`GetHitEntity` — 2026-09-11.
 //
-// Os dois endereços saíram offline (`proofs/20260911-codeware-44-gethitobject-identificado-scan-seq.log`):
+// Os dois endereços saíram offline (prova de 2026-09-11, varredura sequencial que identificou o `GetHitObject`):
 // `GetHitObject(out, resultID, índice)` = `0x104583398`, e o `GetHitEntity(out, resultID)` do próprio
-// motor = `0x10156e184` (laço de índice 0 e 1 com `IsA`, o mesmo que o Codeware faz). Os dois
+// motor = `0x10156e184` (laço de índice 0 e 1 com `IsA`). Os dois
 // devolvem Handle de 16 B por SRET, que no ARM64 vai em `x8`. Chamada por `asm!` e não por
 // `extern "C" fn -> Struct`: o `GetHitObject` sai sem escrever o `out` quando o resultID não tem
 // registro, e o slot de sret que o Rust passaria não é zerado — seria lixo lido como Handle. Aqui o
@@ -4557,7 +4527,7 @@ pub(crate) unsafe fn register_traceresult_hit_natives(reg: &Registry, proto: *mu
             tramp_traceresult_gethitobject_class,
         );
     crate::log_dev!(
-        "[reg] register_all: codeware-44-traceresult BwmsTraceResultGetHitObject={ok_obj} BwmsTraceResultGetHitEntity={ok_ent} BwmsTraceResultGetHitObjectClass={ok_cls}"
+        "[reg] register_all: traceresult-44 BwmsTraceResultGetHitObject={ok_obj} BwmsTraceResultGetHitEntity={ok_ent} BwmsTraceResultGetHitObjectClass={ok_cls}"
     );
     let ok_trace_node = registro_de_prova!(register_argful_by_types(reg, proto, &["script_ref:TraceResult", "Int32"], "BwmsTraceNodeInstanceCheck", "BwmsTraceNodeInstanceCheck", corpo_de_prova!(tramp_trace_node_instance_check)));
     let ok_node_por_id = registro_de_prova!(register_argful_by_types(reg, proto, &["Uint64", "Int32"], "BwmsNodeInstanceById", "BwmsNodeInstanceById", corpo_de_prova!(tramp_node_instance_by_id)));
@@ -4570,21 +4540,21 @@ pub(crate) unsafe fn register_traceresult_hit_natives(reg: &Registry, proto: *mu
     let ok_85d_u = register_argful_by_types(reg, proto, &["Uint64", "Int32", "Int32"], "BwmsNodeInstanceU64", "BwmsNodeInstanceU64", tramp_node_instance_u64 as NativeHandler);
     let ok_85d_c = register_argful_by_types(reg, proto, &["Uint64"], "BwmsNodeInstanceNodeClass", "BwmsNodeInstanceNodeClass", tramp_node_instance_node_class as NativeHandler);
     let ok_237 = register_argful_by_types(reg, proto, &["Uint64", "Int32"], "BwmsNodeInstanceInfo", "BwmsNodeInstanceInfo", tramp_node_instance_info as NativeHandler);
-    crate::log_dev!("[reg] register_all: codeware-237 NodeInstanceInfo={ok_237}");
+    crate::log_dev!("[reg] register_all: nodeinstance-237 NodeInstanceInfo={ok_237}");
     let ok_85d_campo = register_argful_by_types(reg, proto, &["String", "Int32", "String", "Int32", "Int32"], "BwmsSectorNodeField", "BwmsSectorNodeField", tramp_sector_node_field as NativeHandler);
     let ok_85d_arr = register_argful_by_types(reg, proto, &["String", "Int32", "Int32"], "BwmsSectorNodeArraySize", "BwmsSectorNodeArraySize", tramp_sector_node_array_size as NativeHandler);
     let ok_85c_f = register_argful_by_types(reg, proto, &["String", "Int32", "Int32", "Int32", "Int32", "Int32"], "BwmsSectorNodeArrayF32", "BwmsSectorNodeArrayF32", tramp_sector_node_array_f32 as NativeHandler);
     let ok_85c_u = register_argful_by_types(reg, proto, &["String", "Int32", "Int32", "Int32", "Int32", "Int32"], "BwmsSectorNodeArrayU32", "BwmsSectorNodeArrayU32", tramp_sector_node_array_u32 as NativeHandler);
     crate::log_dev!(
-        "[reg] register_all: codeware-85 TraceNodeInstanceCheck={ok_trace_node} NodeInstanceById={ok_node_por_id} SectorInstancedMeshCensus={ok_censo_do_setor} | axl-44 7d-2b-3 NodeAreaVolumeCheck={ok_vol} 7e-2 JournalModStat={ok_7e_stat} JournalModMergeUndo={ok_7e_undo} 7e-3c JournalModTestPinHash={ok_7e_pin} | codeware-85d NodeInstanceF32={ok_85d_f} NodeInstanceU64={ok_85d_u} NodeInstanceNodeClass={ok_85d_c} SectorNodeField={ok_85d_campo} SectorNodeArraySize={ok_85d_arr} SectorNodeArrayF32={ok_85c_f} SectorNodeArrayU32={ok_85c_u}"
+        "[reg] register_all: nodeinstance-85 TraceNodeInstanceCheck={ok_trace_node} NodeInstanceById={ok_node_por_id} SectorInstancedMeshCensus={ok_censo_do_setor} | journal-44 7d-2b-3 NodeAreaVolumeCheck={ok_vol} 7e-2 JournalModStat={ok_7e_stat} JournalModMergeUndo={ok_7e_undo} 7e-3c JournalModTestPinHash={ok_7e_pin} | nodeinstance-85d NodeInstanceF32={ok_85d_f} NodeInstanceU64={ok_85d_u} NodeInstanceNodeClass={ok_85d_c} SectorNodeField={ok_85d_campo} SectorNodeArraySize={ok_85d_arr} SectorNodeArrayF32={ok_85c_f} SectorNodeArrayU32={ok_85c_u}"
     );
 }
 
-// Codeware `#85` parte 85a (2026-09-12, RE `proofs/20260912-codeware-85-node-instance-layout-offline.log`): getters de `worldINodeInstance` numa instância
-// viva vinda do trace de física (rota do C#44), sem declarar o tipo em redscript. Layout: transform `+0x30` (quaternion `+0x40`), scale `+0x50`, nó Handle
+// Instância de nó, parte 85a (2026-09-12, RE offline do layout da instância de nó): getters de `worldINodeInstance` numa instância
+// viva vinda do trace de física (rota do `GetHitObject`), sem declarar o tipo em redscript. Layout: transform `+0x30` (quaternion `+0x40`), scale `+0x50`, nó Handle
 // `+0x60`, setup `+0x70` (ponteiro duplo: no boot 75 `[+0x70]` é uma entrada com a própria instância em `+0x8` e o setup em `+0x0`), GlobalNodeID `+0x80`, estado `+0x88`; no setup, `node*` `+0x50`,
 // globalNodeID `+0x58`, proxyNodeID `+0x60`, streamingDistance `+0x7C` (2.5). Nó de colisão não tem GlobalNodeID próprio (0 na instância e no setup), então a forma
-// do setup é decidida pelo nó, e o GlobalNodeID positivo sai de uma instância achada pelo `FindNode` do registro. O Handle do trace vaza, como no C#44.
+// do setup é decidida pelo nó, e o GlobalNodeID positivo sai de uma instância achada pelo `FindNode` do registro. O Handle do trace vaza, como no `GetHitObject`.
 pub(crate) const NODEINSTANCE_POSICAO_OFF: usize = 0x30;
 
 pub(crate) const NODEINSTANCE_QUAT_OFF: usize = 0x40;
@@ -4634,8 +4604,8 @@ pub(crate) unsafe fn find_node(id: u64) -> Option<[u64; 2]> {
     Some(out)
 }
 
-// Codeware `#85` partes 85c/85d (2026-09-12): API de leitura pra mods, sem declarar `worldINodeInstance` nem `worldInstancedMeshNode` (categoria CMesh).
-// Como no C#83, leitores tipados com os getters compostos em reds (`bwms-world-node.reds`): a instância sai do `FindNode` pelo id (layout provado na
+// Instância de nó, partes 85c/85d (2026-09-12): API de leitura pra mods, sem declarar `worldINodeInstance` nem `worldInstancedMeshNode` (categoria CMesh).
+// Como no `WorldNodeSetupWrapper`, leitores tipados com os getters compostos em reds (`bwms-world-node.reds`): a instância sai do `FindNode` pelo id (layout provado na
 // 85a), o setup pela forma escolhida pelo nó, e o nó de setor pela lista `nodes` do setor no cache do depot, com cada campo no offset do registro RTTI desta
 // build (provado na 85b). Os 3 arrays de runtime do `worldInstancedMeshNode` (`+0x50`, `+0x60`, `+0x70`, fora do RTTI; o construtor `0x101b1d840` inicia os
 // três) saem pelo tamanho (85c). Só leitura; o Handle da instância é solto em toda chamada.
@@ -4647,9 +4617,9 @@ pub(crate) unsafe fn ler_largura_ate(obj: *const u8, off: i32, largura: usize, f
     (off + largura <= fim).then(|| campo_de_largura(obj, off, largura))
 }
 
-// ===== Codeware `#237` (`Red/WorldNode.hpp`) — estado e objeto carregado da instância de nó (2026-09-13) =====
+// ===== Estado e objeto carregado da instância de nó (2026-09-13) =====
 /// `WorldNodeInstanceNodeState` (u16 em `NODEINSTANCE_ESTADO_OFF`): bit 0 inicializando, 1 inicializado, 2 anexando, 3 desanexando, 5 anexado, 9 visível.
-/// Objeto que cada tipo de instância carrega num `Handle` e a classe base esperada dele. Offsets do header vendorizado, com o do `worldBendedMeshNodeInstance`
+/// Objeto que cada tipo de instância carrega num `Handle` e a classe base esperada dele. Offsets do layout do Windows, com o do `worldBendedMeshNodeInstance`
 /// medido no Mac: 0xC0 em vez de 0xA0 (boot 136, 13/13 com `CMesh` em 0xC0 e nenhum em 0xA0).
 pub(crate) const NODEINSTANCE_CARGAS: [(&str, usize, &str); 5] = [
     ("worldMeshNodeInstance", 0x98, "CMesh"),
@@ -4690,13 +4660,13 @@ pub(crate) static WORLD_OFFSETS_OK: AtomicBool = AtomicBool::new(false);
 
 pub(crate) static BLOCOS_APLICADOS: AtomicU64 = AtomicU64::new(0);
 
-// ===== ArchiveXL `#51` 51h — `OnDeviceResourceLoad` pelo `OnDependenciesReady` do serializer (2026-09-12) =====
-// A referência, no mesmo `OnResourceReady`, pega o `HashMap<u64, gameCookedDeviceData>` em `data+0x30` de cada `gameDeviceResource` e faz `InsertOrAssign`
-// de cada entrada do mapa de cada patch do caminho. Aqui o hook é o da 51g. Layout (SDK): `data` `Handle<gameDeviceResourceData>` em `+0x40` do recurso;
+// ===== Patch de devices, 51h — pelo `OnDependenciesReady` do serializer (2026-09-12) =====
+// Pega o `HashMap<u64, gameCookedDeviceData>` em `data+0x30` de cada `gameDeviceResource` e faz `InsertOrAssign`
+// de cada entrada do mapa de cada patch do caminho. Aqui o hook é o da 51g. Layout: `data` `Handle<gameDeviceResourceData>` em `+0x40` do recurso;
 // mapa: `indexTable` `+0x00`, `size` `+0x08`, `capacity` `+0x0c`, nós `+0x10` (capacidade `+0x18`, stride `+0x1c`), alocador `+0x28`; nó = `{next u32,
 // hashedKey u32, chave u64 +0x08, gameCookedDeviceData +0x10}`, hash da chave = FNV-1a 32 dos 8 bytes. `gameCookedDeviceData` (0x40 B): `unk00` `+0x00`,
 // `className` `+0x08`, `children` `DynArray<u64>` `+0x10`, `parents` `+0x20`, `nodePosition` + `unk3C` `+0x30`. A chave que o alvo já tem recebe o valor do
-// patch (as listas pelo reserve de `DynArray` do motor; provado no boot 115). v2: chave nova entra pelo `Emplace` do SDK, com o `Reserve` pelo alocador inline
+// patch (as listas pelo reserve de `DynArray` do motor; provado no boot 115). v2: chave nova entra por `Emplace`, com o `Reserve` pelo alocador inline
 // do mapa (`PoolStorageProxy<game::PoolGMPL_Devices_Data_HMap>`, vtable lida no boot 115) quando não cabe — bloco único `nós + tabela`, como o do motor.
 pub(crate) static MESCLA_DE_DEVICES_ATIVA: AtomicBool = AtomicBool::new(false);
 
@@ -4756,7 +4726,7 @@ pub(crate) unsafe fn copiar_lista_u64(arr: *mut u8, origem: *const u8) -> bool {
     true
 }
 
-/// `HashMap::Reserve` do SDK pelo alocador inline do mapa (vtable conferida): bloco único `nós + tabela`, nós rehasheados em ordem, bloco antigo liberado.
+/// `HashMap::Reserve` pelo alocador inline do mapa (vtable conferida): bloco único `nós + tabela`, nós rehasheados em ordem, bloco antigo liberado.
 /// Só troca o mapa depois de mover todos os nós; `false` sem mexer nele.
 pub(crate) unsafe fn reservar_mapa(mapa: *mut u8, nova_cap: usize) -> bool {
     let vt = (mapa.add(0x28) as *const u64).read_unaligned();
@@ -4827,7 +4797,7 @@ pub(crate) unsafe fn reservar_mapa(mapa: *mut u8, nova_cap: usize) -> bool {
     true
 }
 
-/// `Emplace` do SDK com chave que o mapa não tem (`valor` = `gameCookedDeviceData` do patch, listas pelo reserve do motor). `None` sem nó livre ou sem
+/// `Emplace` com chave que o mapa não tem (`valor` = `gameCookedDeviceData` do patch, listas pelo reserve do motor). `None` sem nó livre ou sem
 /// capacidade (o `Reserve` vem antes); `Some(listas copiadas)` com a chave inserida.
 pub(crate) unsafe fn inserir_no_mapa(mapa: *mut u8, chave: u64, valor: *const u8) -> Option<bool> {
     let (tabela, cap, nos, stride) = partes_do_mapa(mapa)?;
@@ -4956,11 +4926,11 @@ pub(crate) unsafe fn mesclar_devices(alvo: u64) {
     }
 }
 
-// ArchiveXL `#49` (WorldStreamingExtension) — candidato #2 de `worldStreamingSector::PostLoad`,
+// Pós-carga de setor de streaming — candidato #2 de `worldStreamingSector::PostLoad`,
 // achado pelo MESMO `postloadprobe` na mesma sessão de 2026-08-12, DIVERGENTE do endereço já
-// PROVADO ao vivo sob o rótulo antigo `axl-streaming-apply` (`STREAMING_SL26_VM`/`0x1010c5f74`,
+// PROVADO ao vivo sob o rótulo antigo `streaming-apply` (`STREAMING_SL26_VM`/`0x1010c5f74`,
 // achado por técnica DIFERENTE — scan manual de slot de vtable, não `new_object`+vtable+0x30).
-// RE offline dedicada (2026-08-12, agente ArchiveXL, disassembly + varredura completa de
+// RE offline dedicada (2026-08-12, disassembly + varredura completa de
 // `__DATA_CONST` por chained-fixups) reconciliou parcialmente a divergência, sem prova ao vivo:
 //   - Este candidato (0x101c05360) é referenciado por **1 ÚNICA** entrada em TODO `__DATA_CONST`
 //     (vtable-slot exclusivo, não-compartilhado) — sentado em **LOCAL SLOT 6** do seu próprio vtable
@@ -4972,35 +4942,32 @@ pub(crate) unsafe fn mesclar_devices(alvo: u64) {
 //   - O disassembly do corpo (700 bytes, boundary de função confirmada via LC_FUNCTION_STARTS)
 //     chama `bl 0x1010b0854` (a "PostLoad" base) como a PRIMEIRA instrução
 //     após o prólogo — padrão clássico de override chamando `Super::PostLoad()` antes da lógica
-//     própria — e, logo depois, opera sobre `this+0x40`, EXATAMENTE o offset que o header oficial
-//     vendorizado documenta pra `Raw::StreamingSector::NodeBuffer` desta MESMA classe
-//     (`enablers/ArchiveXL/src/Red/StreamingSector.hpp:154`).
+//     própria — e, logo depois, opera sobre `this+0x40`, EXATAMENTE o offset do `NodeBuffer`
+//     desta MESMA classe (`SECTOR_NODEBUFFER`).
 //   - `STREAMING_SL26_VM`/0x1010c5f74, em contraste, tem **8958 referências** em `__DATA_CONST`
 //     (função amplamente COMPARTILHADA por milhares de vtables — não é override específico de
 //     classe) e, na instância examinada, senta no LOCAL SLOT 26 de um vtable de 31 métodos
 //     DIFERENTE/ADJACENTE (não o mesmo vtable deste candidato) — corpo do disassembly (240 bytes)
 //     tem formato de GETTER/agregador (loop com dispatch virtual computando um máximo via `csel`,
 //     termina com `ret` devolvendo escalar em w0), não o padrão void/2-args de PostLoad.
-//   - **Conclusão**: `0x101c05360` é `worldStreamingSector::PostLoad` (a função que
-//     `OnSectorPostLoad` do ArchiveXL real hooka) — reconfirmado offline em 2026-09-06 e provado ao
-//     vivo no boot 44 (`proofs/20260911-boot44-archivexl-49-parte4b-postload-setor-PROVADO-ao-vivo.log`);
+//   - **Conclusão**: `0x101c05360` é `worldStreamingSector::PostLoad` — reconfirmado offline em 2026-09-06 e provado ao
+//     vivo no boot 44 (prova de 2026-09-11 do PostLoad de setor, parte 4b);
 //     é o hook de produção das deleções do `.xl` (`aplicar_delecoes_do_setor`). `SL26`/0x1010c5f74 provavelmente NÃO é PostLoad — é um método
 //     amplamente herdado/compartilhado que só COINCIDE em disparar perto da janela de load do
 //     setor (por isso o teste de array R/W antigo funcionou — o OBJETO `this` legitimamente tem
 //     arrays de node por perto, não porque SL26 EM SI seja quem os popula). Isso NÃO invalida a
 //     técnica/prova de R/W do SL26 (mecanismo genérico continua real) — só a alegação de IDENTIDADE
-//     ("isto é PostLoad") fica em dúvida. Ver CATALOGO-EXAUSTIVO-ARCHIVEXL.md (checkpoint 2026-08-12,
-//     "reconciliação #49/worldStreamingSector") pro relato completo + script de scan reusável.
+//     ("isto é PostLoad") fica em dúvida.
 //   - Gate PRÓPRIO E SEPARADO do SL26: nunca ligar os 2 no mesmo boot (hookam candidatos no mesmo
 //     objeto; ver `install_wssector_postload_probe`).
 pub(crate) const WORLDSTREAMINGSECTOR_POSTLOAD_VM: u64 = 0x1_01c0_5360;
 
 pub(crate) static ORIG_WSSECTOR_POSTLOAD: AtomicU64 = AtomicU64::new(0);
 
-// ArchiveXL `#49` parte 4d (2026-09-11): deleções de node vindas do `.xl`. O `bwms install` (ou o example `emitir_streaming` do `bwms-primitives`) escreve
+// Pós-carga de setor, parte 4d (2026-09-11): deleções de node vindas do `.xl`. O `bwms install` (ou o example `emitir_streaming` do `bwms-primitives`) escreve
 // `red4ext/bwms-streaming.txt` com `emit_streaming_table`: `<mod> | <setor> | <expectedNodes> | <nodeIndex> | <tipo>` (`bwms_primitives::tabelas::Streaming`).
 // Aqui a tabela vira grupos por (mod, hash do setor); no `PostLoad`, cada grupo é conferido inteiro (contagem de setups, índice e vptr da classe) e só
-// então aplicado — uma linha ruim cancela o grupo, como o ArchiveXL cancela o mod. Tipos com vptr conhecido: `worldStaticMeshNode` (zera o `scale`).
+// então aplicado — uma linha ruim cancela o grupo. Tipos com vptr conhecido: `worldStaticMeshNode` (zera o `scale`).
 // Parte 4e-1 (2026-09-11): linhas de 7 colunas (`... | <op> | <valores>`, emissor v2) e `worldInstancedMeshNode` — node inteiro zera o scale de
 // todas as instâncias do buffer; `subdel <esperadas> <i>...` zera só as pedidas. Op sem suporte recusa o grupo.
 #[derive(Clone)]
@@ -5032,7 +4999,7 @@ pub(crate) fn linha_de_delecao(l: &bwms_primitives::tabelas::Streaming) -> Delec
 pub(crate) static DELECOES_DE_SETOR: std::sync::Mutex<Vec<DelecaoDeNode>> = std::sync::Mutex::new(Vec::new());
 
 /// Carrega `bwms-streaming.txt` (substitui a tabela; o arquivo ausente a esvazia, porque o `bwms install` o apaga quando nenhum mod gera deleção e a
-/// recarga do `ArchiveXL.Reload` tira a tabela anterior). Linha fora do formato (`bwms_primitives::tabelas::Streaming`) é ignorada com log.
+/// recarga do `Reload` da fachada de recursos tira a tabela anterior). Linha fora do formato (`bwms_primitives::tabelas::Streaming`) é ignorada com log.
 pub(crate) fn streaming_file(path: &str) {
     let conteudo = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -5053,7 +5020,7 @@ pub(crate) fn streaming_file(path: &str) {
     crate::veredito_dev!("[axl-streaming-xl] {n} deleção(ões) carregada(s) de '{path}'");
 }
 
-/// Transform do motor: posição (x, y, z) e orientação (i, j, k, r), com o produto e a inversa do `Transform` do SDK: `a * b` tem orientação
+/// Transform do motor: posição (x, y, z) e orientação (i, j, k, r), com o produto e a inversa do `Transform`: `a * b` tem orientação
 /// `(b.q * a.q)` normalizada e posição `b.q` aplicada em `a.p` mais `b.p`; a inversa é o conjugado, com posição `conj` aplicado em `-p`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Xf {
@@ -5275,7 +5242,7 @@ pub(crate) unsafe fn aplicar_delecoes_do_setor(this: *mut c_void, hash: u64) {
                     let viz_antes = vizinho.map(setup_viz);
                     (e.add(0x08) as *mut f32).write_unaligned(-2000.0);
                     (e.add(0x58) as *mut u64).write_unaligned(0);
-                    // A referência grava -1 desde a versão 68 de setor: nó fantasma não tem item cozido.
+                    // -1 desde a versão 68 de setor: nó fantasma não tem item cozido.
                     (e.add(crate::diagnostico::SETUP_INDICE_DE_INSTANCIA) as *mut i32).write_unaligned(-1);
                     (e.add(NODESETUP_NO_OFF) as *mut u64).write_unaligned(*doador);
                     #[cfg(feature = "devlog")]

@@ -1,11 +1,11 @@
-// ponte-communitywrapper.reds — Codeware `#77` (`CommunityWrapper`/`CommunityEntryWrapper`), leitura das comunidades vivas do `CommunitySystem`.
+// ponte-communitywrapper.reds — `CommunityWrapper`/`CommunityEntryWrapper`, leitura das comunidades vivas do `CommunitySystem`.
 //
 // Cada wrapper guarda a comunidade pelo `WeakPtr` que o `GetCommunity` do motor devolve e trava a comunidade a cada leitura: com a comunidade
 // descarregada, os getters devolvem vazio. `GetActiveEntityIDs` é o virtual do motor (`game::Community`, slot 0 da vtable).
 //
 // Forma própria: `communitySpawnEntry` e `communityCommunityTemplateData` não são declarados no corpus vanilla (declarar é a categoria do `CMesh`),
-// então `GetTemplateEntryData()` e `GetTemplateData()` devolvem `Variant` com o handle do objeto nativo. A entrega da referência é
-// `WorldStateSystem.GetCommunity(NodeRef)` (Codeware `#84`); aqui é `BwmsCommunityGetWrapper(sistema, id)`.
+// então `GetTemplateEntryData()` e `GetTemplateData()` devolvem `Variant` com o handle do objeto nativo. A entrega é
+// `BwmsCommunityGetWrapper(sistema, id)`, não `WorldStateSystem.GetCommunity(NodeRef)`.
 
 public native class CommunityEntryWrapper extends IScriptable {
     public native func IsActive() -> Bool

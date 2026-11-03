@@ -57,9 +57,8 @@ pub(crate) fn com_origem_arquivo<R>(f: impl FnOnce() -> R) -> R {
 }
 
 /// Roda `f` (um `OnApply`) com a versão do TweakDB subindo uma vez só, no fim, se alguma gravação pediu; devolve também quantas subidas
-/// viraram essa uma. O `PatchOriginaltems` do Equipment-EX grava 3766 flats num `OnApply`: subindo a cada um, um campo de record cujo byte em
-/// cache volta a bater com o global (o acessor `0x10165c104` só compara u8 com u8) devolve o valor velho. No TweakXL de referência as
-/// gravações do `OnApply` também só valem no record pelo `UpdateRecord`/`Commit`, não a cada `SetFlat`.
+/// viraram essa uma. Há mod que grava 3766 flats num `OnApply`: subindo a cada um, um campo de record cujo byte em
+/// cache volta a bater com o global (o acessor `0x10165c104` só compara u8 com u8) devolve o valor velho.
 pub(crate) fn em_lote_de_versao<R>(f: impl FnOnce() -> R) -> (R, u32) {
     EM_LOTE.with(|l| l.set(true));
     SUBIDAS_DO_LOTE.with(|s| s.set(0));
@@ -98,7 +97,7 @@ unsafe fn tipo_do_flat_value(fv: *const u8) -> Option<String> {
     Some(TIPOS_DE_FLAT.iter().find(|n| crate::cname::cname(n) == ret).map_or_else(|| crate::cname::resolve_cname(ret), |n| n.to_string()))
 }
 
-/// Os tipos de flat do TweakDB (`ERTDBFlatType` da referência, escalar e `array:`): o hash que o `GetTypeName` devolve é o FNV-1a do nome, e
+/// Os tipos de flat do TweakDB (escalar e `array:`): o hash que o `GetTypeName` devolve é o FNV-1a do nome, e
 /// estes saem dele sem o pool de nomes do motor; outro `raRef:` cai no pool.
 const TIPOS_DE_FLAT: [&str; 26] = [
     "Int32", "Float", "Bool", "String", "CName", "gamedataLocKeyWrapper", "raRef:CResource", "TweakDBID", "Quaternion", "EulerAngles", "Vector3",
@@ -233,7 +232,7 @@ unsafe fn offset_vivo_do_tipo(t: *const u8, tipo: &str) -> Option<u32> {
     None
 }
 
-/// Aponta cada flat de `flats` pro valor padrão do tipo dele (TweakXL `#14`: record de `$type` nasce com os padrões, não com os valores do
+/// Aponta cada flat de `flats` pro valor padrão do tipo dele (record de `$type` nasce com os padrões, não com os valores do
 /// record-modelo de onde a estrutura foi clonada). `(apontados, sem padrão do tipo)`.
 pub(crate) unsafe fn aplicar_padroes(flats: &[u64]) -> (usize, usize) {
     let Some(t) = singleton() else { return (0, flats.len()) };
@@ -271,9 +270,9 @@ fn numero(v: &str) -> Option<i128> {
 
 /// Valor escalar de 8 bytes a partir do texto, pelo tipo do flat. `None` quando o texto não serve pro tipo.
 pub(super) fn escalar_do_texto(tipo: &str, v: &str) -> Option<u64> {
-    // Os formatos explícitos do TweakXL (`n"X"`, `t"X"`, `LocKey(N)`, `ResRef(N)`, `<TDBID:…>`…) numa propriedade de record chegam crus:
+    // Os formatos explícitos do arquivo de tweak (`n"X"`, `t"X"`, `LocKey(N)`, `ResRef(N)`, `<TDBID:…>`…) numa propriedade de record chegam crus:
     // o tipo só se sabe aqui, no flat vivo.
-    let normal = bwms_primitives::tweakxl::normalizar_para(tipo, v);
+    let normal = bwms_primitives::tweaks::normalizar_para(tipo, v);
     let v = normal.as_str();
     let nulo = v.is_empty() || v == "None";
     Some(match tipo {
@@ -329,13 +328,13 @@ fn floats(v: &str, n: usize) -> Option<Vec<u8>> {
 
 /// Bytes de um valor que não é `String` (escalar ou elemento de array) a partir do texto do mod, no layout do motor. Struct vem na forma
 /// posicional do pipeline (`x,y,z`; `i,j,k,r`; `red,green,blue,alpha`; `EulerAngles` em `pitch,yaw,roll`, a ordem do YAML e do
-/// `tweakdb.bin`, que na memória é `{Roll, Pitch, Yaw}`, `EulerAngles.hpp` do SDK). `None` quando o texto não serve pro tipo.
+/// `tweakdb.bin`, que na memória é `{Roll, Pitch, Yaw}`). `None` quando o texto não serve pro tipo.
 pub(crate) fn bytes_do_texto(tipo: &str, v: &str) -> Option<Vec<u8>> {
     // Struct parcial do arquivo (`{y:6.0}`): o tipo do flat vivo põe os campos na ordem e os ausentes em 0. Tupla do `.tweak` sem tipo
     // declarado (`( 0.f, -85.f, -360.f )`) vem na ordem de memória: o `EulerAngles` vivo a gira para `pitch,yaw,roll`.
     let posicional = match v.trim_start().as_bytes().first() {
-        Some(b'{') => bwms_primitives::tweakxl::struct_em_posicional(tipo, v),
-        Some(b'(') => bwms_primitives::tweakxl::tupla_em_posicional(tipo, v),
+        Some(b'{') => bwms_primitives::tweaks::struct_em_posicional(tipo, v),
+        Some(b'(') => bwms_primitives::tweaks::tupla_em_posicional(tipo, v),
         _ => None,
     };
     let v = posicional.as_deref().unwrap_or(v);
@@ -417,7 +416,7 @@ pub(crate) unsafe fn gravar_texto(id: u64, texto: &str) -> bool {
     let Some(t) = singleton() else { return false };
     let Some(tipo) = tipo_do_valor(t as *const u8, id) else { return false };
     if let Some(elem) = tipo.strip_prefix("array:") {
-        // Array só por lista `[a, b]` (o que o YAML e o `.tweak` produzem pra sequência), como o TweakXL: texto solto não vira array de 1.
+        // Array só por lista `[a, b]` (o que o YAML e o `.tweak` produzem pra sequência): texto solto não vira array de 1.
         let Some(itens) = bwms_primitives::operacoes::texto_em_lista(texto) else {
             crate::log_dev!("[tweakdb] gravar_texto({id:#x}): '{texto}' não é lista pra um {tipo}");
             return false;
@@ -432,7 +431,7 @@ pub(crate) unsafe fn gravar_texto(id: u64, texto: &str) -> bool {
         };
     }
     // Formato explícito (`n"X"`, `t"X"`, `r"X"`, `l"X"`) antes de tirar aspas: sem a aspa do fim ele deixa de ser reconhecido.
-    let normal = bwms_primitives::tweakxl::normalizar_para(&tipo, texto.trim());
+    let normal = bwms_primitives::tweaks::normalizar_para(&tipo, texto.trim());
     let v = normal.trim_matches('"');
     if tipo == "String" {
         return gravar_string(id, string_de_lockey(texto.trim()).as_deref().unwrap_or(v));
@@ -445,17 +444,17 @@ pub(crate) unsafe fn gravar_texto(id: u64, texto: &str) -> bool {
     gravar_valor(id, id, &dados, elemento_do_tipo(&tipo).map_or(8, |(_, a)| a)).is_some()
 }
 
-/// Texto de uma propriedade String com formato explícito de LocKey (`l"X"`, `LocKey(…)`, `LocKey#…`): o TweakXL grava `LocKey#<chave
-/// primária>` (`YamlReader::ConvertValue<CString>`, wiki "Localization keys"), com a secundária no hash. O texto entre aspas no arquivo já
-/// chega sem elas e passa como está: diverge do TweakXL só em `"LocKey#Nome"` entre aspas, que lá fica literal.
+/// Texto de uma propriedade String com formato explícito de LocKey (`l"X"`, `LocKey(…)`, `LocKey#…`): grava `LocKey#<chave
+/// primária>`, com a secundária no hash. O texto entre aspas no arquivo já
+/// chega sem elas: `"LocKey#Nome"` entre aspas também vira LocKey, não fica literal.
 fn string_de_lockey(v: &str) -> Option<String> {
     let explicito = (v.starts_with("l\"") && v.ends_with('"') && v.len() >= 3) || (v.starts_with("LocKey(") && v.ends_with(')')) || v.starts_with("LocKey#");
-    explicito.then(|| format!("LocKey#{}", bwms_primitives::lockey_chave(&bwms_primitives::tweakxl::normalizar_para("gamedataLocKeyWrapper", v))))
+    explicito.then(|| format!("LocKey#{}", bwms_primitives::lockey_chave(&bwms_primitives::tweaks::normalizar_para("gamedataLocKeyWrapper", v))))
 }
 
 /// Flat `id` com o tipo `tipo` e o valor `texto` de arquivo (`Op::Criar`): o que já existe grava pelo tipo dele ([`gravar_texto`]); o que não
-/// existe nasce no índice com a vtable do valor padrão do tipo (`defaultValues`, o mesmo do `$type`) — o `AssignFlat` do TweakXL num flat
-/// inexistente. No diário o "antes" é o valor padrão: a recarga desfaz pra ele, como o changelog do TweakXL (`GetDefault` do tipo).
+/// existe nasce no índice com a vtable do valor padrão do tipo (`defaultValues`, o mesmo do `$type`). No diário o "antes" é o
+/// valor padrão do tipo: a recarga desfaz pra ele.
 pub(crate) unsafe fn criar_flat_tipado(id: u64, tipo: &str, texto: &str) -> bool {
     let Some(t) = singleton() else { return false };
     if find_flat_entry_by_id(t as *const u8, id).is_some() {
@@ -527,7 +526,7 @@ pub(crate) unsafe fn gravar_string(id: u64, texto: &str) -> bool {
 }
 
 /// Grava `elementos` no flat array `id` de elemento de 8 bytes (`array:TweakDBID`, `array:CName`), quando o tipo do flat é `tipo`, o tipo do
-/// valor que o script mandou: o `placementSlots` dos itens e o `attachmentSlots` dos personagens que o Equipment-EX estende no `OnApply`.
+/// valor que o script mandou: o `placementSlots` dos itens e o `attachmentSlots` dos personagens que mod de roupa estende no `OnApply`.
 /// `false` se o flat não existe ou é de outro tipo.
 pub(crate) unsafe fn gravar_lista(id: u64, tipo: &str, elementos: &[u64]) -> bool {
     let Some(t) = singleton() else { return false };
@@ -538,7 +537,7 @@ pub(crate) unsafe fn gravar_lista(id: u64, tipo: &str, elementos: &[u64]) -> boo
 }
 
 /// Flat vanilla de cada tipo que o `SetFlat` cria: dá a vtable nativa do `FlatValue` e, no array, a carga com o alocador do motor no fim do
-/// buffer (o `carga_de_array` copia o alocador de lá). São os doadores do teste do ArchiveXL `#40` (`selftest.rs`, `A40_DOADOR_*`,
+/// buffer (o `carga_de_array` copia o alocador de lá). São os doadores do teste de slot (`selftest.rs`, `A40_DOADOR_*`,
 /// flats criados e relidos ao vivo em 2026-09-13); o `array:CName` é o `tags` do mesmo record.
 const DOADORES_DO_TIPO: [(&str, &str); 3] = [
     ("TweakDBID", "Items.Preset_Yukimura_Default.quality"),
@@ -551,10 +550,9 @@ pub(crate) fn doador_do_tipo(tipo: &str) -> Option<&'static str> {
     DOADORES_DO_TIPO.iter().find(|(t, _)| *t == tipo).map(|(_, d)| *d)
 }
 
-/// Cria o flat `id`, que nenhum record define, com o tipo e o valor do `SetFlat`: `bruto` no `TweakDBID`, `lista` no array. É o que o TweakXL faz
-/// num `SetFlat` de flat inexistente (`TweakDBManager::AssignFlat`: valor novo no buffer e `InsertOrAssign` no índice, sem olhar o schema do
-/// record). O `RegisterOutfitSlots` do Equipment-EX grava assim o `.parentSlot` e o `.dependencySlots` dos slots que ele cria, e o ArchiveXL `#40`
-/// os lê pelo índice. `false` sem doador do tipo, com o doador de outro tipo, ou se a inserção falhou.
+/// Cria o flat `id`, que nenhum record define, com o tipo e o valor do `SetFlat`: `bruto` no `TweakDBID`, `lista` no array: valor novo
+/// no buffer e `InsertOrAssign` no índice, sem olhar o schema do record. O `RegisterOutfitSlots` de mod de roupa grava assim o `.parentSlot`
+/// e o `.dependencySlots` dos slots que ele cria, e o leitor de slot os lê pelo índice. `false` sem doador do tipo, com o doador de outro tipo, ou se a inserção falhou.
 pub(crate) unsafe fn criar_flat(id: u64, tipo: &str, bruto: u64, lista: Option<&[u64]>) -> bool {
     match singleton() {
         Some(t) => criar_flat_em(t, id, tipo, bruto, lista),
@@ -694,10 +692,10 @@ mod tests {
         crate::jogo::listas::alocador_de_teste()
     }
 
-    /// O `SetFlat` do `RegisterOutfitSlots` (Equipment-EX) em flat que o `AttachmentSlot_Record` não tem: o `.parentSlot` (`TweakDBID`) e o
-    /// `.dependencySlots` (`array:TweakDBID`) nascem no índice com a vtable do doador, e o leitor do ArchiveXL `#40` (`get_flat_tdbid` e
+    /// O `SetFlat` do `RegisterOutfitSlots` (mod de roupa) em flat que o `AttachmentSlot_Record` não tem: o `.parentSlot` (`TweakDBID`) e o
+    /// `.dependencySlots` (`array:TweakDBID`) nascem no índice com a vtable do doador, e o leitor de slot (`get_flat_tdbid` e
     /// `get_flat_array_u64_by_id` pelo `tweak_db_id_derive(slot, ".parentSlot")`, o caminho do `a40_initialize_slots`, do
-    /// `terceira_pessoa::slot_base` e do `onattachtpp_compose`) acha o valor que o mod gravou.
+    /// `terceira_pessoa::slot_base` e do `compor_slots_da_terceira_pessoa`) acha o valor que o mod gravou.
     #[test]
     fn setflat_cria_o_flat_que_o_record_nao_tem_e_o_leitor_do_40_acha() {
         use super::super::{get_flat_array_u64_by_id, get_flat_tdbid, tweak_db_id, tweak_db_id_derive, FLATS_OFF, FLAT_DATA_BUFFER_OFF, FLAT_DATA_CAP_OFF, FLAT_DATA_END_OFF};
@@ -785,9 +783,9 @@ mod tests {
         assert!(!unsafe { super::criar_flat(1, "TweakDBID", 2, None) });
     }
 
-    /// Propriedade de record com os formatos explícitos da wiki do TweakXL (YAML Tweaks): o mesmo valor do formato implícito.
+    /// Propriedade de record com os formatos explícitos do arquivo de tweak YAML: o mesmo valor do formato implícito.
     #[test]
-    fn formatos_explicitos_do_tweakxl_na_propriedade_de_record() {
+    fn formatos_explicitos_do_tweak_na_propriedade_de_record() {
         let caminho = r"base\characters\entities\player\photo_mode\judy_alvarez\judy_photomode.ent";
         let hash = 0x7b09_932c_9d2e_d4bf_u64; // `Character.Judy_Puppet_Photomode.entityTemplatePath` no tweakdb.bin da 2.5
         let rr = "raRef:CResource";
@@ -831,7 +829,7 @@ mod tests {
         assert_eq!(escalar_do_texto(t, "LocKey#"), Some(fnv(b"")));
     }
 
-    // ---- TweakDB falso com flats de qualquer tipo: as 5 diferenças frente ao TweakXL no caminho de arquivo ----
+    // ---- TweakDB falso com flats de qualquer tipo: 5 casos do caminho de arquivo ----
 
     extern "C" fn tipo_int32(_fv: *mut core::ffi::c_void, _out: *mut u64) -> *mut u64 {
         crate::cname::cname("Int32") as *mut u64
@@ -995,7 +993,7 @@ mod tests {
     fn mutacao_do_conjunto_sobre_o_valor_atribuido() {
         use super::super::tweak_db_id as id;
         use bwms_primitives::operacoes::Conjunto;
-        use bwms_primitives::tweakxl::{interpret_from, yaml};
+        use bwms_primitives::tweaks::{interpret_from, yaml};
         let i32s = |v: &[i32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
         let mut f = Falso::novo(&[("Items.X.tags", 0x00)], &array(tipo_arr_int32, &i32s(&[1, 2]), 2));
         let t = f.t();

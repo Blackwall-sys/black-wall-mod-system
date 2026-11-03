@@ -1,21 +1,21 @@
-//! Codeware `#132`/`#133`/`#134`/`#135`/`#136` — semântica de match dos `CallbackSystemTarget`.
+//! Semântica de match dos `CallbackSystemTarget`.
 //!
-//! Os 7 Targets do Codeware (`App/Callback/Targets/`) compartilham **uma** regra de decisão, e é
-//! ela que este módulo porta:
+//! Os 7 Targets compartilham **uma** regra de decisão, e é
+//! ela que este módulo implementa:
 //!
 //! > para cada campo do filtro: se o campo está NÃO-SETADO, ele não filtra nada; se está setado,
 //! > o evento precisa bater exatamente naquele campo. Todos os campos setados precisam bater.
 //!
-//! O que conta como "não-setado" é por tipo e vem da fonte, não de convenção minha:
+//! O que conta como "não-setado" é por tipo:
 //! `CName`/`ResourcePath`/`TweakDBID` = `0`, `EInputKey` = `IK_None`, `EInputAction` = `IACT_None`,
 //! lista de tags = vazia. Aqui o campo do filtro chega como `Option`, com `None` = não-setado: quem lê
-//! o alvo converte o valor da referência na entrada, e nenhuma regra deste módulo depende de valor
+//! o alvo converte o valor sentinela na entrada, e nenhuma regra deste módulo depende de valor
 //! sentinela. É por isso que existe [`campo_bate`] em vez de um `==` solto — "não-setado é curinga" é
-//! a parte que um porte descuidado erra, e ela inverte o resultado do filtro inteiro.
+//! a parte fácil de errar, e ela inverte o resultado do filtro inteiro.
 //!
 //! **Escopo honesto:** os Targets de ENTIDADE (`DynamicEntityTarget`/`StaticEntityTarget`) usam a
 //! mesma regra de decisão, mas o predicado por tag (`entitySystem->IsTagged`) é nativo. Aqui a
-//! decisão é portada e o predicado entra como argumento ([`bate_por_tags`]), o que deixa a parte
+//! decisão é implementada e o predicado entra como argumento ([`bate_por_tags`]), o que deixa a parte
 //! pura testável agora e isola exatamente o que ainda depende de RE.
 
 /// Um campo de filtro bate quando está não-setado (`None`, curinga) OU quando é igual ao do evento.
@@ -24,7 +24,7 @@ pub fn campo_bate<T: PartialEq>(filtro: Option<T>, evento: T) -> bool {
     filtro.map_or(true, |f| f == evento)
 }
 
-/// `InkWidgetTarget` (`#135`): filtra por `libraryPath` e `itemName`, ambos curinga quando `None`.
+/// `InkWidgetTarget`: filtra por `libraryPath` e `itemName`, ambos curinga quando `None`.
 pub fn inkwidget_bate(
     filtro_library_path: Option<u64>,
     filtro_item_name: Option<u64>,
@@ -34,7 +34,7 @@ pub fn inkwidget_bate(
     campo_bate(filtro_library_path, evento_library_path) && campo_bate(filtro_item_name, evento_item_name)
 }
 
-/// `ComponentTarget` (`#132`): filtra por `componentName` e pelo `componentID.unk00`.
+/// `ComponentTarget`: filtra por `componentName` e pelo `componentID.unk00`.
 pub fn component_bate(
     filtro_nome: Option<u64>,
     filtro_id: Option<u64>,
@@ -44,7 +44,7 @@ pub fn component_bate(
     campo_bate(filtro_nome, evento_nome) && campo_bate(filtro_id, evento_id)
 }
 
-/// `InputTarget` (`#136`): filtra por tecla e ação; `IK_None`/`IACT_None` da referência chegam como `None`.
+/// `InputTarget`: filtra por tecla e ação; `IK_None`/`IACT_None` chegam como `None`.
 pub fn input_bate(
     filtro_key: Option<u32>,
     filtro_action: Option<u32>,
@@ -54,11 +54,11 @@ pub fn input_bate(
     campo_bate(filtro_key, evento_key) && campo_bate(filtro_action, evento_action)
 }
 
-/// `DynamicEntityTarget`/`StaticEntityTarget` (`#133`): lista vazia casa tudo; senão casa se o
+/// `DynamicEntityTarget`/`StaticEntityTarget`: lista vazia casa tudo; senão casa se o
 /// evento tem QUALQUER uma das tags.
 ///
 /// `tem_tag` é o predicado nativo (`entitySystem->IsTagged`), passado de fora — a decisão é o que
-/// esta função porta.
+/// esta função implementa.
 pub fn bate_por_tags<F: FnMut(u64) -> bool>(tags: &[u64], mut tem_tag: F) -> bool {
     if tags.is_empty() {
         return true;
@@ -73,35 +73,24 @@ pub struct AparenciaCandidata {
     pub definition_name: u64,
 }
 
-/// `EntityTarget` (`#134`) — casamento de aparência do ramo `EntityBuilderEvent`.
-///
-/// Três regras do original que um porte apressado erra:
-/// 1. se `appearancePath` não está setado, o filtro de aparência **não se aplica** (passa);
-/// 2. com `resource` único presente, ele é o ÚNICO candidato — se não bater, falha, e a lista
-///    nem é consultada;
-/// 3. sem `resource` e com a lista VAZIA, o resultado é **falha** — não "passa por omissão".
-///    É o `else { return false; }` final, e é o ponto mais fácil de perder de vista.
 pub fn entity_builder_aparencia_bate(
     filtro_appearance_path: Option<u64>,
     filtro_definition_name: Option<u64>,
     resource_unico: Option<AparenciaCandidata>,
     lista: &[AparenciaCandidata],
 ) -> bool {
-    let Some(appearance_path) = filtro_appearance_path else {
+    // O filtro de definição sozinho não restringe nada: ele qualifica o caminho.
+    let Some(caminho) = filtro_appearance_path else {
         return true;
     };
-    if let Some(r) = resource_unico {
-        if appearance_path != r.resource_path {
-            return false;
-        }
-        return campo_bate(filtro_definition_name, r.definition_name);
+    let casa = |c: &AparenciaCandidata| {
+        c.resource_path == caminho && campo_bate(filtro_definition_name, c.definition_name)
+    };
+    // Com aparência única o builder não usa a lista: consultá-la deixaria passar o que não vai montar.
+    match resource_unico {
+        Some(unica) => casa(&unica),
+        None => lista.iter().any(casa),
     }
-    if lista.is_empty() {
-        return false;
-    }
-    lista.iter().any(|a| {
-        appearance_path == a.resource_path && campo_bate(filtro_definition_name, a.definition_name)
-    })
 }
 
 /// Categoria da entidade, para o despacho de `recordID` do ramo de eventos de entidade.
@@ -110,34 +99,26 @@ pub enum CategoriaEntidade {
     Puppet,
     Vehicle,
     Device,
-    /// Nenhuma das três — o original devolve `false` neste caso.
+    /// Nenhuma das três — o resultado é `false` neste caso.
     Outra,
 }
 
-/// `EntityTarget` (`#134`) — despacho de `recordID` por categoria de entidade.
-///
-/// O original resolve o record por 3 caminhos DIFERENTES (puppet/vehicle/device) e, se a entidade
-/// não é nenhum dos três, **falha**. `record_da_entidade` é `None` quando o caminho nativo não
-/// conseguiu resolver (ex.: device sem `controller` ou sem `persistentState`) — e `None` também é
-/// falha, não "ignora o filtro".
 pub fn entity_record_bate(
     filtro_record_id: Option<u64>,
     categoria: CategoriaEntidade,
     record_da_entidade: Option<u64>,
 ) -> bool {
-    let Some(record_id) = filtro_record_id else {
+    let Some(filtro) = filtro_record_id else {
         return true;
     };
-    if categoria == CategoriaEntidade::Outra {
-        return false;
-    }
-    match record_da_entidade {
-        Some(r) => record_id == r,
-        None => false,
+    // Record não resolvido reprova: tratar como curinga faria o filtro casar entidade de outro record.
+    match (categoria, record_da_entidade) {
+        (CategoriaEntidade::Outra, _) | (_, None) => false,
+        (_, Some(record)) => record == filtro,
     }
 }
 
-/// Os 7 campos do `EntityTarget` da referência; cada fábrica preenche o seu (`Definition` preenche
+/// Os 7 campos do `EntityTarget`; cada fábrica preenche o seu (`Definition` preenche
 /// 2). `None` = não-setado.
 #[derive(Clone, Copy, Default, Debug)]
 pub struct CamposDoAlvoDeEntidade {
@@ -160,16 +141,11 @@ pub struct CamposDoEventoDeEntidade {
     pub appearance_name: u64,
 }
 
-/// `EntityTarget` (`#134`) — o ramo dos 3 eventos de ENTIDADE
-/// (`EntityLifecycle`/`EntityComponent`/`VehicleLightControl`).
-///
-/// **A regra que mais surpreende:** se `appearancePath` OU `definitionName` estiverem setados, este
-/// ramo falha de imediato — esses 2 filtros só existem para o `EntityBuilderEvent`. Quem porta sem
-/// notar isso faz um filtro de aparência "funcionar" onde o original recusa.
 pub fn entity_evento_bate(
     filtro: &CamposDoAlvoDeEntidade,
     evento: &CamposDoEventoDeEntidade,
 ) -> bool {
+    // appearancePath/definitionName só existem no evento do builder: aqui reprovam sempre.
     if filtro.appearance_path.is_some() || filtro.definition_name.is_some() {
         return false;
     }
@@ -184,7 +160,7 @@ mod tests {
 
     #[test]
     fn campo_nao_setado_e_curinga() {
-        // A regra que um porte descuidado erra: não-setado NÃO quer dizer "só casa com o vazio".
+        // A regra fácil de errar: não-setado NÃO quer dizer "só casa com o vazio".
         assert!(campo_bate(None, 12345u64));
         assert!(campo_bate(None, 0u64));
     }
@@ -195,7 +171,7 @@ mod tests {
         assert!(!campo_bate(Some(7u64), 8));
         // um filtro setado nunca casa com o "vazio" do evento
         assert!(!campo_bate(Some(7u64), 0));
-        // o núcleo não conhece sentinela: `Some(0)` é campo setado, e quem converte o 0 da referência é o adaptador
+        // o núcleo não conhece sentinela: `Some(0)` é campo setado, e quem converte o 0 sentinela é o adaptador
         assert!(campo_bate(Some(0u64), 0));
         assert!(!campo_bate(Some(0u64), 7));
     }
@@ -253,7 +229,7 @@ mod tests {
 
     #[test]
     fn builder_lista_vazia_e_falha_nao_omissao() {
-        // O `else { return false; }` do original: sem resource único e sem lista, NÃO passa.
+        // O `else { return false; }` final: sem resource único e sem lista, NÃO passa.
         assert!(!entity_builder_aparencia_bate(Some(77), None, None, &[]));
         // mas se o filtro de path nem está setado, o bloco inteiro não se aplica
         assert!(entity_builder_aparencia_bate(None, None, None, &[]));
@@ -281,7 +257,7 @@ mod tests {
         ];
         assert!(entity_builder_aparencia_bate(Some(2), None, None, &lista));
         assert!(entity_builder_aparencia_bate(Some(2), Some(20), None, &lista));
-        // path bate mas definition não: o original faz `continue`, então NÃO casa
+        // path bate mas definition não: o candidato é pulado, então NÃO casa
         assert!(!entity_builder_aparencia_bate(Some(2), Some(99), None, &lista));
         assert!(!entity_builder_aparencia_bate(Some(3), None, None, &lista));
     }
@@ -326,9 +302,75 @@ mod tests {
         assert!(!entity_evento_bate(&trocado, &evento));
     }
 
+    /// Vetores `[B8]` da spec B4: filtro de caminho e de definição contra a aparência única e a lista do builder.
+    #[test]
+    fn builder_aparencia_vetores_b8() {
+        let c = |resource_path, definition_name| AparenciaCandidata { resource_path, definition_name };
+        let unica = Some(c(77, 5));
+        let lista = [c(1, 10), c(2, 20)];
+        let casos: [(Option<u64>, Option<u64>, Option<AparenciaCandidata>, &[AparenciaCandidata], bool); 12] = [
+            (None, None, None, &[], true),
+            // O filtro de definição sozinho não restringe.
+            (None, Some(9), unica, &[], true),
+            (Some(77), None, None, &[], false),
+            (Some(88), None, unica, &[c(88, 5)], false),
+            (Some(77), None, unica, &[], true),
+            (Some(77), Some(5), unica, &[], true),
+            (Some(77), Some(6), unica, &[], false),
+            (Some(2), None, None, &lista, true),
+            (Some(2), Some(20), None, &lista, true),
+            (Some(2), Some(99), None, &lista, false),
+            (Some(3), None, None, &lista, false),
+            (Some(1), Some(10), None, &lista, true),
+        ];
+        for (caminho, definicao, u, l, esperado) in casos {
+            assert_eq!(entity_builder_aparencia_bate(caminho, definicao, u, l), esperado, "caminho {caminho:?} definição {definicao:?} única {u:?}");
+        }
+    }
+
+    /// Vetores `[B9]`: o record só é olhado com filtro; categoria fora das 3 e record não resolvido reprovam.
+    #[test]
+    fn record_vetores_b9() {
+        use CategoriaEntidade::*;
+        let casos = [
+            (None, Outra, None, true),
+            (None, Puppet, Some(3), true),
+            (Some(5), Outra, Some(5), false),
+            (Some(5), Device, None, false),
+            (Some(5), Device, Some(5), true),
+            (Some(5), Puppet, Some(6), false),
+            (Some(5), Vehicle, Some(5), true),
+            (Some(0), Puppet, Some(0), true),
+        ];
+        for (filtro, categoria, record, esperado) in casos {
+            assert_eq!(entity_record_bate(filtro, categoria, record), esperado, "filtro {filtro:?} {categoria:?} record {record:?}");
+        }
+    }
+
+    /// Vetores `[B10]`: evento id 9, template 0xA, aparência 0xB; `tipo` e `record_id` não são olhados aqui.
+    #[test]
+    fn evento_de_entidade_vetores_b10() {
+        let evento = CamposDoEventoDeEntidade { entity_id: 9, template_path: 0xA, appearance_name: 0xB };
+        let f = CamposDoAlvoDeEntidade::default();
+        let casos = [
+            (f, true),
+            (CamposDoAlvoDeEntidade { appearance_path: Some(1), ..f }, false),
+            (CamposDoAlvoDeEntidade { definition_name: Some(1), ..f }, false),
+            (CamposDoAlvoDeEntidade { entity_id: Some(9), ..f }, true),
+            (CamposDoAlvoDeEntidade { entity_id: Some(1), ..f }, false),
+            (CamposDoAlvoDeEntidade { template_path: Some(0xA), appearance_name: Some(0xB), ..f }, true),
+            (CamposDoAlvoDeEntidade { template_path: Some(0xB), appearance_name: Some(0xA), ..f }, false),
+            (CamposDoAlvoDeEntidade { tipo: Some(123), record_id: Some(5), ..f }, true),
+            (CamposDoAlvoDeEntidade { entity_id: Some(9), appearance_path: Some(0xA), ..f }, false),
+        ];
+        for (filtro, esperado) in casos {
+            assert_eq!(entity_evento_bate(&filtro, &evento), esperado, "{filtro:?}");
+        }
+    }
+
     #[test]
     fn tags_nao_chamam_predicado_quando_vazio() {
-        // Importa: com lista vazia o original nem consulta o sistema (retorna true antes).
+        // Importa: com lista vazia o sistema nem é consultado (retorna true antes).
         let mut chamou = false;
         let r = bate_por_tags(&[], |_| {
             chamou = true;

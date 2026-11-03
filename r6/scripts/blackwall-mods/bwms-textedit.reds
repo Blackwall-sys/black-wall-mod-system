@@ -1,4 +1,4 @@
-// bwms-textedit.reds — camada redscript do modelo de edição de texto (Codeware `#115`).
+// bwms-textedit.reds — camada redscript do modelo de edição de texto.
 //
 // O buffer, o cursor e a seleção vivem em `bwms_primitives::editor_texto` (Rust, com testes offline); aqui só há chamada. O motivo é
 // técnico: o modelo indexa em codepoint (`char`) e o redscript só oferece `String` (bytes). Manter o buffer do lado que sabe contar

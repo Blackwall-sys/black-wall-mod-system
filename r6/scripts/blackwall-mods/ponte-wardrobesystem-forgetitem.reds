@@ -1,13 +1,10 @@
-// ponte-wardrobesystem-forgetitem.reds — Codeware `Player/WardrobeSystem.reds`:
-// `@addMethod(WardrobeSystem) public native func ForgetItemID(itemID: ItemID) -> Bool` (itens #46/#208).
+// ponte-wardrobesystem-forgetitem.reds —
+// `@addMethod(WardrobeSystem) public native func ForgetItemID(itemID: ItemID) -> Bool`.
 //
-// A fonte do Codeware (`WardrobeSystemEx::ForgetItemID`, `App/Player/WardrobeSystemEx.hpp`) faz 2 coisas: (1) deriva `appearanceName`
-// via `GetFlatValue<CName>({itemID.tdbid, ".appearanceName"})` e tenta remover por essa chave; (2) se falhar, varre o
-// `HashMap<CName,ItemID>` (`store.ForEach`) comparando `tdbid` e remove TODAS as chaves que baterem.
-//
-// Aqui só a 2ª, o SCAN por `tdbid`, como via única: não depende de o item ter o flat `.appearanceName` no TweakDB, e usa o layout do
+// Uma via só: varre o `HashMap<CName,ItemID>` comparando `tdbid` e remove TODAS as chaves que baterem, em vez de derivar
+// `appearanceName` do flat `.appearanceName` e remover por essa chave. O SCAN por `tdbid` não depende de o item ter o flat `.appearanceName` no TweakDB, e usa o layout do
 // `HashMap` conferido ao vivo contra um save real (`wardrobe_forget_by_tdbid`, roupas_e_armas/mod.rs; `ItemID.tdbid@node+0x10`,
-// `RED4EXT_ASSERT_SIZE(ItemID, 0x10)` no `RED4ext.SDK/include/RED4ext/NativeTypes.hpp`).
+// `ItemID` de 0x10 bytes).
 //
 // `ItemID.GetTDBID(itemID) -> TweakDBID` e `TDBID.ToNumber(tweakDBID) -> Uint64` são natives vanilla (`orphans.script:18613`).
 native func BwmsWardrobeForgetByTDBID(sys: ref<IScriptable>, tdbid: Uint64) -> Int32

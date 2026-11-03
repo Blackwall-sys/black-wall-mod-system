@@ -1,17 +1,17 @@
 //! Fonte única do que o runtime (`cp77-console`) e as ferramentas (`bwms`; `bwms-catalog` e `save-parser` do `bwms-dev`) calculam igual.
 //! Zero-dep. Hashes do Cyberpunk 2077: TweakDBID = CRC32(nome)|(len<<32); type_key de record = murmur3(miolo, seed 0x5EEDBA5E);
-//! ResourcePath (RDAR/ArchiveXL) = FNV-1a64 do path normalizado; NodeRef; chave de LocKey; FNV-1a 32/64 crus; CRC-64 e SHA-1 do `.archive`;
+//! ResourcePath (RDAR) = FNV-1a64 do path normalizado; NodeRef; chave de LocKey; FNV-1a 32/64 crus; CRC-64 e SHA-1 do `.archive`;
 //! CRC-16 do id de nó de quest. A raiz também guarda regras que o runtime e o install leem igual (`formato_tweak`, `PASTA_DO_RUNTIME`,
 //! props do `resource.patch`). Os módulos não são hash: `editor_texto`, `garment_ctx`, `override_state`, `regex`, `restarget` e `targets`
-//! são núcleos puros (sem endereço do jogo) de itens Codeware/ArchiveXL que o runtime usa, testáveis fora do jogo; `dynarray` é o cabeçalho
+//! são núcleos puros (sem endereço do jogo) de itens que o runtime usa, testáveis fora do jogo; `dynarray` é o cabeçalho
 //! do `DynArray` do motor; `json`, o JSON estrito dos arquivos de estado da `instalacao`. `enderecos` é a resolução de endereço do jogo por
-//! assinatura de instruções ARM64 (RED4ext #447): o mesmo código gera a tabela fora do jogo (`examples/gerar_enderecos.rs`, que o
+//! assinatura de instruções ARM64: o mesmo código gera a tabela fora do jogo (`examples/gerar_enderecos.rs`, que o
 //! `build-core.sh` roda antes do runtime) e a resolve no runtime. `macho` é o andador dos comandos de carga de um Mach-O de 64 bits, para o
 //! `enderecos`, o `bwms-helper` do instalador e o `fix-symtab-align` do build. `native_registrada` é a conferência de `native func` declarada
 //! num `.reds` contra os binários que registram natives: a mesma para o `bwms-helper natives`, o `bwms mods checar` e a compilação dos
 //! scripts na abertura do jogo. `rdar` é o cabeçalho do `.archive`: o runtime confere por ele
-//! o arquivo que entrega ao motor, e o `bwms archive` abre o índice por ele. `tweakxl` é o parser do formato declarativo do TweakXL
-//! (`.yaml`/`.toml`/`.tweak` → `Vec<operacoes::Op>`), com o leitor YAML (`tweakxl::yaml`) que também lê o `.xl` da `instalacao`.
+//! o arquivo que entrega ao motor, e o `bwms archive` abre o índice por ele. `tweaks` é o parser do formato declarativo de tweak
+//! (`.yaml`/`.toml`/`.tweak` → `Vec<operacoes::Op>`), com o leitor YAML (`tweaks::yaml`) que também lê o `.xl` da `instalacao`.
 //! `operacoes` é a representação canônica que os formatos produzem: o runtime aplica as ops no TweakDB vivo e o `bwms tweak`, no
 //! `tweakdb.bin`. `instalacao` é o motor de mods (`.xl`, a pasta `Mods/`, tabelas `red4ext/bwms-*.txt`, a migração da biblioteca antiga). `tabelas`
 //! é o formato dessas tabelas (arquivo, cabeçalho e linha), o mesmo para quem grava (`instalacao`) e para quem lê (o runtime).
@@ -30,14 +30,14 @@ pub mod regex;
 pub mod restarget;
 pub mod tabelas;
 pub mod targets;
-pub mod tweakxl;
+pub mod tweaks;
 
 /// Offset basis do FNV-1a 64-bit: o seed de [`fnv1a64`], de [`resource_path_hash`] e de
-/// [`node_ref_hash`], e o default do `opt seed` do `FNV1a64` do Codeware.
+/// [`node_ref_hash`], e o default do `opt seed` da native `FNV1a64`.
 pub const FNV1A64_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 /// Primo do FNV-1a 64-bit.
 pub const FNV1A64_PRIME: u64 = 0x0000_0100_0000_01b3;
-/// Offset basis do FNV-1a 32-bit: o seed de [`fnv1a32`] e o default do `opt seed` do `FNV1a32` do Codeware.
+/// Offset basis do FNV-1a 32-bit: o seed de [`fnv1a32`] e o default do `opt seed` da native `FNV1a32`.
 pub const FNV1A32_OFFSET: u32 = 0x811c_9dc5;
 /// Primo do FNV-1a 32-bit.
 pub const FNV1A32_PRIME: u32 = 0x0100_0193;
@@ -47,8 +47,8 @@ pub const fn fnv1a64(bytes: &[u8]) -> u64 {
     fnv1a64_seeded(bytes, FNV1A64_OFFSET)
 }
 
-/// FNV-1a 64-bit com hash INICIAL customizável (`seed`) — a mesma assinatura do `Red::FNV1a64`
-/// real do Codeware (`App/Utils/Hashing.hpp`: `Red::Optional<uint64_t, 0xCBF29CE484222325>`,
+/// FNV-1a 64-bit com hash INICIAL customizável (`seed`) — a mesma assinatura da native `FNV1a64`
+/// (`opt seed` com default `0xCBF29CE484222325`),
 /// ou seja, o valor default do parâmetro `opt seed` É o offset basis padrão do FNV — quando o
 /// .reds chamador omite o seed, o COMPILADOR já embute esse default na chamada, então o
 /// handler nativo nunca precisa adivinhar "seed==0 → usa o default"). `fnv1a64` acima é só
@@ -67,15 +67,15 @@ pub const fn fnv1a64_seeded(bytes: &[u8], seed: u64) -> u64 {
     hash
 }
 
-/// Prefixo do texto de uma chave de localização (`Red::LocKeyPrefix`, `Red/Localization.hpp` do TweakXL).
+/// Prefixo do texto de uma chave de localização.
 pub const LOCKEY_PREFIXO: &str = "LocKey#";
 
 /// `primaryKey` do `gamedataLocKeyWrapper` a partir do texto INTEIRO de um mod, pela regra do runtime (escritor
-/// TweakXL e `SetFlat` por script, `cp77-console/src/tweakdb/escritor.rs` e `natives.rs`), para a ferramenta offline
+/// de tweaks e `SetFlat` por script, `cp77-console/src/tweakdb/escritor.rs` e `natives.rs`), para a ferramenta offline
 /// e o jogo darem a mesma chave: `LocKey#<n>` com `n` decimal u64 é a chave primária; qualquer outro texto depois
 /// de [`LOCKEY_PREFIXO`], e o texto sem o prefixo, é a chave secundária, guardada como FNV-1a64.
-/// TODO(decisão do dono, F1-30): o conversor YAML do TweakXL (`YamlReader.Values.cpp:174-191`, `Str.hpp:7-24`) dá
-/// a chave decimal também sem o prefixo e 0 para o miolo vazio, e o `strtoull` dele aceita espaço à esquerda, sinal
+/// TODO(decisão do dono, F1-30): a outra regra possível dá
+/// a chave decimal também sem o prefixo e 0 para o miolo vazio, e aceita espaço à esquerda, sinal
 /// `-` e estouro; trocar aqui troca a ferramenta e, depois do F3-04, o runtime.
 pub fn lockey_chave(texto: &str) -> u64 {
     match texto.strip_prefix(LOCKEY_PREFIXO) {
@@ -90,11 +90,10 @@ pub fn lockey_chave(texto: &str) -> u64 {
 pub const TIPOS_DE_TEXTO_APLICADOS: &[&str] = &["onscreens"];
 
 /// Hash de ResourcePath do RDAR (o que o depot usa p/ resolver .archive): FNV-1a 64-bit do path
-/// NORMALIZADO. É o coração do resource.link/copy do ArchiveXL. PROVADO 5/5 goldens reais
+/// NORMALIZADO. É o coração do resource.link/copy do `.xl`. PROVADO 5/5 goldens reais
 /// (testes em `instalacao/tabelas_de_runtime.rs`). Fonte única do runtime E do offline.
 ///
-/// Sanitização na ordem do comentário do `HashSanitized` do RED4ext.SDK (`ResourcePath.hpp:73-77`,
-/// `cp77-symbols/notes/CATALOGO-EXAUSTIVO-RED4EXT.md` item #395):
+/// Sanitização (item #395 do catálogo exaustivo):
 /// (1) descarta 1 aspas de abertura E 1 de fechamento (simples ou duplas), se presentes;
 /// (2) descarta TODAS as barras/contrabarras iniciais (não só 1);
 /// (3) colapsa barras/contrabarras repetidas em sequência pra 1 só;
@@ -105,13 +104,13 @@ pub const TIPOS_DE_TEXTO_APLICADOS: &[&str] = &["onscreens"];
 /// (colapso considera o resultado JÁ normalizado — uma barra seguida de contrabarra também
 /// colapsa, já que ambas viram `\` antes da checagem de repetição).
 ///
-/// TODO(#395): o CÓDIGO do `HashSanitized` não faz a regra (1) como o comentário dele descreve: para
-/// na primeira aspa depois da de abertura, em qualquer posição (`ResourcePath.hpp:99`), e devolve 0
+/// TODO(#395): há uma leitura da regra (1) que para
+/// na primeira aspa depois da de abertura, em qualquer posição, e devolve 0
 /// se nada sobrou. Aqui só sai a aspa do último byte e as internas entram no hash (`base\it's.mesh`,
 /// `""x""`). Qual dos dois o motor segue está \[UNCONFIRMED\]: medir o hash que o jogo dá a um path
 /// com apóstrofo interno (`depot_loaded_resource_class_by_hash`) antes de mudar a regra.
-/// TODO: byte >= 0x80 entra sem sinal; o SDK (`char` com sinal) e o índice do WolvenKit
-/// (`useSignedBuffer`) estendem o sinal. \[UNCONFIRMED\] contra um `.archive` do WolvenKit com path
+/// TODO: byte >= 0x80 entra sem sinal; com `char` com sinal o byte
+/// estende o sinal. \[UNCONFIRMED\] contra um `.archive` com path
 /// acentuado (name_hash do índice x este hash).
 ///
 /// `const fn` pelo mesmo motivo de [`fnv1a64_seeded`]. Os cortes de aspa e de barra são padrões de
@@ -132,7 +131,7 @@ pub const fn resource_path_hash(path: &str) -> u64 {
     }
 
     // Regras 3+4+5, truncamento e FNV no mesmo passe: o byte normalizado vai direto pro hash, sem
-    // buffer, e o corte de 216 (`MaxPathLength` do SDK) conta os bytes emitidos, pós-colapso.
+    // buffer, e o corte de 216 (`MaxPathLength`) conta os bytes emitidos, pós-colapso.
     let mut hash = FNV1A64_OFFSET;
     let mut emitidos = 0usize;
     let mut prev_was_sep = false;
@@ -160,42 +159,28 @@ pub const fn resource_path_hash(path: &str) -> u64 {
     }
 }
 
-/// Hash de um `NodeRef` do mundo (o que `ToNodeRef`/`ToEntityID`/spawns e scene-mods do Codeware
-/// usam pra resolver um nó pelo path) — porte do `NodeRef::Hash` do RED4ext.SDK (`NodeRef.hpp:83-111`),
-/// byte-exato para ASCII sem NUL. O Codeware não tem algoritmo próprio: chama a nativa
-/// `NodeRef::Create` do jogo (`Codeware/src/Red/NodeRef.hpp:19-23`); este é o algoritmo do SDK.
-/// É FNV-1a64 (seed/prime padrão) do path, com DUAS regras de skip que o distinguem do `fnv1a64` cru:
-/// - `#` (marcador de nó dinâmico) é PULADO — o char não entra no hash.
-/// - `;alias` (um alias local) é PULADO até o `/` seguinte; o `/` terminador SIM entra no hash.
-///   Se o `;alias` vai até o fim da string (sem `/`), o hash para ali.
-/// Saída: hash final == seed → 0, a regra literal do SDK (`return hash == seed ? 0 : hash`,
-/// `NodeRef.hpp:110`). Cobre a string vazia ou toda pulada e também uma entrada que volte ao seed.
-/// `GlobalRoot`=`node_ref_hash("$")`, `RelativeRoot`=`node_ref_hash("~")`.
-/// TODO: fora de ASCII o SDK estende o sinal do `char` e para no NUL; aqui o byte entra sem sinal e o
-/// NUL é hasheado. A equivalência com a nativa `NodeRef::Create` está \[UNCONFIRMED\]: falta o endereço
-/// Mac dela para comparar.
+/// Hash de um `NodeRef` do mundo (o que `ToNodeRef`/`ToEntityID`/spawns e scene-mods usam pra resolver um nó pelo path). O jogo resolve o
+/// nó por esse hash: o valor tem de ser idêntico ao do jogo.
+///
+/// FNV-1a 64 sobre os bytes, sem normalizar nada, com duas regras: `#` (marca de nó dinâmico) fica fora; `;` abre um apelido, que fica fora até
+/// o próximo `/` (o `/` entra), ou até o fim. Sem byte nenhum hasheado o resultado é 0, não o valor inicial.
 pub fn node_ref_hash(node_ref: &str) -> u64 {
-    let bytes = node_ref.as_bytes();
     let mut hash = FNV1A64_OFFSET;
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'#' {
-            i += 1;
+    let mut em_apelido = false;
+    for &b in node_ref.as_bytes() {
+        if em_apelido {
+            if b != b'/' {
+                continue;
+            }
+            em_apelido = false;
+        } else if b == b';' {
+            em_apelido = true;
+            continue;
+        } else if b == b'#' {
             continue;
         }
-        if bytes[i] == b';' {
-            i += 1;
-            while i < bytes.len() && bytes[i] != b'/' {
-                i += 1;
-            }
-            if i >= bytes.len() {
-                break;
-            }
-            // bytes[i] == b'/' aqui: cai fora do if e HASHEIA o '/' (fiel ao C++).
-        }
-        hash ^= u64::from(bytes[i]);
+        hash ^= u64::from(b);
         hash = hash.wrapping_mul(FNV1A64_PRIME);
-        i += 1;
     }
     if hash == FNV1A64_OFFSET {
         0
@@ -205,13 +190,13 @@ pub fn node_ref_hash(node_ref: &str) -> u64 {
 }
 
 /// FNV-1a 32-bit ([`FNV1A32_OFFSET`], [`FNV1A32_PRIME`]): hash da chave dos HashMap do motor (nó e balde), FactID e pathHash de
-/// nó de quest, chave secundária de texto da localização, nome de record inline do TweakXL (`ComposeInlineName`) e native `BwmsFNV1a32`.
+/// nó de quest, chave secundária de texto da localização, nome de record inline dos tweaks e native `BwmsFNV1a32`.
 pub fn fnv1a32(bytes: &[u8]) -> u32 {
     fnv1a32_seeded(bytes, FNV1A32_OFFSET)
 }
 
-/// FNV-1a 32-bit com hash inicial customizável — mesma lógica do `fnv1a64_seeded`, pro
-/// `Red::FNV1a32` real do Codeware (default `0x811C9DC5` = o offset basis padrão).
+/// FNV-1a 32-bit com hash inicial customizável — mesma lógica do `fnv1a64_seeded`, pra
+/// native `FNV1a32` (default `0x811C9DC5` = o offset basis padrão).
 pub fn fnv1a32_seeded(bytes: &[u8], seed: u32) -> u32 {
     let mut hash = seed;
     for &byte in bytes {
@@ -221,8 +206,7 @@ pub fn fnv1a32_seeded(bytes: &[u8], seed: u32) -> u32 {
     hash
 }
 
-/// CRC-32 IEEE com hash INICIAL customizável (`seed`) — a assinatura exata do `CRC32(data, len,
-/// seed)` do RED4ext (`Hashing/CRC.hpp`: `crc = ~seed; ...; return ~crc`). É a impl CANÔNICA;
+/// CRC-32 IEEE com hash INICIAL customizável (`seed`): `crc = ~seed; ...; return ~crc`. É a impl CANÔNICA;
 /// [`crc32`] é só este com `seed=0`. O seed permite CONTINUAR um CRC de onde outro parou — a base
 /// da derivação de TweakDBID ([`tweak_db_id_derive`]): como `~seed` no início e `~crc` no fim se
 /// telescopam, `crc32_seeded(B, crc32_seeded(A, s)) == crc32_seeded(A++B, s)`.
@@ -257,14 +241,14 @@ const fn crc32_tabela() -> [u32; 256] {
     tabela
 }
 
-/// CRC-32 IEEE (poly 0xEDB88320, init 0xFFFFFFFF, xorout 0xFFFFFFFF) — o que o
-/// WolvenKit (`Crc32Algorithm`) usa para os nomes do tweakdb. É `crc32_seeded(_, 0)`.
+/// CRC-32 IEEE (poly 0xEDB88320, init 0xFFFFFFFF, xorout 0xFFFFFFFF) — o hash dos nomes do tweakdb.
+/// É `crc32_seeded(_, 0)`.
 pub fn crc32(bytes: &[u8]) -> u32 {
     crc32_seeded(bytes, 0)
 }
 
 /// TweakDBID de um nome: `CRC32(nome) | (len << 32)` (nome em ASCII), onde o campo `length` é UM
-/// BYTE (`static_cast<uint8_t>(len)` no `TweakDBID(string_view)` do RED4ext) — nomes >255 chars
+/// BYTE — nomes >255 chars
 /// truncam o length em u8, batendo com o id real do jogo (os bytes 5-7 = tdbOffset, sempre 0 aqui).
 pub fn tweak_db_id(name: &str) -> u64 {
     u64::from(crc32(name.as_bytes())) | (u64::from(name.len() as u8) << 32)
@@ -276,12 +260,10 @@ pub const fn tweak_db_id_chave(id: u64) -> u64 {
     id & 0xFF_FFFF_FFFF
 }
 
-/// Deriva o TweakDBID de um record/flat filho a partir do id do PAI + um sufixo — o
-/// `TweakDBID(const TweakDBID& aBase, string_view aName)` / `operator+` do RED4ext
-/// (`NativeTypes-inl.hpp:15,58`), que é como o TweakXL resolve `record.flat` no RegisterName /
-/// CreateExtraNames sem re-hashear o nome inteiro. Semântica exata do C++:
+/// Deriva o TweakDBID de um record/flat filho a partir do id do PAI + um sufixo, sem re-hashear o
+/// nome inteiro (como `record.flat` é resolvido no registro de nomes). Semântica:
 /// `hash = CRC32(sufixo, seed=base.hash)` e `length = base.length + sufixo.len()` (u8 wrapping);
-/// o tdbOffset do pai é ignorado (o C++ faz memset em zero). Pela propriedade telescópica do CRC,
+/// o tdbOffset do pai é ignorado (zerado). Pela propriedade telescópica do CRC,
 /// `tweak_db_id_derive(tweak_db_id("base"), ".suf") == tweak_db_id("base.suf")` — PROVADO nos testes.
 pub fn tweak_db_id_derive(base_id: u64, suffix: &str) -> u64 {
     let base_hash = (base_id & 0xFFFF_FFFF) as u32;
@@ -291,12 +273,12 @@ pub fn tweak_db_id_derive(base_id: u64, suffix: &str) -> u64 {
     u64::from(new_hash) | (u64::from(new_len) << 32)
 }
 
-/// Seed dos type_keys de record no tweakdb (`TweakDB.RecordsSeed` do WolvenKit).
+/// Seed dos type_keys de record no tweakdb.
 pub const RECORDS_SEED: u32 = 0x5EED_BA5E;
 
 /// MurmurHash3 x86 32-bit (seed configurável). O `type_key` de um record do
 /// tweakdb é o murmur3_32, com seed [`RECORDS_SEED`], do MIOLO do nome da classe
-/// RED — o WolvenKit aplica o regex `gamedata(.*)_Record` antes (ver
+/// RED — o regex `gamedata(.*)_Record` é aplicado antes (ver
 /// [`record_type_key`]).
 pub fn murmur3_32(data: &[u8], seed: u32) -> u32 {
     const C1: u32 = 0xcc9e_2d51;
@@ -341,8 +323,8 @@ pub fn murmur3_32(data: &[u8], seed: u32) -> u32 {
     h
 }
 
-/// type_key de uma classe de record: aplica o regex `gamedata(.*)_Record` do
-/// WolvenKit (strip do prefixo `gamedata` + sufixo `_Record`) e hasheia o miolo
+/// type_key de uma classe de record: aplica o regex `gamedata(.*)_Record`
+/// (strip do prefixo `gamedata` + sufixo `_Record`) e hasheia o miolo
 /// com [`murmur3_32`]/[`RECORDS_SEED`]. Aceita tanto a forma completa
 /// (`gamedataWeaponItem_Record`) quanto o miolo já stripado (`WeaponItem`).
 pub fn record_type_key(class_name: &str) -> u32 {
@@ -353,8 +335,8 @@ pub fn record_type_key(class_name: &str) -> u32 {
     murmur3_32(core.as_bytes(), RECORDS_SEED)
 }
 
-/// CRC-64/XZ (refletido, init/xorout 0xFFFF…FFFF, poly refletido 0xC96C5795D7870F42) — o `Crc64`
-/// do WolvenKit, usado no crc do ÍNDICE RDAR (`.archive`). Bit-a-bit.
+/// CRC-64/XZ (refletido, init/xorout 0xFFFF…FFFF, poly refletido 0xC96C5795D7870F42) —
+/// usado no crc do ÍNDICE RDAR (`.archive`). Bit-a-bit.
 pub fn crc64(bytes: &[u8]) -> u64 {
     const POLY: u64 = 0xC96C_5795_D787_0F42;
     let mut crc = !0u64;
@@ -367,7 +349,7 @@ pub fn crc64(bytes: &[u8]) -> u64 {
     !crc
 }
 
-/// SHA-1 (FIPS 180-1) — hash do `FileEntry.SHA1Hash` de cada recurso do `.archive` (WolvenKit).
+/// SHA-1 (FIPS 180-1) — hash do `FileEntry.SHA1Hash` de cada recurso do `.archive`.
 /// Os blocos cheios saem direto da entrada e só a cauda com o padding vai pra pilha: o `bwms archive` passa cada recurso
 /// inteiro, e copiar a entrada dobraria o pico de memória.
 pub fn sha1(data: &[u8]) -> [u8; 20] {
@@ -425,29 +407,18 @@ fn sha1_bloco(h: &mut [u32; 5], chunk: &[u8]) {
     h[4] = h[4].wrapping_add(e);
 }
 
-/// `GeneratePhaseNodeID` do ArchiveXL real (`App::QuestPhaseExtension::GeneratePhaseNodeID`,
-/// `App/Extensions/QuestPhase/Extension.cpp`) — o ID determinístico (16-bit) que o sistema de
-/// EDIÇÃO DE GRAFO de quest (`PatchPhase`/`CreatePhaseNode`) atribui a cada nó novo inserido
-/// num `questGraphDefinition`, derivado de `"<phasePath>:<parentNodeId>"` (chave textual, evita
-/// colisão entre patches de mods diferentes no MESMO grafo). Peça `#35`/`#56` do catálogo
-/// ArchiveXL — a única sub-parte 100% algoritmo puro (sem `Core::RawFunc`/endereço nativo) das 7
-/// funções do sistema de patch de grafo; as outras 6 (`PatchPhase`/`FindConnectionPoint`/
-/// `ResolveSocket`/`AddConnection`/`RemoveConnection`/`CreatePhaseNode`) operam sobre um
-/// `Handle<questGraphDefinition>` vivo e estão em `cp77-console/src/mundo/mod.rs`
-/// (`questphase_patch_aplicar` chama esta fn) e `npcs/mod.rs`.
+/// Id de 16 bits do nó de fase novo que o BWMS insere num `questGraphDefinition`, a partir do texto `"<caminho da fase do mod>:<id do nó de
+/// entrada>"` (chamado por `cp77-console` `mundo::questphase_patch_aplicar` e `npcs`).
 ///
-/// **Confirmado ser CRC-16/CCITT-FALSE clássico** (poly `0x1021`, init `0xFFFF`, sem reflexão,
-/// sem xorout) — a forma byte a byte, sem tabela, do C++ real (`x = crc>>8 ^ *data; x ^= x>>4;
-/// crc = (crc<<8) ^ (x<<12) ^ (x<<5) ^ x`) é uma implementação alternativa do MESMO algoritmo:
-/// bate exato com o valor-de-checagem padrão da indústria pra `"123456789"` (`0x29B1`), não só
-/// autoconsistência com o C++ transcrito — 2ª fonte independente confirmando a leitura do
-/// código-fonte estar correta.
+/// CRC-16/CCITT-FALSE: polinômio `0x1021`, inicial `0xFFFF`, sem reflexão de entrada nem de saída, sem xor final. O id do nó de mod que as provas
+/// em jogo criaram sai daqui: outro algoritmo dá outro id.
 pub fn quest_phase_node_id(data: &[u8]) -> u16 {
     let mut crc: u16 = 0xFFFF;
-    for &byte in data {
-        let mut x = ((crc >> 8) as u8) ^ byte;
-        x ^= x >> 4;
-        crc = (crc << 8) ^ ((x as u16) << 12) ^ ((x as u16) << 5) ^ (x as u16);
+    for &b in data {
+        crc ^= u16::from(b) << 8;
+        for _ in 0..8 {
+            crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x1021 } else { crc << 1 };
+        }
     }
     crc
 }
@@ -458,14 +429,14 @@ pub fn quest_phase_node_id(data: &[u8]) -> u16 {
 /// Mora aqui porque é a folha que o runtime e as ferramentas usam.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FormatoTweak {
-    /// `.yaml` e `.yml`: o YAML do TweakXL.
+    /// `.yaml` e `.yml`: o YAML de tweak.
     Yaml,
-    /// `.tweak`: a linguagem própria do TweakXL (`tweakxl::tweak_source`).
+    /// `.tweak`: a linguagem própria de tweak (`tweaks::tweak_source`).
     Tweak,
 }
 
 /// Formato de tweak da extensão `ext` (sem o ponto), sem diferenciar maiúscula. `None` = não é tweak. `toml` fica de fora: é formato
-/// de autoria do `bwms tweak`, e o runtime não aplica TOML (o leitor, `tweakxl::toml`, só serve ao `apply-toml`/`registro` do
+/// de autoria do `bwms tweak`, e o runtime não aplica TOML (o leitor, `tweaks::toml`, só serve ao `apply-toml`/`registro` do
 /// `bwms tweak`).
 pub fn formato_tweak(ext: &str) -> Option<FormatoTweak> {
     if ext.eq_ignore_ascii_case("yaml") || ext.eq_ignore_ascii_case("yml") {
@@ -491,7 +462,7 @@ pub fn blob_compilado_pelo_scc(blob: &[u8]) -> bool {
     blob.windows(MARCA_DO_SCC.len()).any(|w| w == MARCA_DO_SCC)
 }
 
-/// Props do `resource.patch` (ArchiveXL `#17`) em bits, com os nomes das props da referência. O install (`instalacao::tabelas_de_runtime`,
+/// Props do `resource.patch` em bits, com os nomes das props do `.xl`. O install (`instalacao::tabelas_de_runtime`,
 /// `emit_resource_patch_table`) grava a máscara na `bwms-resource-patch.txt` e o runtime (`cp77-console`, `arquivos_do_jogo`) testa os bits:
 /// mora aqui porque é a folha que os dois usam.
 pub const A17_PROP_COMPONENTS: u32 = 1;
@@ -517,10 +488,10 @@ pub const A17_PROP_BASETEXTUREPARAM: u32 = 512;
 
 pub const A17_PROP_BOUNDINGBOX: u32 = 1024;
 
-/// `streaming.blocks` do `.xl` (51e): o block é patch do streaming world, como o `RegisterPatch` da referência.
+/// `streaming.blocks` do `.xl` (51e): o block é patch do streaming world.
 pub const A17_PROP_BLOCKS: u32 = 2048;
 
-/// Props do `MorphTargetMesh` e do `CMesh` que o runtime aplica (a referência aceita qualquer CName; estas são as que ela lê).
+/// Props do `MorphTargetMesh` e do `CMesh` que o runtime aplica.
 pub const A17_PROP_BASEMESH: u32 = 4096;
 
 pub const A17_PROP_BASETEXTURE: u32 = 8192;
@@ -552,7 +523,7 @@ pub const A17_PROPS: [(&str, u32); 17] = [
     ("censorshipMapping", A17_PROP_CENSORSHIP),
 ];
 
-/// Máscara de props escritas por nome, separados por espaço: `-` liga todas (props vazio, o `Modifies` da referência); cada nome de
+/// Máscara de props escritas por nome, separados por espaço: `-` liga todas (props vazio); cada nome de
 /// [`A17_PROPS`] liga o bit dele, e nome desconhecido não liga nenhum. Os espaços das pontas não contam. O install converte assim as props de
 /// cada patch do `.xl` (juntas por espaço) e o runtime, o campo de props por nome de uma tabela posta à mão.
 pub fn a17_props_mascara(campo: &str) -> u32 {
@@ -601,9 +572,8 @@ mod tests {
 
     #[test]
     fn quest_phase_node_id_crc16_ccitt_false_check_value() {
-        // Valor-de-checagem PADRÃO da indústria pro CRC-16/CCITT-FALSE — confirma que a leitura
-        // do algoritmo do C++ real (App::QuestPhaseExtension::GeneratePhaseNodeID) está certa
-        // por uma 2ª fonte independente, não só transcrição.
+        // Valor-de-checagem PADRÃO da indústria pro CRC-16/CCITT-FALSE — confirma o algoritmo
+        // por uma fonte independente.
         assert_eq!(quest_phase_node_id(b"123456789"), 0x29B1);
     }
 
@@ -656,14 +626,14 @@ mod tests {
         assert_eq!(lockey_chave("LocKey#abc"), fnv1a64(b"abc"));
         assert_eq!(lockey_chave("abc"), fnv1a64(b"abc"));
         // A chave que o runtime grava (`escritor.rs` e `natives.rs` do cp77-console), fixada para o F3-04 trocar o runtime
-        // por esta função sem mudar chave. O conversor YAML do TweakXL dá 45371, 45371, 0 e 0 nestes quatro (TODO na função).
+        // por esta função sem mudar chave. A outra regra (TODO na função) dá 45371, 45371, 0 e 0 nestes quatro.
         assert_eq!(lockey_chave("45371"), fnv1a64(b"45371"));
         assert_eq!(lockey_chave("LocKey# 45371"), fnv1a64(b" 45371"));
         assert_eq!(lockey_chave(""), fnv1a64(b""));
         assert_eq!(lockey_chave("LocKey#"), fnv1a64(b""));
     }
 
-    // ===== `resource_path_hash` — item #395 (`cp77-symbols/notes/CATALOGO-EXAUSTIVO-RED4EXT.md`): as 5 regras de
+    // ===== `resource_path_hash` — item #395 do catálogo exaustivo: as 5 regras de
     // sanitização, testadas por AUTOCONSISTÊNCIA (path "sujo" deve hashear IGUAL ao equivalente
     // já limpo à mão — não temos golden real do motor pra um path sujo, mas a regra em si é
     // mecânica/determinística) +
@@ -814,7 +784,7 @@ mod tests {
     #[test]
     fn tweak_db_id_length_trunca_u8() {
         // O campo length é u8 (byte 4); nome de 256 chars → length wrap p/ 0, e nada vaza pros
-        // bytes 5-7 (tdbOffset). Bate com o `static_cast<uint8_t>` do C++.
+        // bytes 5-7 (tdbOffset).
         let n256 = "a".repeat(256);
         let id = tweak_db_id(&n256);
         assert_eq!(id >> 32, 0); // 256 & 0xFF == 0
@@ -839,12 +809,11 @@ mod tests {
     }
 
     #[test]
-    fn murmur3_vetores_wolvenkit() {
-        // Vetores reais do WolvenKit (Tests/.../Murmur3Tests.cs), seed RECORDS_SEED.
+    fn murmur3_vetores_conhecidos() {
+        // Vetores conhecidos, seed RECORDS_SEED.
         assert_eq!(murmur3_32(b"", 0), 0);
         assert_eq!(murmur3_32(b"Records", RECORDS_SEED), 0x92C1_A109);
         assert_eq!(murmur3_32(b"TweakDB", RECORDS_SEED), 0xF185_1BEB);
-        assert_eq!(murmur3_32(b"WolvenKit", RECORDS_SEED), 0x131C_522F);
         assert_eq!(murmur3_32(b"Hello!", RECORDS_SEED), 0xFA23_C62F);
         assert_eq!(
             murmur3_32(b"This is a longer string than usual.", RECORDS_SEED),
@@ -889,7 +858,7 @@ mod tests {
 
     #[test]
     fn record_type_key_strip() {
-        // O regex `gamedata(.*)_Record` do WolvenKit: hasheia só o miolo.
+        // O regex `gamedata(.*)_Record`: hasheia só o miolo.
         assert_eq!(
             record_type_key("gamedataWeaponItem_Record"),
             murmur3_32(b"WeaponItem", RECORDS_SEED)
@@ -933,7 +902,7 @@ mod tests {
 
     #[test]
     fn tweak_db_id_derive_bate_com_direto() {
-        // O invariante do RegisterName/CreateExtraNames do TweakXL: derivar do pai + sufixo dá
+        // O invariante do registro de nomes: derivar do pai + sufixo dá
         // o MESMO id que hashear o nome completo. Prova reversa da derivação (não só forward).
         assert_eq!(
             tweak_db_id_derive(tweak_db_id("Items.Preset_Lexington"), ".Cool"),
@@ -989,7 +958,7 @@ mod tests {
         // GlobalRoot / RelativeRoot: sem char especial, é FNV-1a64 cru do char.
         assert_eq!(node_ref_hash("$"), fnv1a64(b"$"));
         assert_eq!(node_ref_hash("~"), fnv1a64(b"~"));
-        // Goldens absolutos (do header RED4ext).
+        // Goldens absolutos.
         assert_eq!(node_ref_hash("$"), 0xaf63_994c_8601_7ab3);
         assert_eq!(node_ref_hash("~"), 0xaf63_f34c_8602_13a1);
         // Nada hasheado → 0 (não o seed).
@@ -1003,7 +972,7 @@ mod tests {
         assert_eq!(node_ref_hash("#foo"), fnv1a64(b"foo"));
         // ';alias' pulado até o '/', mas o '/' É hasheado: "a;xyz/b" == fnv1a64("a/b").
         assert_eq!(node_ref_hash("a;xyz/b"), fnv1a64(b"a/b"));
-        // Combinado, contra o header.
+        // Goldens absolutos.
         assert_eq!(node_ref_hash("#foo"), 0xdcb2_7518_fed9_d577);
         assert_eq!(node_ref_hash("a;xyz/b"), 0xe620_c319_0468_cf61);
     }

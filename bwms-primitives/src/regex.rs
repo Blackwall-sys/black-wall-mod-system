@@ -1,11 +1,10 @@
-//! Motor de regex do `regex:` do Codeware `#137` (`ResourceTarget`).
+//! Motor de regex do `regex:` do `ResourceTarget`.
 //!
-//! **Contrato do original.** O Codeware monta `std::regex` com as flags padrão (ECMAScript) uma vez,
-//! na fábrica `Path()` (`App/Callback/Targets/ResourceTarget.hpp:72-74`), e casa com
-//! `std::regex_match` (`hpp:36`): o texto INTEIRO, sobre `std::string`, byte a byte. Este motor
+//! **Contrato.** A regex usa as flags padrão (ECMAScript), é montada uma vez,
+//! na fábrica `Path()`, e casa o texto INTEIRO, byte a byte. Este motor
 //! segue as três coisas: compila uma vez, casa o texto inteiro, a unidade é o byte.
 //!
-//! O projeto é zero-dependência, e `std::regex` sobre path de recurso usa um vocabulário pequeno.
+//! O projeto é zero-dependência, e regex sobre path de recurso usa um vocabulário pequeno.
 //! **O que suporta**, cada um porque um padrão de path o escreve:
 //!   `.` qualquer byte · `*` `+` `?` quantificadores · `[abc]` `[^abc]` `[a-z]` classes ·
 //!   `(a|b)` grupo · `|` em qualquer nível · `^` `$` asserções em qualquer posição ·
@@ -81,7 +80,7 @@ enum No {
     /// `.`
     Qualquer,
     Classe(ConjuntoDeBytes),
-    /// `^`: largura zero, só na posição 0 (o original não liga `multiline`).
+    /// `^`: largura zero, só na posição 0 (sem `multiline`).
     Ini,
     /// `$`: largura zero, só no fim do texto.
     Fim,
@@ -237,7 +236,7 @@ impl Parser<'_> {
                 self.i += 1;
                 let f = self.comer().ok_or(ErroDeRegex::Invalido)?;
                 let fim = if f == b'\\' { self.escape()? } else { f };
-                // A ordem de byte acima de 0x7f depende de `char` ter sinal no compilador do original.
+                // A ordem de byte acima de 0x7f depende de `char` ter sinal no compilador.
                 if !inicio.is_ascii() || !fim.is_ascii() {
                     return Err(ErroDeRegex::NaoSuportado);
                 }
@@ -340,7 +339,7 @@ impl Compilador {
 }
 
 impl Regex {
-    /// Compila. O erro diz por que o padrão ficou sem resposta; os consumidores do `#137` recebem
+    /// Compila. O erro diz por que o padrão ficou sem resposta; os consumidores do `ResourceTarget` recebem
     /// `None` ("não sei") via [`crate::restarget::CompiledResourceTarget::casa`].
     pub fn compilar(padrao: &str) -> Result<Regex, ErroDeRegex> {
         if padrao.len() > PADRAO_MAX {
@@ -357,7 +356,7 @@ impl Regex {
         Ok(Regex { programa: c.programa, classes: c.classes })
     }
 
-    /// `true` se o texto INTEIRO casa, como `std::regex_match` (`hpp:36`).
+    /// `true` se o texto INTEIRO casa, como `std::regex_match`.
     pub fn casa(&self, texto: &str) -> bool {
         let t = texto.as_bytes();
         let m = self.programa.len();
@@ -648,7 +647,7 @@ mod tests {
     }
 
     /// `cargo test --release -- --ignored --nocapture bench_regex_match`. Padrões dos consumidores
-    /// reais (c6, smoke `#137`) mais dois patológicos; mede só o casamento, regex já compilada.
+    /// reais (c6, smoke do `ResourceTarget`) mais dois patológicos; mede só o casamento, regex já compilada.
     #[test]
     #[ignore]
     fn bench_regex_match() {
@@ -687,7 +686,7 @@ mod tests {
     #[test]
     fn equivalente_ao_glob_para_o_mesmo_padrao() {
         // A regex que `wildcard_para_regex` produz tem que aceitar o mesmo conjunto que o glob —
-        // é o que garante que as duas rotas do `#137` concordam.
+        // é o que garante que as duas rotas do `ResourceTarget` concordam.
         for (padrao, alvos) in [
             ("base\\gameplay\\*.ent", vec![(r"base\gameplay\v.ent", true), (r"base\outro\v.ent", false)]),
             ("*.mesh", vec![("a.mesh", true), ("a.ent", false)]),

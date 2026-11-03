@@ -15,7 +15,7 @@ use std::path::{Component, Path, PathBuf};
 pub enum ModClass {
     PureContent,  // .archive/.xl/.mesh/textura — dados que o jogo/frameworks interpretam
     RedMod,       // pacote REDmod oficial (info.json + archives/scripts)
-    Script,       // .reds (redscript, roda dentro do jogo) e/ou .lua de mod de CET (mod de CET inteiro ainda não roda no BWMS)
+    Script,       // .reds (redscript, roda dentro do jogo) e/ou .lua de mod Lua (o que depende de .dll não roda no BWMS)
     NativeCode,   // .dll/.dylib/Mach-O — código nativo, canal restrito
     Mixed,        // mistura (ex.: conteúdo + script)
     Unknown,      // nada reconhecido
@@ -25,8 +25,8 @@ pub enum ModClass {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compat {
     Universal,           // o mesmo arquivo roda em Windows e Mac (conteúdo puro)
-    MacAdapter,          // roda via nossa adaptação (redscript/TweakXL/ArchiveXL-offline)
-    NativePortRequired,  // tem código Windows, mod de CET (inteiro, ainda não roda no BWMS) ou depende de hook ainda ausente
+    MacAdapter,          // roda via nossa adaptação (redscript/tweaks/.xl-offline)
+    NativePortRequired,  // tem código Windows ou depende de hook ainda ausente
 }
 
 /// Tipo de UM arquivo dentro do pacote.
@@ -36,8 +36,8 @@ pub enum FileKind {
     Xl,         // .xl (manifesto do mod; o runtime aplica as seções com tabela, `tabelas_de_runtime`)
     Content,    // mesh/ent/textura/etc. (loose content)
     Redscript,  // .reds
-    Tweak,      // .yaml/.tweak (TweakXL)
-    Lua,        // .lua de mod de CET (mod de CET inteiro ainda não roda no BWMS)
+    Tweak,      // .yaml/.tweak (tweak declarativo)
+    Lua,        // .lua de mod Lua (o que depende de .dll não roda no BWMS)
     RedModInfo, // info.json (manifesto REDmod)
     Native,     // .dll/.dylib/Mach-O/exe
     InstallScript, // .sh/.command/.bat/.ps1 — NUNCA executar
@@ -175,25 +175,25 @@ fn class_of(files: &[FileEntry]) -> ModClass {
 }
 
 /// Nome das dependências que o `compat_of` lê: `detect_deps` grava e `compat_of` casa pelo mesmo nome.
-const DEP_LUA: &str = "CET";
+const DEP_LUA: &str = "lua";
 const DEP_NATIVO: &str = "nativo";
 
-/// Detecta dependências de framework olhando os arquivos (não executa nada). O nome é o do framework que o mod pede na
-/// página dele; o detalhe diz o que o BWMS faz com o arquivo.
+/// Detecta dependências de framework olhando os arquivos (não executa nada). O nome é o do tipo de arquivo que pede
+/// runtime; o detalhe diz o que o BWMS faz com o arquivo.
 fn detect_deps(files: &[FileEntry]) -> Vec<Dep> {
     let mut deps = Vec::new();
     let mut add = |name: &str, detail: &str| deps.push(Dep { name: name.into(), detail: detail.into() });
     if files.iter().any(|f| f.kind == FileKind::Xl) {
-        add("ArchiveXL", "tem .xl → o BWMS aplica as seções pelas tabelas em red4ext/ ou pelo .json que o jogo lê; as notas dizem quem aplica cada uma e o que fica de fora");
+        add("xl", "tem .xl → o BWMS aplica as seções pelas tabelas em red4ext/ ou pelo .json que o jogo lê; as notas dizem quem aplica cada uma e o que fica de fora");
     }
     if files.iter().any(|f| f.kind == FileKind::Tweak) {
-        add("TweakXL", "tem .yaml/.tweak → o BWMS aplica o que estiver em r6/tweaks/");
+        add("tweaks", "tem .yaml/.tweak → o BWMS aplica o que estiver em r6/tweaks/");
     }
     if files.iter().any(|f| f.kind == FileKind::Redscript) {
         add("redscript", "tem .reds → precisa do compilador redscript");
     }
     if files.iter().any(|f| f.kind == FileKind::Lua) {
-        add(DEP_LUA, "mod de CET: o BWMS roda os .lua pela pasta Mods; o que depende de .dll não");
+        add(DEP_LUA, "mod Lua: o BWMS roda os .lua pela pasta Mods; o que depende de .dll não");
     }
     if files.iter().any(|f| f.kind == FileKind::Native) {
         add(DEP_NATIVO, "tem .dll/.dylib → plugin nativo (canal restrito)");
@@ -210,7 +210,7 @@ fn compat_of(class: ModClass, deps: &[Dep]) -> Compat {
     if class == ModClass::PureContent && deps.is_empty() {
         return Compat::Universal; // conteúdo puro, sem framework → o mesmo arquivo
     }
-    Compat::MacAdapter // redscript/TweakXL/ArchiveXL-offline cobrem
+    Compat::MacAdapter // redscript/tweaks/.xl-offline cobrem
 }
 
 /// Magic-bytes Mach-O. Arquivo com menos de 4 bytes não é Mach-O; erro de open/read sobe, porque
@@ -368,10 +368,10 @@ pub fn classify(root: &Path) -> ModReport {
     let (mut notes, avisos_do_xl) = analyze_xl(root, &files);
     // Sem esta nota o .lua some calado de quem lê só as notas.
     // A nota fala só do .lua. O destino do resto não é dela: o gate de risco pode barrar o pacote
-    // inteiro, e o resto do mod (ex.: o settings.json do mod de CET) tem as regras da pasta Mods.
+    // inteiro, e o resto do mod (ex.: o settings.json do mod Lua) tem as regras da pasta Mods.
     let n_lua = files.iter().filter(|f| f.kind == FileKind::Lua).count();
     if n_lua > 0 {
-        notes.push(format!("{n_lua} .lua — mod de CET: o BWMS roda pela pasta Mods; o que depende de .dll não."));
+        notes.push(format!("{n_lua} .lua — mod Lua: o BWMS roda pela pasta Mods; o que depende de .dll não."));
     }
     // `.tweak` aplica desde 2026-09-19 (runtime e gerenciador, pelo mesmo aplicador do YAML); o aviso de "não faz efeito" saiu.
     ModReport { name, class, compat, files, deps, risks, notes, avisos_do_xl }
@@ -408,8 +408,8 @@ mod tests {
         touch(&m.join("mymod.xl"), "factories:\n  - mymod\\f.csv\n");
 
         let r = classify(&m);
-        // detecta a dependência do ArchiveXL, e o detalhe diz quem aplica
-        assert!(r.deps.iter().any(|d| d.name == "ArchiveXL" && d.detail.contains("o BWMS aplica")), "deps: {:?}", r.deps);
+        // detecta a dependência do .xl, e o detalhe diz quem aplica
+        assert!(r.deps.iter().any(|d| d.name == "xl" && d.detail.contains("o BWMS aplica")), "deps: {:?}", r.deps);
         // e a nota: o factories vai ao jogo pelo .json, sem tabela
         assert!(r.notes.iter().any(|n| n.contains("factories") && n.contains("o próprio jogo aplica")), "notes: {:?}", r.notes);
 
@@ -697,16 +697,16 @@ mod tests {
     }
 
     #[test]
-    fn lua_de_cet_sozinho_roda_pela_pasta_mods() {
-        let g = std::env::temp_dir().join(format!("bwms-classify-cet-{}", std::process::id()));
+    fn lua_sozinho_roda_pela_pasta_mods() {
+        let g = std::env::temp_dir().join(format!("bwms-classify-lua-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&g);
-        let m = g.join("ModCet");
+        let m = g.join("ModLua");
         touch(&m.join("bin/x64/plugins/cyber_engine_tweaks/mods/x/init.lua"), "registerForEvent('onInit', function() end)\n");
 
         let r = classify(&m);
         assert_eq!(r.class, ModClass::Script);
         assert_eq!(r.compat, Compat::MacAdapter);
-        assert!(r.deps.iter().any(|d| d.name == "CET" && d.detail.contains("o que depende de .dll não")), "deps: {:?}", r.deps);
+        assert!(r.deps.iter().any(|d| d.name == "lua" && d.detail.contains("o que depende de .dll não")), "deps: {:?}", r.deps);
         assert!(r.risks.is_empty(), "risks: {:?}", r.risks);
         // `plan`/`install` não mostram compat: a nota é o único aviso de que `.dll` fica de fora
         assert_eq!(r.notes, [NOTA_1_LUA], "notes: {:?}", r.notes);
@@ -714,28 +714,28 @@ mod tests {
         let _ = std::fs::remove_dir_all(&g);
     }
 
-    const NOTA_1_LUA: &str = "1 .lua — mod de CET: o BWMS roda pela pasta Mods; o que depende de .dll não.";
+    const NOTA_1_LUA: &str = "1 .lua — mod Lua: o BWMS roda pela pasta Mods; o que depende de .dll não.";
 
     #[test]
     fn nota_de_lua_nao_promete_o_destino_do_resto() {
-        let g = std::env::temp_dir().join(format!("bwms-classify-cet-misto-{}", std::process::id()));
+        let g = std::env::temp_dir().join(format!("bwms-classify-lua-misto-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&g);
-        let cet = "bin/x64/plugins/cyber_engine_tweaks/mods/addon";
+        let pasta_lua = "bin/x64/plugins/cyber_engine_tweaks/mods/addon";
         let reds = "public func Nucleo() -> Int32 { return 1; }\n";
         let m = g.join("ModRedsLua");
         touch(&m.join("r6/scripts/nucleo.reds"), reds);
-        touch(&m.join(format!("{cet}/init.lua")), "return {}\n");
-        touch(&m.join(format!("{cet}/ui.lua")), "return {}\n");
+        touch(&m.join(format!("{pasta_lua}/init.lua")), "return {}\n");
+        touch(&m.join(format!("{pasta_lua}/ui.lua")), "return {}\n");
 
         let r = classify(&m);
         assert_eq!(r.class, ModClass::Script);
         assert_eq!(r.compat, Compat::MacAdapter);
-        assert_eq!(r.notes, ["2 .lua — mod de CET: o BWMS roda pela pasta Mods; o que depende de .dll não."]);
+        assert_eq!(r.notes, ["2 .lua — mod Lua: o BWMS roda pela pasta Mods; o que depende de .dll não."]);
         assert!(r.risks.is_empty(), "risks: {:?}", r.risks);
 
         let m2 = g.join("ModArchiveLua");
         touch(&m2.join("a.archive"), "RDAR");
-        touch(&m2.join(format!("{cet}/init.lua")), "return {}\n");
+        touch(&m2.join(format!("{pasta_lua}/init.lua")), "return {}\n");
         let r2 = classify(&m2);
         assert_eq!(r2.class, ModClass::Mixed);
         assert_eq!(r2.compat, Compat::MacAdapter);
@@ -744,14 +744,14 @@ mod tests {
         // PE junto: o gate barra o pacote inteiro, e a nota não pode dizer que algo segue para o jogo
         let m3 = g.join("ModLuaComDll");
         touch(&m3.join("r6/scripts/a.reds"), reds);
-        touch(&m3.join(format!("{cet}/init.lua")), "return {}\n");
+        touch(&m3.join(format!("{pasta_lua}/init.lua")), "return {}\n");
         touch(&m3.join("red4ext/plugins/m/m.dll"), "MZ");
         let r3 = classify(&m3);
         assert_eq!(r3.class, ModClass::NativeCode);
         assert!(risk_of(&r3, "CÓDIGO NATIVO NÃO-MAC", "red4ext/plugins/m/m.dll").is_some(), "risks: {:?}", r3.risks);
         assert_eq!(r3.notes, [NOTA_1_LUA], "notes: {:?}", r3.notes);
 
-        // .json companheiro do mod de CET também não vai ao jogo: a nota não conta o que se perde além do .lua
+        // .json companheiro do mod Lua também não vai ao jogo: a nota não conta o que se perde além do .lua
         let m4 = g.join("ModLuaComJson");
         touch(&m4.join("r6/scripts/a.reds"), reds);
         touch(&m4.join("mods/m/init.lua"), "return {}\n");

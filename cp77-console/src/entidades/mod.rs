@@ -72,7 +72,7 @@ pub(crate) unsafe fn alvo_novo(classe: &str, registrar: impl FnOnce(usize)) -> *
     obj
 }
 
-/// Codeware `#134`: `EntityTarget.ID(entityID: EntityID) -> ref<EntityTarget>` — fábrica estática; o `EntityID` chega como os 8 B do hash (o mesmo
+/// `EntityTarget.ID(entityID: EntityID) -> ref<EntityTarget>` — fábrica estática; o `EntityID` chega como os 8 B do hash (o mesmo
 /// parâmetro que o `BwmsEntityIDToHash` lê).
 pub(crate) unsafe extern "C" fn tramp_et_id(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
@@ -284,10 +284,9 @@ pub(crate) unsafe extern "C" fn tramp_ebt_add_component(c: *mut c_void, frame: *
     crate::log_dev!("[ebw] EntityBuilderTemplateWrapper.AddComponent em {c:p}: extrator {extrator:#x} -> {ok}");
 }
 
-// Codeware `GameObjectEx::AddTag(CName)` (item #27, agente de pesquisa 2026-08-11) — fonte real
-// (`App/Entity/GameObjectEx.hpp`): `tags.tags.PushBack(tag)`. `tags: red::TagList{DynArray<CName>
-// tags@+0x00}` (0x10 bytes, layout CONFIRMADO no header GERADO da reflection real do jogo,
-// `Scripting/Natives/Generated/red/TagList.hpp`) — como o DynArray fica no offset 0 da TagList,
+// `GameObject.AddTag(CName)` (item #27, agente de pesquisa 2026-08-11): `tags.tags.PushBack(tag)`.
+// `tags: red::TagList{DynArray<CName> tags@+0x00}` (0x10 bytes, layout CONFIRMADO pela reflection
+// real do jogo) — como o DynArray fica no offset 0 da TagList,
 // o ponteiro pra TagList JÁ É o ponteiro pro DynArray, sem indireção extra. Composição pura:
 // `resolve_prop_in_class` acha o offset REAL da property "tags" na RTTI viva (não hardcoded —
 // funciona mesmo se o Mac tiver layout diferente do Windows), `field_ptr` resolve o ponteiro
@@ -313,14 +312,14 @@ pub(crate) unsafe extern "C" fn tramp_gameobject_add_tag(_c: *mut c_void, frame:
     write_bool_ret(out, ok);
 }
 
-// Codeware `TagList.RemoveTag` (item #32, 2026-08-11, candidato barato) — DIVERGÊNCIA DE ESCOPO
-// CONSCIENTE: a fonte real expõe `TagList` como STRUCT VALUE-TYPE próprio (`native struct TagList
+// `TagList.RemoveTag` (item #32, 2026-08-11, candidato barato) — DIVERGÊNCIA DE ESCOPO
+// CONSCIENTE: sem expor `TagList` como STRUCT VALUE-TYPE próprio (`native struct TagList
 // { native let tags: array<CName> }`), risco ALTO já documentado (mesma categoria do #30/CMesh —
 // tipo sem backing script-facing confirmado). Em vez de declarar esse struct, removo a mesma
 // entrada da MESMA property RTTI "tags" que `AddTag`/#27 (já FECHADO) já escreve — 100%
 // composição de primitivas já provadas: `resolve_prop_in_class`+`field_ptr` (idênticos ao
 // AddTag) acham o `DynArray<CName>` real; um scan linear (CName é só um hash u64, comparação
-// trivial) acha o índice; `dynarray_remove_at` (RED4ext.SDK #284, já fechado — `Erase`/
+// trivial) acha o índice; `dynarray_remove_at` (`Erase`/
 // `ShiftEntries`, lógica de memmove pura, ZERO endereço nativo) faz a remoção com shift correto.
 // Zero campo novo, zero struct novo, zero endereço nativo novo.
 pub(crate) unsafe extern "C" fn tramp_gameobject_remove_tag(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -351,7 +350,7 @@ pub(crate) unsafe extern "C" fn tramp_gameobject_remove_tag(_c: *mut c_void, fra
     write_bool_ret(out, ok);
 }
 
-// Codeware `TagList.IsEmpty`/parte de leitura (item #32) — mesma resolução de campo do
+// `TagList.IsEmpty`/parte de leitura (item #32) — mesma resolução de campo do
 // AddTag/RemoveTag, só lê `size` (offset +0x0C do header DynArray, já batalha-testado) sem
 // mutar nada. `IsEmpty()`/`HasTags()` (redscript) compõem a partir daqui.
 pub(crate) unsafe extern "C" fn tramp_gameobject_tag_count(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -369,7 +368,7 @@ pub(crate) unsafe extern "C" fn tramp_gameobject_tag_count(_c: *mut c_void, fram
     write_uint_ret(out, count as u64, 4);
 }
 
-// Codeware `TagList.Clear` (item #32) — mesma resolução de campo, só zera `size` (offset +0x0C).
+// `TagList.Clear` (item #32) — mesma resolução de campo, só zera `size` (offset +0x0C).
 // Não mexe em `entries`/`capacity` (buffer permanece alocado, mesmo idioma "clear sem
 // desalocar" já usado por `dynarray_remove_at`/`Assign` — nunca falha por já estar vazio).
 pub(crate) unsafe extern "C" fn tramp_gameobject_clear_tags(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -389,16 +388,14 @@ pub(crate) unsafe extern "C" fn tramp_gameobject_clear_tags(_c: *mut c_void, fra
     write_bool_ret(out, ok);
 }
 
-// ===== `cw-entity-builder` (2026-07-24) — atalho pragmático: NÃO forja `Red::EntityBuilder`/
+// ===== Construtor de entidade (2026-07-24) — atalho pragmático: NÃO forja `Red::EntityBuilder`/
 // `EntityBuilderWrapper`/`EntityBuilderSpec` (3 classes novas em cima de um objeto com
 // `SharedSpinLock`/`WeakPtr`/`SharedPtr<ObjectPackageExtractor>` — RE+forge bem mais pesados que
-// qualquer classe já forjada no projeto). Em vez disso, GLOBAL nova que reproduz o que o próprio
-// Codeware faz pro caso comum "adicionar 1 componente" — `App/Entity/EntityEx.hpp`:
-// `RTTI_EXPAND_CLASS(Red::Entity, App::EntityEx, {RTTI_METHOD(AddComponent)})` — o Codeware real
-// TAMBÉM não usa EntityBuilder aqui, ele ESTENDE a classe `Entity` já existente. Offset
-// GROUND-TRUTH, sem RE nova: `Red/Entity.hpp:53` (`ComponentsStorage@Entity+0x70`) +
-// `RED4ext.SDK/.../Generated/ent/ComponentsStorage.hpp` (`components: DynArray<Handle<IComponent>>
-// @+0x30`, `RED4EXT_ASSERT_SIZE(ComponentsStorage, 0x40)`) → `Entity + 0x70 + 0x30 = Entity + 0xA0`.
+// qualquer classe já forjada no projeto). Em vez disso, GLOBAL nova pro caso comum "adicionar 1
+// componente", que ESTENDE a classe `Entity` já existente. Offset
+// GROUND-TRUTH, sem RE nova: `ComponentsStorage@Entity+0x70` +
+// `components: DynArray<Handle<IComponent>> @+0x30` (`ComponentsStorage` de 0x40 B, reflection
+// do jogo) → `Entity + 0x70 + 0x30 = Entity + 0xA0`.
 // PushBack via `dynarray_push_handle16` (16B = `{instance,refCount}`, layout `SharedPtrBase<T>`).
 //
 // Exposta como GLOBAL (`BwmsEntityAddComponent`, via `register_global_composed`/
@@ -406,7 +403,7 @@ pub(crate) unsafe extern "C" fn tramp_gameobject_clear_tags(_c: *mut c_void, fra
 // `register_method(reg, "Entity", ...)`: `register_method` só tem precedente comprovado em
 // classes FORJADAS por nós (`CallbackSystem`/`CallbackSystemHandler`/`EntityLifecycleEvent`/...) —
 // nunca numa classe REAL VANILLA já populada pelo motor como `Entity`. A API literal
-// `Entity.AddComponent(component)` (mesma assinatura do Codeware real) é reconstruída no `.reds`
+// `Entity.AddComponent(component)` é reconstruída no `.reds`
 // via `@addMethod(Entity)` — mecanismo do PRÓPRIO COMPILADOR redscript, já usado dezenas de vezes
 // neste projeto em classes vanilla reais (`PlayerPuppet`/`SettingsSelectorControllerBool`/
 // `SingleplayerMenuGameController`/...) — chamando esta global por dentro. Zero risco de
@@ -417,7 +414,7 @@ pub(crate) unsafe extern "C" fn tramp_gameobject_clear_tags(_c: *mut c_void, fra
 // `Raw::Entity::Attach(Entity*, uintptr_t)` — SEM array de componentes separado — sugerindo que
 // `Attach` lê `entity->components` direto. O disparo de `Entity/Assemble` (lib.rs, abaixo) roda
 // ANTES do `Attach` nativo, então um componente empurrado nesse instante DEVERIA ser pego por
-// `Attach` sem lógica extra nossa. Ver investigação completa `cw-entity-builder` (2026-07-24).
+// `Attach` sem lógica extra nossa. Ver investigação completa do construtor de entidade (2026-07-24).
 pub(crate) unsafe extern "C" fn tramp_entity_add_component(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
     let entity = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
@@ -450,7 +447,7 @@ pub(crate) unsafe extern "C" fn tramp_entity_add_component(_c: *mut c_void, fram
     write_bool_ret(out, ok);
 }
 
-// `cw-entity-builder` (2026-08-10, cont.187): `BwmsEntityFindComponentByType(entity, type:
+// Construtor de entidade (2026-08-10, cont.187): `BwmsEntityFindComponentByType(entity, type:
 // CName) -> ref<IComponent>` — leitura da MESMA `DynArray<Handle<IComponent>>` que
 // `BwmsEntityAddComponent` escreve (`Entity+0xA0`, layout já confirmado). Percorre os slots de
 // 16 bytes (`{instance,refCount}`), resolve a classe de cada instância (`class_of`) e sobe a
@@ -463,7 +460,7 @@ pub(crate) unsafe extern "C" fn tramp_entity_find_component_by_type(_c: *mut c_v
     let entity = args.first().map(|(v, _)| *v as *mut c_void).unwrap_or(std::ptr::null_mut());
     let type_hash = args.get(1).map(|(v, _)| *v).unwrap_or(0);
     let mut found: u64 = 0;
-    // `if (auto type = Red::GetClass(aType))` da referência (`EntityEx.hpp:16`): sem classe, nenhum componente casa.
+    // Sem classe, nenhum componente casa.
     let tipo = if rtti::sane(entity) { rtti::Registry::obtain().map_or(std::ptr::null_mut(), |reg| reg.script_class(type_hash)) } else { std::ptr::null_mut() };
     if rtti::sane(tipo) {
         let arr = (entity as *mut u8).add(0xA0) as *const c_void;
@@ -506,12 +503,12 @@ pub(crate) unsafe extern "C" fn tramp_entity_find_component_by_type(_c: *mut c_v
     write_handle_ret(out, found);
 }
 
-/// Codeware `#24` (`Entity.GetComponents() -> array<ref<IComponent>>`) — 2026-08-10 (cont.190).
-/// 3º método do item, e o 2º array-retorno deste projeto (o 1º, TweakXL `#43`/`GetRecords`,
+/// `#24` (`Entity.GetComponents() -> array<ref<IComponent>>`) — 2026-08-10 (cont.190).
+/// 3º método do item, e o 2º array-retorno deste projeto (o 1º, `GetRecords`,
 /// cont.189, achou+corrigiu o crash de teardown de array-local — trailer de allocator-vft
 /// FALTANDO). Aqui o fix é ainda mais direto: a fonte dos dados JÁ É `entity+0xA0`
 /// (`DynArray<Handle<IComponent>>` real do motor) — em vez de emprestar o trailer de OUTRO
-/// array (como o TweakXL precisou), uso o trailer do PRÓPRIO `entity+0xA0` que estou lendo
+/// array (como o `GetRecords` precisou), uso o trailer do PRÓPRIO `entity+0xA0` que estou lendo
 /// (mesma classe de array, garantidamente populado pelo motor de verdade).
 pub(crate) unsafe extern "C" fn tramp_entity_get_components(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     let args = rtti::read_params_consuming(current_native_func(), frame);
@@ -525,7 +522,7 @@ pub(crate) unsafe extern "C" fn tramp_entity_get_components(_c: *mut c_void, fra
             let d_cap = core::ptr::read_unaligned((arr as *const u8).add(0x08) as *const u32);
             let d_size = core::ptr::read_unaligned((arr as *const u8).add(0x0C) as *const u32);
             if !d_entries.is_null() && d_size <= d_cap && d_cap < 10_000 {
-                // trailer do PRÓPRIO array (mesmo mecanismo do fix de #43/TweakXL, mas sem
+                // trailer do PRÓPRIO array (mesmo mecanismo do fix do `GetRecords`, mas sem
                 // precisar de doador externo — a fonte já é o array que estou copiando).
                 let alloc_vft: u64 = if d_cap > 0 {
                     let tr = (d_entries as u64 + d_cap as u64 * 16 + 7) & !7;
@@ -570,12 +567,11 @@ pub(crate) unsafe extern "C" fn tramp_entity_get_components(_c: *mut c_void, fra
     core::ptr::write_unaligned((out as *mut u8).add(12) as *mut u32, n as u32);
 }
 
-/// Codeware `#24` (`Entity.GetTemplatePath() -> ResRef`) — 2026-08-10 (cont.191), 4º/6 métodos.
-/// Achado que destravou: um header vendorizado DIFERENTE do já lido antes (`entEntity.hpp`, não
-/// o `Generated/ent/Entity.hpp` — esse último é opaco/padding) documenta o layout REAL completo
-/// de `Entity`: `templatePath: ResourcePath @ +0x60`. `ResourcePath` (`RED4ext/ResourcePath.hpp`)
+/// `#24` (`Entity.GetTemplatePath() -> ResRef`) — 2026-08-10 (cont.191), 4º/6 métodos.
+/// Achado que destravou: o layout REAL completo
+/// de `Entity`: `templatePath: ResourcePath @ +0x60`. `ResourcePath`
 /// É só um `uint64_t hash` (FNV-1a64, mesma convenção de `resource_path_hash` já usada em todo o
-/// projeto) — `RED4EXT_ASSERT_SIZE(ResourcePath, 0x8)`, confirmado. Zero RE nova: leitura direta
+/// projeto) — tamanho 0x8, confirmado. Zero RE nova: leitura direta
 /// de campo + o MESMO padrão de retorno já usado por `BwmsHashToResRef` (`write_uint_ret`, raw
 /// 8 bytes — `ResRef` em runtime JÁ É só o hash, sem wrapper adicional).
 pub(crate) unsafe extern "C" fn tramp_entity_get_template_path(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -592,11 +588,10 @@ pub(crate) unsafe extern "C" fn tramp_entity_get_template_path(_c: *mut c_void, 
     write_uint_ret(out, hash, 8);
 }
 
-/// Codeware `#24` (`Entity.SetWorldTransform(WorldTransform)`) — 2026-09-11. O Codeware chama
-/// `IPlacedComponent::SetTransform(entity->transformComponent, t)` por endereço. Aqui a peça nativa é só
-/// o ponteiro `transformComponent@0xB0` (SDK `entEntity.hpp:49`); a escrita fica com o native VANILLA
+/// `#24` (`Entity.SetWorldTransform(WorldTransform)`) — 2026-09-11. A peça nativa é só
+/// o ponteiro `transformComponent@0xB0`; a escrita fica com o native VANILLA
 /// `IPlacedComponent.SetLocalTransform(pos, rot)` no `.reds` — no componente raiz, local = mundo. O
-/// layout do `IPlacedComponent` no Mac bate com o SDK (registro RTTI `0x101953a68`:
+/// layout do `IPlacedComponent` no Mac bate com o do Windows (registro RTTI `0x101953a68`:
 /// `parentTransform@0x90`, `localTransform@0xc0`). Só devolve o objeto se a classe dele descender de
 /// `entIPlacedComponent`; o handle sai por `make_handle` (acha o bloco de refcount que já existe).
 pub(crate) unsafe extern "C" fn tramp_entity_get_transform_component(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
@@ -791,12 +786,8 @@ pub(crate) unsafe extern "C" fn tramp_ses_get_tag_by_index(_c: *mut c_void, fram
     write_uint_ret(out, tag, 8);
 }
 
-// ===== Codeware `#75` — StaticEntitySystem pelo EntitySpawner do motor (2026-09-18) =====================================================
-// RE em `proofs/20260918-codeware-75-re-offline.log`. Spawn por template: `EntitySpawner::SpawnEntity` (spawner em `RuntimeSystemEntity+0x58`) com
-// pedido de 0xF0 B e FlexCallback próprio; no callback (update "Entities/UpdateState", tick posterior) a entidade sai do token pro BWMS e,
-// se não for `GameObject`, entra no `RuntimeEntityRegistry`. Attach/Detach pelo `RuntimeSystemEntity` (enfileiram; o status em `+0x156` muda
-// depois). Despawn: soltar o token (o spawner aborta sem callback) e `Entity::Dispose`; o handle fica até o status 7 (Uninitialized) e aí sai.
-// Id transiente do `DynamicEntityIDSystem`, como no `#73`: nada vai pro save.
+// ===== `#75` — StaticEntitySystem pelo EntitySpawner do motor (2026-09-18) =====================================================
+// RE em `proofs/20260918-*-75-re-offline.log`. Id transiente do `DynamicEntityIDSystem`: nada vai pro save.
 pub(crate) const RSE_VTBL_VM: u64 = 0x1_078d_2a40;
 
 pub(crate) const SPAWNER_SPAWN_VM: u64 = 0x1_019f_2f3c;
@@ -857,186 +848,173 @@ pub(crate) unsafe fn statent_eh_gameobject(ent: *mut c_void) -> bool {
     classe_deriva_de_nome(rtti::class_of(ent), crate::cname::cname("gameObject"))
 }
 
-/// Invoke do FlexCallback do spawn, com o `SharedPtr<Token>` da entrada do spawner. Com entidade, sem falha e sem aborto: o handle sai do token
-/// pro estado (o destrutor do token não descarta mais) e a entidade que não é `GameObject` entra no registry; senão o estado sai. Solta a
-/// referência do BWMS ao token (a do spawner fica e é a última).
+/// Invoke do callback do spawn, com o `SharedPtr` do token da entrada do spawner.
 pub(crate) unsafe extern "C" fn statent_cb_invoke(buffer: *mut u8, token_sp: *mut [u64; 2]) {
-    let id = (buffer as *const u64).read_unaligned();
-    let token = if token_sp.is_null() { 0 } else { (*token_sp)[0] };
+    if buffer.is_null() || token_sp.is_null() {
+        return;
+    }
+    let token = (*token_sp)[0];
     if token == 0 {
         return;
     }
-    let t = token as *mut u8;
-    let (ent, rc) = ((t.add(0x10) as *const u64).read_unaligned(), (t.add(0x18) as *const u64).read_unaligned());
-    let (falhou, abortou) = (*t.add(0x21) != 0, *t.add(0x22) != 0);
-    let Ok(mut m) = STATENT_ESTADOS.lock() else {
-        return;
-    };
+    let id = (buffer as *const u64).read_unaligned();
+    let Ok(mut estados) = STATENT_ESTADOS.lock() else { return };
     #[cfg(feature = "devtools")]
-    statent_trilhar(id, "callback", i64::from(ent != 0) + 2 * i64::from(falhou) + 4 * i64::from(abortou));
-    let Some(e) = m.get_mut(&id) else {
-        return;
-    };
-    let token_nosso = std::mem::take(&mut e.token);
-    if ent != 0 && !falhou && !abortou {
+    statent_trilhar(id, "callback", token as i64);
+    let Some(e) = estados.get_mut(&id) else { return };
+    let mut guardado = std::mem::take(&mut e.token);
+    let t = token as *mut u8;
+    let ent = (t.add(0x10) as *const [u64; 2]).read_unaligned();
+    let (falhou, abortou) = (t.add(0x21).read() != 0, t.add(0x22).read() != 0);
+    if ent[0] != 0 && !falhou && !abortou {
+        // O handle sai do token: o destrutor dele não descarta mais a entidade, que passa a ser do estado.
         (t.add(0x10) as *mut [u64; 2]).write_unaligned([0, 0]);
-        e.ent = [ent, rc];
-        if !statent_eh_gameobject(ent as *mut c_void) {
-            let registrar: extern "C" fn(usize, *mut c_void) -> u32 = std::mem::transmute(crate::rebase(REGISTRY_REGISTER_VM));
-            e.registrada = registrar(e.registry, ent as *mut c_void) & 0xff != 0;
+        e.ent = ent;
+        if !statent_eh_gameobject(ent[0] as *mut c_void) {
+            let registrar: unsafe extern "C" fn(usize, u64) -> u64 = std::mem::transmute(crate::rebase(REGISTRY_REGISTER_VM));
+            e.registrada = registrar(e.registry, ent[0]) & 0xff != 0;
         }
-        #[cfg(feature = "devtools")]
-        statent_trilhar(id, "entidade", i64::from(e.registrada));
     } else {
-        m.remove(&id);
-        drop(m);
+        estados.remove(&id);
+        drop(estados);
         statent_esquecer_tags(id);
-        dynent_soltar_token(token_nosso);
-        return;
     }
-    drop(m);
-    dynent_soltar_token(token_nosso);
+    dynent_soltar_token(std::mem::take(&mut guardado));
 }
 
-/// `SpawnEntity`: id transiente, pedido ao spawner e o token guardado (segurar o token é o que mantém o spawn vivo). 0 sem sistemas, sem
-/// caminho ou com o spawner recusando.
-pub(crate) unsafe fn statent_spawnar(spec: &StaticEntitySpecFields) -> u64 {
-    if spec.template_path == 0 {
-        return 0;
-    }
-    let (Some((rse, registry, spawner)), ids) = (statent_sistemas(), sistema_da_sessao("gameDynamicEntityIDSystem", Some(IDSYS_VTBL_VM))) else {
-        crate::log_dev!("[statent] SpawnEntity: sistemas do motor não resolveram");
-        return 0;
-    };
-    if ids.is_null() {
-        return 0;
-    }
-    let proximo: extern "C" fn(*mut c_void) -> u64 = std::mem::transmute(crate::rebase(ID_NEXT_TRANSIENT_VM));
-    let id = proximo(ids) & 0xffff_ffff;
-    if id == 0 {
-        return 0;
-    }
+/// `EntitySpawnerRequest` do spec, com o callback do id.
+fn statent_pedido(id: u64, spec: &StaticEntitySpecFields) -> PedidoSpawner {
     let mut p = PedidoSpawner([0; 0xF0]);
     p.put(0x00, spec.template_path);
     for k in 0..3 {
         p.put(0x10 + 4 * k, (spec.position[k] * FIXEDPOINT_ESCALA) as i32);
     }
-    let o = if spec.orientation == [0.0; 4] { [0.0f32, 0.0, 0.0, 1.0] } else { spec.orientation };
-    p.put(0x20, o);
+    let orientacao = if spec.orientation.iter().all(|v| *v == 0.0) { [0.0, 0.0, 0.0, 1.0] } else { spec.orientation };
+    p.put(0x20, orientacao);
     p.put(0x30, id);
     p.put(0x38, spec.appearance_name);
     p.put(0x48, id);
-    p.put(0x60, &STATENT_CALLBACK as *const TabelaCallback);
-    p.put(0x78, u8::from(!spec.attached));
+    p.put(0x60, &STATENT_CALLBACK as *const TabelaCallback as u64);
+    p.put(0x78, !spec.attached as u8);
     p.put(0xE1, 1u8);
+    p
+}
+
+/// `SpawnEntity`; devolve o id ou 0.
+pub(crate) unsafe fn statent_spawnar(spec: &StaticEntitySpecFields) -> u64 {
+    if spec.template_path == 0 {
+        return 0;
+    }
+    let ids = sistema_da_sessao("gameDynamicEntityIDSystem", Some(IDSYS_VTBL_VM));
+    let Some((rse, registry, spawner)) = statent_sistemas().filter(|_| !ids.is_null()) else {
+        crate::log_dev!("[statent] SpawnEntity sem sistemas do motor");
+        return 0;
+    };
+    let proximo: unsafe extern "C" fn(*mut c_void) -> u64 = std::mem::transmute(crate::rebase(ID_NEXT_TRANSIENT_VM));
+    let id = proximo(ids) & 0xffff_ffff;
+    if id == 0 {
+        return 0;
+    }
+    let pedido = statent_pedido(id, spec);
     // O estado entra antes do pedido: o callback pode vir de outra thread logo depois.
-    if let Ok(mut m) = STATENT_ESTADOS.lock() {
-        m.insert(id, EntidadeEstatica { rse, registry, token: [0; 2], ent: [0; 2], registrada: false, descartada: false });
-    }
-    let mut token = [0u64; 2];
-    core::arch::asm!(
-        "blr {f}",
-        f = in(reg) crate::rebase(SPAWNER_SPAWN_VM),
-        in("x0") spawner,
-        in("x1") p.0.as_ptr(),
-        in("x8") token.as_mut_ptr(),
-        clobber_abi("C"),
-    );
-    #[cfg(feature = "devtools")]
-    statent_trilhar(id, "pedido", token[0] as i64);
-    let Ok(mut m) = STATENT_ESTADOS.lock() else {
-        return 0;
-    };
-    if token[0] == 0 {
-        m.remove(&id);
-        return 0;
-    }
-    // Callback ainda não veio: o token fica com o BWMS. Se já rodou (ou o estado saiu), a referência que o SpawnEntity devolveu é solta aqui.
-    let soltar = match m.get_mut(&id) {
-        Some(e) if e.ent[0] == 0 => {
-            e.token = token;
-            false
+    match STATENT_ESTADOS.lock() {
+        Ok(mut m) => {
+            m.insert(id, EntidadeEstatica { rse, registry, token: [0; 2], ent: [0; 2], registrada: false, descartada: false });
         }
-        _ => true,
-    };
-    drop(m);
-    if soltar {
-        dynent_soltar_token(token);
+        Err(_) => return 0,
     }
-    // Tags só pra quem segue vivo (a falha no callback pode ter vindo antes daqui).
-    if !statent_gerenciada(id) {
+    let mut sp = [0u64; 2];
+    crate::jogo::chamada::sret_chamar(crate::rebase(SPAWNER_SPAWN_VM), [spawner as u64, &pedido as *const PedidoSpawner as u64, 0, 0], sp.as_mut_ptr() as *mut c_void);
+    #[cfg(feature = "devtools")]
+    statent_trilhar(id, "pedido", sp[0] as i64);
+    if sp[0] == 0 {
+        if let Ok(mut m) = STATENT_ESTADOS.lock() {
+            m.remove(&id);
+        }
+        return 0;
+    }
+    let (ficou, gerenciada) = match STATENT_ESTADOS.lock() {
+        Ok(mut m) => match m.get_mut(&id) {
+            Some(e) if e.ent[0] == 0 => {
+                e.token = sp;
+                (true, true)
+            }
+            Some(_) => (false, true),
+            None => (false, false),
+        },
+        Err(_) => (false, false),
+    };
+    if !ficou {
+        dynent_soltar_token(sp);
+    }
+    if !gerenciada {
         return id;
     }
     if let (Ok(mut porid), Ok(mut portag)) = (statent_tags().lock(), statent_by_tag().lock()) {
-        let s = porid.entry(id).or_default();
-        for tag in &spec.tags {
-            s.insert(*tag);
-            portag.entry(*tag).or_default().insert(id);
+        for &tag in &spec.tags {
+            porid.entry(id).or_default().insert(tag);
+            portag.entry(tag).or_default().insert(id);
         }
     }
     id
 }
 
-/// `DespawnEntity`: solta o token (o spawner aborta o spawn sem callback) e dá `Dispose` na entidade; o handle fica até o status 7.
+/// `DespawnEntity`.
 pub(crate) unsafe fn statent_despawnar(id: u64) -> bool {
-    let Ok(mut m) = STATENT_ESTADOS.lock() else {
-        return false;
-    };
-    let Some(e) = m.get_mut(&id).filter(|e| !e.descartada) else {
-        return false;
-    };
+    let Ok(mut estados) = STATENT_ESTADOS.lock() else { return false };
+    let Some(e) = estados.get_mut(&id).filter(|e| !e.descartada) else { return false };
     let token = std::mem::take(&mut e.token);
-    let tinha_ent = e.ent[0] != 0;
-    if tinha_ent {
-        let descartar: extern "C" fn(*mut c_void) = std::mem::transmute(crate::rebase(ENTITY_DISPOSE_VM));
-        descartar(e.ent[0] as *mut c_void);
+    let ent = e.ent[0];
+    if ent != 0 {
+        // O estado fica até o status 7: o `statent_tick` solta o handle e tira do registry.
         e.descartada = true;
-        #[cfg(feature = "devtools")]
-        statent_trilhar(id, "dispose", 1);
     } else {
-        m.remove(&id);
+        estados.remove(&id);
     }
-    drop(m);
+    drop(estados);
+    if ent != 0 {
+        let descartar: unsafe extern "C" fn(u64) = std::mem::transmute(crate::rebase(ENTITY_DISPOSE_VM));
+        descartar(ent);
+    } else {
+        statent_esquecer_tags(id);
+    }
     if token[0] != 0 {
         dynent_soltar_token(token);
     }
-    if !tinha_ent {
-        statent_esquecer_tags(id);
-    }
-    token[0] != 0 || tinha_ent
+    token[0] != 0 || ent != 0
 }
 
-/// Status da entidade gerenciada no mundo (não descartada), ou nada.
+/// `(RuntimeSystemEntity, handle da entidade, status)` da entidade gerenciada no mundo.
 pub(crate) fn statent_status(id: u64) -> Option<(usize, [u64; 2], u8)> {
-    STATENT_ESTADOS.lock().ok().and_then(|m| {
-        m.get(&id).filter(|e| e.ent[0] != 0 && !e.descartada).map(|e| (e.rse, e.ent, unsafe { *((e.ent[0] as *const u8).add(ENT_STATUS_OFF)) }))
-    })
+    let estados = STATENT_ESTADOS.lock().ok()?;
+    let e = estados.get(&id).filter(|e| e.ent[0] != 0 && !e.descartada)?;
+    let status = (e.ent[0] as usize).checked_add(ENT_STATUS_OFF)? as *const u8;
+    // SAFETY: o handle do estado segura a entidade; o `is_readable` cobre um estado corrompido.
+    unsafe { crate::memoria::is_readable(status as *const c_void, 1).then(|| (e.rse, e.ent, status.read())) }
 }
 
-/// `AttachEntity`/`DetachEntity`: `false` sem entidade ou já no estado pedido (ou indo pra ele).
+/// `AttachEntity`/`DetachEntity`.
 pub(crate) unsafe fn statent_ligar(id: u64, ligar: bool) -> bool {
-    let Some((rse, ent, status)) = statent_status(id) else {
-        return false;
-    };
+    let Some((rse, ent, status)) = statent_status(id) else { return false };
     if ligar {
         if status == ENT_ATTACHING || status == ENT_ATTACHED {
             return false;
         }
-        // RuntimeSystemEntityAttachRequest (0x40 B): o Handle emprestado em +0x00 (o motor copia com +1), o resto zerado.
+        // O motor copia o handle do pedido com +1: o do estado só é emprestado.
         let mut pedido = [0u64; 8];
         pedido[0] = ent[0];
         pedido[1] = ent[1];
-        let anexar: extern "C" fn(usize, *const u64) = std::mem::transmute(crate::rebase(RSE_ATTACH_VM));
+        let anexar: unsafe extern "C" fn(usize, *const u64) = std::mem::transmute(crate::rebase(RSE_ATTACH_VM));
         anexar(rse, pedido.as_ptr());
     } else {
         if status == ENT_DETACHED || status == ENT_DETACHING {
             return false;
         }
-        let soltar: extern "C" fn(usize, *const [u64; 2]) = std::mem::transmute(crate::rebase(RSE_DETACH_VM));
+        let soltar: unsafe extern "C" fn(usize, *const [u64; 2]) = std::mem::transmute(crate::rebase(RSE_DETACH_VM));
         soltar(rse, &ent);
     }
     #[cfg(feature = "devtools")]
-    statent_trilhar(id, if ligar { "attach" } else { "detach" }, i64::from(status));
+    statent_trilhar(id, if ligar { "attach" } else { "detach" }, status as i64);
     true
 }
 
@@ -1147,14 +1125,13 @@ pub(crate) unsafe extern "C" fn tramp_ses_detach_tagged(_c: *mut c_void, frame: 
     }
 }
 
-// ===== Codeware `#76` (`StaticEntitySpec`) — implementação NOVA, 2026-08-15 (rodada 9) ==============
+// ===== `#76` (`StaticEntitySpec`) — implementação NOVA, 2026-08-15 (rodada 9) ==============
 //
 // Companion struct do `#75`/`StaticEntitySystem` (acima, FECHADO nesta mesma sessão) — catalogado
 // como "companion struct do #75, nunca tocado, 0%" (confirmado por grep triplo antes de codar: zero
 // ocorrência de "StaticEntitySpec" em `register.rs`/`cp77-console/src/`/`blackwall-mods-dev/*.reds`/
-// `bwms-core/`). Fonte real lida por completo agora pela 1ª vez: `enablers/Codeware/src/App/World/
-// StaticEntitySpec.hpp` (33 linhas) — struct de dado PURO (`struct StaticEntitySpec : Red::
-// IScriptable`), ZERO método/native func, só 6 `RTTI_PROPERTY` (não `RTTI_PERSISTENT` — ao contrário
+// `bwms-core/`). Struct de dado PURO (`StaticEntitySpec extends
+// IScriptable`), ZERO método/native func, só 6 propriedades (não persistentes — ao contrário
 // do irmão `DynamicEntitySpec`/`#74`, este NÃO é salvo no save): `templatePath: RaRef<>`,
 // `appearanceName: CName`, `position: Vector4`, `orientation: Quaternion`, `tags: DynArray<CName>`,
 // `attached: bool`.
@@ -1163,8 +1140,7 @@ pub(crate) unsafe extern "C" fn tramp_ses_detach_tagged(_c: *mut c_void, frame: 
 // — `extends IScriptable` DIRETO (mesmo parent), INSTANCIÁVEL (`register_type_instantiable_with_
 // parent`), estado por-instância guardado num registry Rust keyed por ponteiro `this` (`c as usize`),
 // mesmo idioma de `HANDLER_STATES`/`tramp_csh_set_run_mode`/`tramp_csh_add_target`. Zero endereço
-// nativo, zero campo cru lido de memória do motor — é 100% dado NOSSO, construído do zero (não há
-// C++ real que popule isto no Mac; o consumidor é o `SpawnEntity` do `#75`, que passa estes campos ao
+// nativo, zero campo cru lido de memória do motor — é 100% dado NOSSO, construído do zero (o consumidor é o `SpawnEntity` do `#75`, que passa estes campos ao
 // `EntitySpawner` do motor em `statent_spawnar`).
 //
 // `templatePath` tipado como `ResRef` (não `RaRef<T>`/`ResourceAsyncReference`, tipo nunca
@@ -1487,7 +1463,7 @@ pub(crate) unsafe fn categoria_e_record(entidade: *mut c_void) -> (bwms_primitiv
     }
 }
 
-/// Codeware `#130`: eventos do ciclo de vida da entidade que os hooks despacham, na ordem dos bits de [`ENTIDADE_EVENTOS_ARMADOS`].
+/// Eventos do ciclo de vida da entidade que os hooks despacham, na ordem dos bits de [`ENTIDADE_EVENTOS_ARMADOS`].
 pub const ENTIDADE_EVENTOS: [&str; 6] = ["Entity/Initialize", "Entity/Reassemble", "Entity/Attach", "Entity/AfterAttach", "Entity/Detach", "Entity/Uninitialize"];
 
 /// Bit `k` ligado = alguém ouve `ENTIDADE_EVENTOS[k]`. Os hooks rodam milhares de vezes por minuto e quase sempre fora da thread do jogo, então só leem
@@ -1499,7 +1475,7 @@ pub(crate) fn evento_de_entidade_armado(k: usize) -> bool {
     ENTIDADE_EVENTOS_ARMADOS.load(Ordering::Relaxed) & (1 << k) != 0
 }
 
-/// `StaticEntityTarget.Tags(tags: array<CName>) -> ref<StaticEntityTarget>` — Codeware `#133`, 2026-09-14: a mesma fábrica plural do `DynamicEntityTarget`.
+/// `StaticEntityTarget.Tags(tags: array<CName>) -> ref<StaticEntityTarget>` — 2026-09-14: a mesma fábrica plural do `DynamicEntityTarget`.
 pub(crate) unsafe extern "C" fn tramp_stt_tags(_c: *mut c_void, frame: *mut c_void, out: *mut c_void, _rt: i64) {
     alvo_por_tags(frame, out, "StaticEntityTarget", &STATICENTITYTARGET_STATES);
 }
@@ -1514,8 +1490,8 @@ pub(crate) unsafe fn alvo_por_tags(frame: *mut c_void, out: *mut c_void, classe:
     rtti::make_handle(out, obj);
 }
 
-/// A linha `(alvo, tags)` do `Tags` na tabela `estados`, a mesma do `Tag`. Array vazio também grava: `Matches` com `tags` vazio casa todo evento
-/// (`DynamicEntityTarget.hpp:18-19`, `StaticEntityTarget.hpp:18-19`), e o alvo sem linha sairia dos alvos suportados no despacho.
+/// A linha `(alvo, tags)` do `Tags` na tabela `estados`, a mesma do `Tag`. Array vazio também grava: `Matches` com `tags` vazio casa todo evento,
+/// e o alvo sem linha sairia dos alvos suportados no despacho.
 pub(crate) fn gravar_alvo_por_tags(estados: &Mutex<Vec<(usize, Box<[u64]>)>>, alvo: usize, tags: Vec<u64>) {
     if let Ok(mut s) = estados.lock() {
         s.push((alvo, tags.into_boxed_slice()));
@@ -1562,7 +1538,7 @@ pub unsafe fn register_staticentitytarget(reg: &Registry) -> String {
     format!("[reg] StaticEntityTarget: classe=OK (INSTANCIÁVEL, parent=CallbackSystemTarget real) Tag={m1} Tags={m2}")
 }
 
-/// Codeware `#134` (`EntityTarget` dispatch-time filtering, 2026-08-12): TAG de qual das 4
+/// `EntityTarget` (dispatch-time filtering, 2026-08-12): TAG de qual das 4
 /// factories construiu um `EntityTarget` — `Type`/`RecordID`/`Template`/`Appearance` compartilhavam
 /// `ENTITYTARGET_STATES` como um `u64` cru sem distinguir a PROVENIÊNCIA (achado documentado no
 /// item `#6` do catálogo: "o critério de filtro é oportunístico/permissivo, não filtra fundo
@@ -1615,27 +1591,25 @@ pub unsafe fn register_entitytarget(reg: &Registry) -> String {
     )
 }
 
-/// `EntityLifecycleEvent extends CallbackSystemEvent` — `cw-controller-entity` (2026-07-18,
-/// sessão `handle-ctor-re`, 7ª rodada). Fonte real: `public native class EntityLifecycleEvent
+/// `EntityLifecycleEvent extends CallbackSystemEvent` — controller de entidade (2026-07-18,
+/// sessão `handle-ctor-re`, 7ª rodada). Declaração: `public native class EntityLifecycleEvent
 /// extends CallbackSystemEvent { public native func GetEntity() -> wref<Entity> }`. É o evento
-/// REAL usado por `EntityAttachHook`/`EntityAssembleHook` (`enablers/Codeware/src/App/Callback/
-/// Controllers/EntityAttachHook.hpp`: `EventName = Red::CName("Entity/Attach")`, dispatch via
-/// `DispatchNativeEvent<EntityLifecycleEvent>`) — RE confirmou que "Entity/Attach" carrega
+/// REAL de "Entity/Attach" e "Entity/Assemble" — RE confirmou que "Entity/Attach" carrega
 /// `EntityLifecycleEvent`, NÃO `EntityBuilderEvent` (esse último é específico de "Entity/Extract",
 /// que embrulha um `Red::EntityBuilder` inteiro via `EntityBuilderWrapper`: `register_entitybuilderevent`/
 /// `register_entitybuilderwrapper`, abaixo).
 ///
 /// `GetEntity()` devolve `wref<Entity>`, como o bundle declara (`ponte-callbacksystem.reds`), montado
 /// por `rtti::make_weak_handle`: o handle `{ptr,0}` de `write_handle_ret` vale pra `ref<T>`, mas num
-/// `wref` o `IsDefined()` lê `false` (`proofs/2026-08-11-red4ext-387-weakhandle-PROVADO.log`).
+/// `wref` o `IsDefined()` lê `false` (prova de 2026-08-11 do weak handle).
 pub(crate) static ENTITYLIFECYCLE_STATES: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
 
 pub(crate) unsafe extern "C" fn tramp_ele_get_entity(c: *mut c_void, _f: *mut c_void, out: *mut c_void, _rt: i64) {
     // `EntityComponentEvent` e `VehicleLightControlEvent` usam este `GetEntity` herdado: a dona do componente e o veículo.
     let entity = entidade_do_evento(c as usize);
-    // RED4ext.SDK #387 (2026-08-11): wref<Entity> REAL via rtti::make_weak_handle — substitui o
+    // 2026-08-11: wref<Entity> REAL via rtti::make_weak_handle — substitui o
     // handle "raw" write_handle_ret{ptr,0} que fazia IsDefined() falhar pra wref (revertido em
-    // 2026-07-18). Ver nota completa acima e proofs/2026-08-11-red4ext-387-weakhandle-PROVADO.log.
+    // 2026-07-18). Ver nota completa acima e a prova de 2026-08-11 do weak handle.
     rtti::make_weak_handle(out, entity as *mut c_void);
 }
 
@@ -1682,8 +1656,8 @@ pub unsafe fn make_entitylifecycleevent_arg(entity_ptr: *mut c_void) -> Option<r
     Some(rtti::Arg::Handle(inst, refc))
 }
 
-/// Codeware `#130`: dispara `evento` com um `EntityLifecycleEvent` de `entity` e solta o evento na hora — a entrada do `GetEntity` sai do estado e o
-/// handle forte criado aqui é solto como no C#120 3b-2 (um ouvinte que guardou o evento continua com a própria referência, e o `GetEntity` dele passa a
+/// Dispara `evento` com um `EntityLifecycleEvent` de `entity` e solta o evento na hora — a entrada do `GetEntity` sai do estado e o
+/// handle forte criado aqui é solto como no #120 3b-2 (um ouvinte que guardou o evento continua com a própria referência, e o `GetEntity` dele passa a
 /// devolver vazio). Quem chama são hooks do ciclo de vida da entidade, milhares de vezes por minuto e quase sempre fora da thread do jogo (boot 164):
 /// sem soltar, o estado crescia um item por evento.
 pub unsafe fn disparar_evento_de_entidade(evento: &str, entity: *mut c_void) -> usize {
@@ -1724,7 +1698,7 @@ pub(crate) unsafe extern "C" fn tramp_ebe_get_entity_builder(c: *mut c_void, _f:
     }
 }
 
-/// Codeware `#130` (`Entity/Extract`): dispara o evento com um `EntityBuilderWrapper` do builder `builder` (já travado por quem chama) e solta tudo depois
+/// `Entity/Extract`: dispara o evento com um `EntityBuilderWrapper` do builder `builder` (já travado por quem chama) e solta tudo depois
 /// — os wrappers desse builder saem do estado, então um ouvinte que guardou algum lê vazio depois do despacho.
 pub unsafe fn disparar_extract(builder: u64, rc: u64) -> usize {
     let Some(reg) = rtti::Registry::obtain() else { return 0 };
@@ -1776,7 +1750,7 @@ pub unsafe fn register_entitybuilderwrapper(reg: &Registry) -> String {
     let m4 = register_method(reg, "EntityBuilderWrapper", proto, "HasEntity", "HasEntity", tramp_ebw_has_entity, false);
     let m5 = register_method(reg, "EntityBuilderWrapper", proto, "HasAppearance", "HasAppearance", tramp_ebw_has_appearance, false);
     let m6 = register_method(reg, "EntityBuilderWrapper", proto, "HasCustomAppearances", "HasCustomAppearances", tramp_ebw_has_custom_appearances, false);
-    // Codeware `#25`: os outros 6 métodos sobre o builder vivo (formas próprias onde o corpus vanilla não declara o tipo de retorno).
+    // Os outros 6 métodos sobre o builder vivo (formas próprias onde o corpus vanilla não declara o tipo de retorno).
     let m7 = register_method(reg, "EntityBuilderWrapper", proto, "GetTemplatePath", "GetTemplatePath", tramp_ebw_get_template_path, false);
     let m8 = register_method(reg, "EntityBuilderWrapper", proto, "GetEntityType", "GetEntityType", tramp_ebw_get_entity_type, false);
     let m9 = register_method(reg, "EntityBuilderWrapper", proto, "HasEntityParams", "HasEntityParams", tramp_ebw_has_entity_params, false);
@@ -1788,7 +1762,7 @@ pub unsafe fn register_entitybuilderwrapper(reg: &Registry) -> String {
     )
 }
 
-/// Codeware `#25`: `EntityBuilderTemplateWrapper` (pai `IScriptable`), sobre o template e os resultados do extrator do builder.
+/// `EntityBuilderTemplateWrapper` (pai `IScriptable`), sobre o template e os resultados do extrator do builder.
 pub unsafe fn register_ebw_template(reg: &Registry) -> String {
     let iscriptable = reg.class_by_name("IScriptable");
     if !rtti::sane(iscriptable) || register_type_instantiable_with_parent(reg, "EntityBuilderTemplateWrapper", "gameuiInGameMenuGameController", iscriptable).is_null() {
@@ -1808,7 +1782,7 @@ pub unsafe fn register_ebw_template(reg: &Registry) -> String {
     format!("[reg] EntityBuilderTemplateWrapper: classe=OK métodos {r:?}")
 }
 
-/// Codeware `#8`: `EntityBuilderEvent` (pai `CallbackSystemEvent`) com `GetEntityBuilder() -> ref<EntityBuilderWrapper>`.
+/// `EntityBuilderEvent` (pai `CallbackSystemEvent`) com `GetEntityBuilder() -> ref<EntityBuilderWrapper>`.
 pub unsafe fn register_entitybuilderevent(reg: &Registry) -> String {
     let cse = reg.class_by_name("CallbackSystemEvent");
     if !rtti::sane(cse) || register_type_instantiable_with_parent(reg, "EntityBuilderEvent", "gameuiInGameMenuGameController", cse).is_null() {
@@ -1872,36 +1846,40 @@ pub(crate) const RESOLVE_RECORD_ID_VM: u64 = 0x1020a096c;
 /// Setter do record do puppet (`0x1020a0954`): grava em `+0x25C` só id válido.
 pub(crate) const PUPPET_GRAVA_RECORD_VM: u64 = 0x1020a0954;
 
-/// Codeware `#130`: como o `OnInitialize` da referência, resolve antes do `Initialize` o record de puppet e veículo pelo `populationParam` do request
-/// (`+0x90`, `Handle<PopulationSpawnParameter>`). O motor só resolve nos virtuais `+0x148`/`+0x150`, depois do `RequestComponents` onde o
-/// `Entity/Initialize` sai — sem isto um `EntityTarget.RecordID` não casa nesse evento.
+/// Antes do `Initialize`: o record de puppet e veículo pelo `populationParam` do request (`+0x90`, `Handle<PopulationSpawnParameter>`). O motor só
+/// resolve nos virtuais `+0x148`/`+0x150`, depois do `RequestComponents` onde o `Entity/Initialize` sai.
 pub(crate) unsafe fn pre_resolver_record(entidade: *mut c_void, request: *mut c_void) {
     if entidade.is_null() || request.is_null() || !crate::memoria::is_readable(request as *const c_void, 0xa0) {
         return;
     }
-    let param = read_u64_field(request, 0x90).unwrap_or(0) as *mut c_void;
     let Some(reg) = rtti::Registry::obtain() else { return };
     let cls = rtti::class_of(entidade);
-    let herda = |nomes: &[&str]| {
-        nomes.iter().any(|n| {
-            let c = reg.class_by_name(n);
-            rtti::sane(c) && class_is_kind_of(cls, c)
-        })
+    if cls.is_null() {
+        return;
+    }
+    let herda = |nome: &str| {
+        let c = reg.class_by_name(nome);
+        rtti::sane(c) && class_is_kind_of(cls, c)
     };
-    let resolver: unsafe extern "C" fn(*mut c_void, *mut c_void) -> u64 = std::mem::transmute(crate::rebase(RESOLVE_RECORD_ID_VM));
-    let valido = |id: u64| id as u32 != 0 && (id >> 32) & 0xff != 0;
-    if herda(&["gamePuppetBase"]) {
-        let id = resolver(entidade, param);
-        if valido(id) {
-            let grava: unsafe extern "C" fn(*mut c_void, u64) = std::mem::transmute(crate::rebase(PUPPET_GRAVA_RECORD_VM));
-            grava(entidade, id);
-            #[cfg(feature = "devtools")]
-            RECORDS_PRE_RESOLVIDOS[0].fetch_add(1, Ordering::Relaxed);
-        }
-    } else if herda(&["vehicleBaseObject", "VehicleObject"]) {
-        let id = resolver(entidade, param);
-        if valido(id) && crate::memoria::is_readable((entidade as *const u8).add(0x658) as *const c_void, 8) {
-            ((entidade as *mut u8).add(0x658) as *mut u64).write_unaligned(id);
+    let puppet = herda("gamePuppetBase");
+    if !puppet && !herda("vehicleBaseObject") && !herda("VehicleObject") {
+        return;
+    }
+    let param = ((request as *const u8).add(0x90) as *const u64).read_unaligned();
+    let resolver: unsafe extern "C" fn(*mut c_void, u64) -> u64 = std::mem::transmute(crate::rebase(RESOLVE_RECORD_ID_VM));
+    let id = resolver(entidade, param);
+    if id & 0xffff_ffff == 0 || (id >> 32) & 0xff == 0 {
+        return;
+    }
+    if puppet {
+        let gravar: unsafe extern "C" fn(*mut c_void, u64) = std::mem::transmute(crate::rebase(PUPPET_GRAVA_RECORD_VM));
+        gravar(entidade, id);
+        #[cfg(feature = "devtools")]
+        RECORDS_PRE_RESOLVIDOS[0].fetch_add(1, Ordering::Relaxed);
+    } else {
+        let campo = (entidade as *mut u8).add(0x658);
+        if crate::memoria::is_readable(campo as *const c_void, 8) {
+            (campo as *mut u64).write_unaligned(id);
             #[cfg(feature = "devtools")]
             RECORDS_PRE_RESOLVIDOS[1].fetch_add(1, Ordering::Relaxed);
         }
@@ -1935,7 +1913,7 @@ pub(crate) unsafe fn register_entity_builder_natives(reg: &Registry, proto: *mut
     };
     crate::log_dev!("[reg] register_all: cw-entity-builder BwmsEntityFindComponentByType={ok2}");
     // `#24` (cont.190): `GetComponents` — 2º array-retorno deste projeto, mesma técnica de
-    // trailer-emprestado do TweakXL #43 (cont.189), mas usando o trailer do PRÓPRIO array lido.
+    // trailer-emprestado do `GetRecords` (cont.189), mas usando o trailer do PRÓPRIO array lido.
     let params3 = compose_params_from_types(reg, &["handle:Entity"]);
     let ok3 = if params_compostos(params3) {
         register_global_composed(reg, proto, params3, "BwmsEntityGetComponents", "BwmsEntityGetComponents", tramp_entity_get_components)
@@ -1981,7 +1959,7 @@ pub(crate) unsafe fn register_entity_builder_natives(reg: &Registry, proto: *mut
     crate::log_dev!(
         "[reg] register_all: cw-entity-builder BwmsEntityApplyMorphTarget={ok_aplicar} GetMorphTargetWeight={ok_peso} GetMorphTargetCount={ok_n} GetMorphTargetName={ok_nome}"
     );
-    // Codeware `#30` (cont.192): `MeshComponent.meshResource` — genérico (usa "handle:IComponent" já provado por AddComponent).
+    // `#30` (cont.192): `MeshComponent.meshResource` — genérico (usa "handle:IComponent" já provado por AddComponent).
     // Só no dev: nenhum `.reds` declara (quarentena do CMesh-trap).
     #[cfg(feature = "devtools")]
     {
@@ -2003,25 +1981,22 @@ pub(crate) unsafe fn register_entity_builder_natives(reg: &Registry, proto: *mut
     }
 }
 
-// ===== Codeware `#75` (`StaticEntitySystem`) — implementação NOVA, 2026-08-15 =========================
+// ===== `#75` (`StaticEntitySystem`) — implementação NOVA, 2026-08-15 =========================
 //
 // Módulo IRMÃO de `DynamicEntitySystem` (#73, FECHADO acima), nunca implementado antes desta rodada
 // (confirmado por grep: zero ocorrência de "StaticEntitySystem"/"tramp_ses_" neste arquivo e em
-// `blackwall-mods-dev/*.reds` antes desta mudança). Fonte real: `enablers/Codeware/src/App/World/
-// StaticEntitySystem.hpp`+`.cpp` (lido por completo agora) + `enablers/Codeware/scripts/World/
-// StaticEntitySystem.reds` (18 métodos). Mesmo subconjunto de risco BAIXO já aplicado ao `#73`:
+// `blackwall-mods-dev/*.reds` antes desta mudança). 18 métodos. Mesmo subconjunto de risco BAIXO já aplicado ao `#73`:
 // tag-bookkeeping puro (registry Rust-side, `HashMap<u64,HashSet<u64>>`, zero ponteiro de Entity,
-// zero endereço nativo) — `IsManaged`/`IsTagged`/`AssignTag`/`UnassignTag`/`IsPopulated` (o C++ real,
-// linhas 244-417, é literalmente `std::shared_lock`/`scoped_lock` sobre `Core::Map<EntityID,Set<CName>>`
-// + o espelho `Core::Map<CName,Set<EntityID>>` — o MESMO par de mapas já portado pro `#73`).
+// zero endereço nativo) — `IsManaged`/`IsTagged`/`AssignTag`/`UnassignTag`/`IsPopulated` (mapa
+// `EntityID → Set<CName>` + o espelho `CName → Set<EntityID>` — o MESMO par de mapas já usado no `#73`).
 //
 // `SpawnEntity`/`DespawnEntity`/`AttachEntity`/`DetachEntity`/`IsSpawned`/`IsSpawning`/`GetEntity`/
 // `GetTags`/`GetTagged`/`GetTaggedIDs`/`DespawnTagged`/`AttachTagged`/`DetachTagged` vão pelo
 // `EntitySpawner` do motor (bloco de `SPAWNER_SPAWN_VM`). `IsManaged` = spawnada pelo BWMS
 // (`statent_gerenciada`) ou já tagueada.
 //
-// `#75` NÃO tem `IsRestored` nem `DeleteTagged` na API real (diferença genuína vs `#73`, confirmado
-// lendo o header — `StaticEntitySystem.hpp` não declara nenhum dos dois) — não inventados aqui.
+// `#75` NÃO tem `IsRestored` nem `DeleteTagged` na API real (diferença genuína vs `#73`) — não
+// inventados aqui.
 // Idioma "Count()+ByIndex(i)" (5 getters escalares) reusa a MESMA disciplina anti-array-retorno já
 // estabelecida pro `#73`/round 8, `ReflectionClass`, `Scripting.GetStackTrace`.
 pub(crate) type StatentMap = std::sync::Mutex<std::collections::HashMap<u64, std::collections::HashSet<u64>>>;
@@ -2087,32 +2062,32 @@ pub(crate) fn statent_esquecer_tags(id: u64) {
     }
 }
 
-/// Tick: entidades descartadas que chegaram ao status 7 saem do registry (se entraram), o handle é solto e o estado some.
+/// Tick da thread do jogo: limpeza das entidades descartadas.
 pub(crate) unsafe fn statent_tick() {
     static VOLTAS: AtomicU64 = AtomicU64::new(0);
     if !crate::tempo::a_cada(VOLTAS.fetch_add(1, Ordering::Relaxed), 30) {
         return;
     }
-    let prontas: Vec<(u64, EntidadeEstatica)> = match STATENT_ESTADOS.lock() {
+    let desinicializada = |ent: u64| {
+        let s = (ent as usize).wrapping_add(ENT_STATUS_OFF) as *const u8;
+        ent != 0 && crate::memoria::is_readable(s as *const c_void, 1) && s.read() == ENT_UNINITIALIZED
+    };
+    let soltas: Vec<(u64, EntidadeEstatica)> = match STATENT_ESTADOS.lock() {
         Ok(mut m) => {
-            let ids: Vec<u64> = m
-                .iter()
-                .filter(|(_, e)| e.descartada && e.ent[0] != 0 && *((e.ent[0] as *const u8).add(ENT_STATUS_OFF)) == ENT_UNINITIALIZED)
-                .map(|(id, _)| *id)
-                .collect();
+            let ids: Vec<u64> = m.iter().filter(|(_, e)| e.descartada && desinicializada(e.ent[0])).map(|(id, _)| *id).collect();
             ids.into_iter().filter_map(|id| m.remove(&id).map(|e| (id, e))).collect()
         }
         Err(_) => return,
     };
-    for (id, mut e) in prontas {
+    for (id, mut e) in soltas {
         if e.registrada {
-            let tirar: extern "C" fn(usize, *mut c_void) -> u32 = std::mem::transmute(crate::rebase(REGISTRY_UNREGISTER_VM));
-            tirar(e.registry, e.ent[0] as *mut c_void);
+            let desregistrar: unsafe extern "C" fn(usize, u64) = std::mem::transmute(crate::rebase(REGISTRY_UNREGISTER_VM));
+            desregistrar(e.registry, e.ent[0]);
         }
         crate::jogo::objetos::soltar_handle(&mut e.ent);
         statent_esquecer_tags(id);
         #[cfg(feature = "devtools")]
-        statent_trilhar(id, "solta", 7);
+        statent_trilhar(id, "solta", 0);
     }
 }
 
@@ -2270,9 +2245,9 @@ pub(crate) fn hooks_do_ciclo_ativos() -> bool {
 /// `Entity/Detach` na saída, com o último ponteiro. Sai só com entidade, com o hook de mesmo nome fora do ar (bit em `no_ar`, de [`HOOKS_DO_CICLO_NO_AR`]) e com
 /// ouvinte: com o hook no ar o player chega duas vezes, e numa instalação parcial do grupo, com esse hook fora, a presença é a única entrega.
 pub(crate) fn evento_do_player(presente: bool, entidade: *mut c_void, no_ar: u8, tem_ouvinte: impl Fn(&str) -> bool) -> Option<&'static str> {
-    // `k` = índice em `ALVOS_DO_CICLO_DE_VIDA` do hook que entrega o mesmo evento.
-    let (evento, k) = if presente { ("Entity/Attach", 3) } else { ("Entity/Detach", 4) };
-    (!entidade.is_null() && no_ar & 1 << k == 0 && tem_ouvinte(evento)).then_some(evento)
+    // Bits 3 e 4 de `no_ar`: os índices de `Attach` e `Detach` em `ALVOS_DO_CICLO_DE_VIDA`.
+    let (evento, bit) = if presente { ("Entity/Attach", 3) } else { ("Entity/Detach", 4) };
+    (!entidade.is_null() && no_ar & (1 << bit) == 0 && tem_ouvinte(evento)).then_some(evento)
 }
 
 /// Máscara de [`HOOKS_DO_CICLO_NO_AR`]: bit `k` ligado com hook nosso no endereço de `ALVOS_DO_CICLO_DE_VIDA[k]`, que `endereco` traduz do vm.
@@ -2285,25 +2260,25 @@ pub(crate) fn gravar_hooks_do_ciclo_no_ar() {
     HOOKS_DO_CICLO_NO_AR.store(mascara_no_ar(crate::rebase), Ordering::Relaxed);
 }
 
+/// Despacha o evento `ENTIDADE_EVENTOS[k]` com a entidade.
 pub(crate) unsafe fn despachar_evento_do_ciclo(k: usize, entidade: *mut c_void) {
-    if entidade.is_null() || C130B_CONGELADO.load(Ordering::Relaxed) || !crate::entidades::evento_de_entidade_armado(k) {
+    let Some(&evento) = ENTIDADE_EVENTOS.get(k) else { return };
+    // Só o atômico: o hook roda milhares de vezes por minuto, quase sempre fora da thread do jogo.
+    if entidade.is_null() || C130B_CONGELADO.load(Ordering::Relaxed) || !evento_de_entidade_armado(k) {
         return;
     }
-    // Teste 130b, só no dev: o handler de script anota a entidade pelo `BwmsC130bAnotar`, conferida contra a do despacho nesta thread, e o selftest
-    // lê os contadores.
-    #[cfg(feature = "devtools")]
-    let anterior = C130B_ATUAL.with(|c| c.replace(entidade as usize));
-    #[cfg(feature = "devtools")]
-    let anotacoes_de_fora = C130B_ANOTOU.with(|c| c.replace(0));
-    #[cfg_attr(not(feature = "devtools"), allow(unused_variables))]
-    let enviados = crate::entidades::disparar_evento_de_entidade(crate::entidades::ENTIDADE_EVENTOS[k], entidade);
+    #[cfg(not(feature = "devtools"))]
+    disparar_evento_de_entidade(evento, entidade);
     #[cfg(feature = "devtools")]
     {
-        let anotacoes = C130B_ANOTOU.with(|c| c.replace(anotacoes_de_fora));
-        C130B_ATUAL.with(|c| c.set(anterior));
+        let atual = C130B_ATUAL.with(|c| c.replace(entidade as usize));
+        let anotacoes = C130B_ANOTOU.with(|c| c.replace(0));
+        let enviados = disparar_evento_de_entidade(evento, entidade);
+        let anotou = C130B_ANOTOU.with(|c| c.replace(anotacoes));
+        C130B_ATUAL.with(|c| c.set(atual));
         if enviados > 0 {
             C130B_DESPACHOS[k].fetch_add(1, Ordering::Relaxed);
-            if anotacoes == 0 {
+            if anotou == 0 {
                 C130B_SEM_ANOTACAO[k].fetch_add(1, Ordering::Relaxed);
             }
             if enviados > 1 {
@@ -2313,74 +2288,72 @@ pub(crate) unsafe fn despachar_evento_do_ciclo(k: usize, entidade: *mut c_void) 
     }
 }
 
-/// Como o `OnInitialize` da referência: antes do `Initialize`, com ouvinte de `Entity/Initialize`, resolve o record de puppet e veículo pelo
-/// `populationParam` do request, pro `EntityTarget.RecordID` casar já no `Entity/Initialize`.
+/// Gancho de `Entity::Initialize` (`ALVOS_DO_CICLO_DE_VIDA[0]`).
 pub(crate) unsafe extern "C" fn ciclo_initialize_hook(entidade: *mut c_void, fila: *mut c_void, request: *mut c_void) {
-    if crate::entidades::evento_de_entidade_armado(0) {
-        crate::entidades::pre_resolver_record(entidade, request);
+    if evento_de_entidade_armado(0) {
+        pre_resolver_record(entidade, request);
     }
-    let f: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_INITIALIZE));
-    f(entidade, fila, request);
+    let original: unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_INITIALIZE));
+    original(entidade, fila, request);
 }
 
+/// Gancho de `RequestComponents` (`ALVOS_DO_CICLO_DE_VIDA[1]`).
 pub(crate) unsafe extern "C" fn ciclo_requestcomponents_hook(entidade: *mut c_void, a2: u64, componentes: *mut c_void) {
-    // No `Initialize` o array é o da própria entidade (`ComponentsStorage` em `+0x70`, componentes em `+0x30`); numa troca de aparência é o do builder.
-    let propria = componentes as usize == entidade as usize + 0xa0;
-    if propria {
+    // O `Initialize` passa o array da própria entidade; outro array é a troca de aparência pelo builder.
+    if !entidade.is_null() && componentes as usize == entidade as usize + 0xa0 {
         despachar_evento_do_ciclo(0, entidade);
-    } else if crate::entidades::evento_de_entidade_armado(1) && !entidade.is_null() {
-        // Como a referência: o que os ouvintes do `Entity/Reassemble` somarem em `entity+0xA0` vai também pro array novo.
+    } else if !entidade.is_null() && evento_de_entidade_armado(1) {
         let antes = crate::aparencia::entidade_num_componentes(entidade);
-        #[cfg(feature = "devtools")]
-        C130E_SOMADO.with(|c| c.set(0));
         despachar_evento_do_ciclo(1, entidade);
-        let copiados = crate::aparencia::entidade_propagar_componentes(entidade, componentes, antes);
-        // Teste 130e: o componente que o handler somou tem que estar no array novo.
+        let _propagados = crate::aparencia::entidade_propagar_componentes(entidade, componentes, antes);
         #[cfg(feature = "devtools")]
         {
-            C130E_PROPAGADOS.fetch_add(copiados as u64, Ordering::Relaxed);
+            C130E_PROPAGADOS.fetch_add(_propagados as u64, Ordering::Relaxed);
             let somado = C130E_SOMADO.with(|c| c.replace(0));
             if somado != 0 && c130e_array_tem(componentes, somado) {
                 C130E_NO_ARRAY_NOVO.fetch_add(1, Ordering::Relaxed);
             }
         }
-        #[cfg(not(feature = "devtools"))]
-        let _ = copiados;
     }
-    let f: unsafe extern "C" fn(*mut c_void, u64, *mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_REQUESTCOMPONENTS));
-    f(entidade, a2, componentes);
+    let original: unsafe extern "C" fn(*mut c_void, u64, *mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_REQUESTCOMPONENTS));
+    original(entidade, a2, componentes);
 }
 
+/// Gancho de `Attach` (`ALVOS_DO_CICLO_DE_VIDA[3]`).
 pub(crate) unsafe extern "C" fn ciclo_attach_hook(entidade: *mut c_void, contexto: u64) {
     despachar_evento_do_ciclo(2, entidade);
-    let f: unsafe extern "C" fn(*mut c_void, u64) = std::mem::transmute(original_publicado(&ORIG_CICLO_ATTACH));
-    f(entidade, contexto);
+    let original: unsafe extern "C" fn(*mut c_void, u64) = std::mem::transmute(original_publicado(&ORIG_CICLO_ATTACH));
+    original(entidade, contexto);
     despachar_evento_do_ciclo(3, entidade);
 }
 
+/// Gancho de `Detach` (`ALVOS_DO_CICLO_DE_VIDA[4]`).
 pub(crate) unsafe extern "C" fn ciclo_detach_hook(entidade: *mut c_void) {
     despachar_evento_do_ciclo(4, entidade);
-    let f: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_DETACH));
-    f(entidade);
+    let original: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_DETACH));
+    original(entidade);
 }
 
+/// Gancho de `Uninitialize` (`ALVOS_DO_CICLO_DE_VIDA[5]`).
 pub(crate) unsafe extern "C" fn ciclo_uninitialize_hook(entidade: *mut c_void) {
     despachar_evento_do_ciclo(5, entidade);
-    let f: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_UNINITIALIZE));
-    f(entidade);
+    let original: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_UNINITIALIZE));
+    original(entidade);
 }
 
+/// Gancho de `Dispose` (`ALVOS_DO_CICLO_DE_VIDA[6]`).
 pub(crate) unsafe extern "C" fn ciclo_dispose_hook(entidade: *mut c_void) {
-    // O `Dispose` do Mac só desinicializa em linha com status de 2 a 5 e sem cena (`+0xb8`); com cena, a desinicialização passa pelos hooks acima.
-    if !entidade.is_null() {
-        let status = (entidade as *const u8).add(0x156).read();
-        let cena = ((entidade as *const u8).add(0xb8) as *const u64).read_unaligned();
-        if (2..=5).contains(&status) && cena == 0 {
+    // O `Dispose` do Mac desinicializa em linha só com status de 2 a 5 e sem cena; aí o `Uninitialize` não passa pelo gancho dele.
+    if !entidade.is_null() && evento_de_entidade_armado(5) && crate::memoria::is_readable(entidade as *const c_void, ENT_STATUS_OFF + 1) {
+        let e = entidade as *const u8;
+        let status = e.add(ENT_STATUS_OFF).read();
+        let cena = (e.add(0xb8) as *const u64).read_unaligned();
+        if (ENT_DETACHED..=ENT_DETACHING).contains(&status) && cena == 0 {
             despachar_evento_do_ciclo(5, entidade);
         }
     }
-    let f: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_DISPOSE));
-    f(entidade);
+    let original: unsafe extern "C" fn(*mut c_void) = std::mem::transmute(original_publicado(&ORIG_CICLO_DISPOSE));
+    original(entidade);
 }
 
 /// (índice em `ALVOS_DO_CICLO_DE_VIDA`, hook, original) dos 6 hooks do ciclo de vida.
@@ -2395,7 +2368,7 @@ pub(crate) fn hooks_do_ciclo() -> [(usize, *mut c_void, &'static AtomicU64); 6] 
     ]
 }
 
-/// Codeware `#130`/`#118`: instala os hooks do ciclo de vida da entidade no `RegisterCallback` de um evento `Entity/*` — o mod e o teste 130b passam pelo
+/// Instala os hooks do ciclo de vida da entidade no `RegisterCallback` de um evento `Entity/*` — o mod e o teste 130b passam pelo
 /// mesmo caminho —, de novo depois de uma desinstalação. Quem chama serializa ativação e desativação (`register::ativar_hooks_do_evento`). Só instala onde
 /// a 1ª instrução é o prólogo: com o hook no ar ela é o salto, e não empilha. Recusa se as sondas do 130a estão ativas (dois hooks no mesmo endereço entram
 /// em laço). O original publicado nunca volta a zero: uma thread que ainda está no hook depois da desinstalação chama o trampolim antigo, que continua
@@ -2433,31 +2406,33 @@ pub(crate) unsafe fn garantir_hooks_do_ciclo_de_vida() {
     }
 }
 
-/// Codeware `#8`/`#130`: o `Entity/Extract` sai do hook do job de componentes do builder, que a tabela de patches instala na carga só quando tem linha.
+/// O `Entity/Extract` sai do hook do job de componentes do builder, que a tabela de patches instala na carga só quando tem linha.
 pub(crate) unsafe fn garantir_hook_do_extract() {
     install_job_do_builder_hook();
 }
 
-// Teste 130c (`~/.bwms-hook-c130c-teste`): `Entity/Assemble` pelo hook do `Entity::Assemble` (`0x1019aa048`, RE de 2026-09-13: chamado pela
-// finalização do `EntityBuilder` com `x0` = entidade e `x1` = contexto com template, aparência e componentes), depois da original, como o `HookAfter`
-// da referência. Na montagem a entidade ainda não tem id nem status (os 2 vêm no `Initialize`) e já tem os componentes. O handler de script anota a
-// entidade do `Entity/Assemble` (parte 0) e a do `Entity/Initialize` (parte 1); o Rust confere na mesma thread o ponteiro, o id e o status zerados e os
-// componentes, e que a entidade inicializada passou antes pela montagem.
+// `Entity::Assemble` (`0x1019aa048`, RE de 2026-09-13: chamado pela finalização do `EntityBuilder` com `x0` = entidade e `x1` = contexto com
+// template, aparência e componentes). Na montagem a entidade ainda não tem id nem status (os 2 vêm no `Initialize`) e já tem os componentes.
+// Teste 130c (`~/.bwms-hook-c130c-teste`): o handler de script anota a entidade do `Entity/Assemble` (parte 0) e a do `Entity/Initialize` (parte 1);
+// o Rust confere na mesma thread o ponteiro, o id e o status zerados e os componentes, e que a entidade inicializada passou antes pela montagem.
 pub(crate) const ENTITY_ASSEMBLE_VM: u64 = 0x1019aa048;
 
 pub(crate) const ENTITY_ASSEMBLE_PROLOGO: u32 = 0xd10343ff;
 
 pub(crate) static ORIG_ENTITY_ASSEMBLE: AtomicU64 = AtomicU64::new(0);
 
+/// Gancho de `Entity::Assemble`.
 pub(crate) unsafe extern "C" fn entity_assemble_hook(entidade: *mut c_void, contexto: *mut c_void) -> u64 {
-    let f: unsafe extern "C" fn(*mut c_void, *mut c_void) -> u64 = std::mem::transmute(original_publicado(&ORIG_ENTITY_ASSEMBLE));
-    let r = f(entidade, contexto);
-    if !entidade.is_null() && crate::entidades::ASSEMBLE_ARMADO.load(Ordering::Relaxed) && !C130C_CONGELADO.load(Ordering::Relaxed) {
-        // Teste 130c, só no dev: guarda as entidades montadas e confere a anotação do handler nesta thread.
-        #[cfg(feature = "devtools")]
-        let teste = C130C_TESTE.load(Ordering::Relaxed);
-        #[cfg(feature = "devtools")]
-        if teste {
+    let original: unsafe extern "C" fn(*mut c_void, *mut c_void) -> u64 = std::mem::transmute(original_publicado(&ORIG_ENTITY_ASSEMBLE));
+    let r = original(entidade, contexto);
+    if entidade.is_null() || !ASSEMBLE_ARMADO.load(Ordering::Relaxed) || C130C_CONGELADO.load(Ordering::Relaxed) {
+        return r;
+    }
+    #[cfg(not(feature = "devtools"))]
+    disparar_evento_de_entidade("Entity/Assemble", entidade);
+    #[cfg(feature = "devtools")]
+    {
+        if C130C_TESTE.load(Ordering::Relaxed) {
             if let Ok(mut m) = C130C_MONTADAS.lock() {
                 if m.len() >= 4096 {
                     m.pop_front();
@@ -2465,26 +2440,22 @@ pub(crate) unsafe extern "C" fn entity_assemble_hook(entidade: *mut c_void, cont
                 m.push_back(entidade as usize);
             }
         }
-        #[cfg(feature = "devtools")]
-        let anterior = C130C_ATUAL.with(|c| c.replace(entidade as usize));
-        #[cfg(feature = "devtools")]
-        let de_fora = C130C_ANOTOU.with(|c| c.replace(0));
-        #[cfg_attr(not(feature = "devtools"), allow(unused_variables))]
-        let enviados = crate::entidades::disparar_evento_de_entidade("Entity/Assemble", entidade);
-        #[cfg(feature = "devtools")]
-        {
-            let anotacoes = C130C_ANOTOU.with(|c| c.replace(de_fora));
-            C130C_ATUAL.with(|c| c.set(anterior));
-            if teste && enviados > 0 {
-                C130C_DESPACHOS.fetch_add(1, Ordering::Relaxed);
-                C130C_SEM_ANOTACAO.fetch_add((anotacoes == 0) as u64, Ordering::Relaxed);
+        let atual = C130C_ATUAL.with(|c| c.replace(entidade as usize));
+        let anotacoes = C130C_ANOTOU.with(|c| c.replace(0));
+        let enviados = disparar_evento_de_entidade("Entity/Assemble", entidade);
+        let anotou = C130C_ANOTOU.with(|c| c.replace(anotacoes));
+        C130C_ATUAL.with(|c| c.set(atual));
+        if enviados > 0 {
+            C130C_DESPACHOS.fetch_add(1, Ordering::Relaxed);
+            if anotou == 0 {
+                C130C_SEM_ANOTACAO.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
     r
 }
 
-/// Codeware `#130`/`#118`: instala o hook do `Entity::Assemble` no `RegisterCallback` de `Entity/Assemble`, de novo depois de uma desinstalação, só com o
+/// Instala o hook do `Entity::Assemble` no `RegisterCallback` de `Entity/Assemble`, de novo depois de uma desinstalação, só com o
 /// prólogo no endereço. Quem chama serializa ativação e desativação.
 pub(crate) unsafe fn garantir_hook_do_assemble() {
     let end = crate::rebase(ENTITY_ASSEMBLE_VM) as *mut c_void;
@@ -2534,53 +2505,44 @@ pub(crate) static MESCLAS_NO_BUILDER_APLICADAS: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) static MESCLAS_NO_BUILDER_RECUSADAS: AtomicU64 = AtomicU64::new(0);
 
+/// Gancho do job de componentes do `EntityBuilder` (`params` = `[builder, _, bloco de contagem]`).
 pub(crate) unsafe extern "C" fn job_do_builder_hook(params: *mut [u64; 3], grupo: *const c_void) {
-    let orig = original_publicado(&ORIG_JOB_DO_BUILDER);
-    // O builder fica travado durante a original, pra ler depois dela a entidade que o job montou (51f-1b).
     let patches = MESCLA_NO_BUILDER_ATIVA.load(Ordering::Relaxed) && PATCHES_DE_RECURSO_ATIVOS.load(Ordering::Relaxed);
-    let travado = if (patches || INCLUSAO_DE_PARTES_ATIVA.load(Ordering::Relaxed)) && !params.is_null() && crate::memoria::is_readable(params as *const c_void, 0x18) {
-        let [builder, _, rc] = *params;
-        (builder != 0 && travar_fraco(rc)).then_some((builder, rc))
-    } else {
-        None
-    };
-    // A ordem da referência: `IncludeAppearanceParts` (51f-3), depois o `PatchPackageResults` da entidade e o das aparências.
-    let tam = travado.map_or(0, |(builder, _)| {
-        incluir_partes_no_builder(builder);
-        if !patches {
-            return 0;
+    let mut travado: Option<(u64, u64)> = None;
+    let mut _tamanho = 0usize;
+    if (patches || INCLUSAO_DE_PARTES_ATIVA.load(Ordering::Relaxed)) && !params.is_null() && crate::memoria::is_readable(params as *const c_void, 0x18) {
+        let [builder, _, bloco] = params.read_unaligned();
+        if builder != 0 && travar_fraco(bloco) {
+            travado = Some((builder, bloco));
+            incluir_partes_no_builder(builder);
+            if patches {
+                _tamanho = mesclar_no_builder_travado(builder);
+                mesclar_patches_nas_aparencias(builder);
+            }
         }
-        let t = mesclar_no_builder_travado(builder);
-        mesclar_patches_nas_aparencias(builder);
-        t
-    });
-    // Codeware `#130` (`Entity/Extract`): antes da original, como o `HookBefore` da referência, com o builder travado enquanto os ouvintes leem e somam
-    // componentes (a trava do 51f só existe com patch ativo); a trava fica até a volta da original.
-    let extract = extract_antes_do_job(params);
-    let f: JobDoBuilderFn = std::mem::transmute(orig);
-    f(params, grupo);
-    if let Some((builder, rc)) = extract {
-        extract_depois_do_job(builder, rc);
     }
-    if let Some((builder, rc)) = travado {
+    let extract = extract_antes_do_job(params);
+    let original: JobDoBuilderFn = std::mem::transmute(original_publicado(&ORIG_JOB_DO_BUILDER));
+    original(params, grupo);
+    if let Some((builder, bloco)) = extract {
+        extract_depois_do_job(builder, bloco);
+    }
+    if let Some((_builder, bloco)) = travado {
         #[cfg(feature = "devtools")]
-        a51f_registrar(builder, tam);
-        #[cfg(not(feature = "devtools"))]
-        let _ = (builder, tam);
-        destravar_fraco(rc);
+        a51f_registrar(_builder, _tamanho);
+        destravar_fraco(bloco);
     }
 }
 
 
-/// `cw-world-depot` (2026-07-24) — atalho pragmático (achado pela investigação paralela do mesmo
+/// Depot do mundo (2026-07-24) — atalho pragmático (achado pela investigação paralela do mesmo
 /// nome): em vez de forjar `DynamicEntitySystem`/`DynamicEntitySpec` (native-class-forge + RE de
-/// endereço nativo desconhecido pro pipeline real de spawn do Codeware — o `CreateEntity` XL
-/// genuíno), chama a API REAL VANILLA `CompanionSystem.SpawnSubcharacterOnPosition(recordID:
+/// endereço nativo desconhecido pro pipeline real de spawn), chama a API REAL VANILLA `CompanionSystem.SpawnSubcharacterOnPosition(recordID:
 /// TweakDBID, pos: Vector3)` direto via `call_func` — a MESMA usada pelo próprio jogo pra spawnar
 /// o Spiderbot (`cyberpunk/systems/subCharacterSystem.script`), acessada pelo MESMO caminho já
 /// provado `give`/`sistema_de_script_ou_getter` usam (`GetGame`→getter estático `GameInstance.GetXxx(gi)`). Zero
 /// classe nova, zero RE de endereço novo — satisfaz o `proof_needed` literal do gap ("spawna uma
-/// entidade visível") sem tocar `cw-variant-marshalling`.
+/// entidade visível") sem tocar o marshalling de Variant.
 ///
 /// `pos` é escrito como 3 floats consecutivos num slot de 16 bytes (`Arg::Raw`): a largura REAL da
 /// struct `Vector3` (12 vs 16 bytes, não confirmada por RE) não importa pra correção — o motor lê
@@ -2589,7 +2551,7 @@ pub(crate) unsafe extern "C" fn job_do_builder_hook(params: *mut [u64; 3], grupo
 /// real for 16B) ficam zerados, o mesmo que um `w`/padding implícito.
 ///
 /// NÃO testado em boot nenhum ainda — comando de console novo (`spawnsub`), mesma categoria de
-/// `cwprobe`/`cloneprobe`: opt-in, nunca auto-disparado.
+/// `cwprobe`: opt-in, nunca auto-disparado.
 /// Posição do V (`GameObject.GetWorldPosition`, `Vector4`), a mesma leitura do spawn ao lado do V provado no boot 297 (`aparencia/do_record.rs`).
 pub(crate) unsafe fn posicao_do_jogador(player: *mut c_void) -> Option<[f32; 3]> {
     if !rtti::sane(player) {
@@ -2701,5 +2663,131 @@ mod testes {
         let player = std::ptr::NonNull::<c_void>::dangling().as_ptr();
         assert_eq!(evento_do_player(true, player, parcial, |_| true), Some("Entity/Attach"));
         assert_eq!(evento_do_player(false, player, parcial, |_| true), None);
+    }
+}
+
+/// Vetores `B5|statent|*` e `B5|entidades|evento_do_player` de `B5-vetores.txt`. Os estados são globais: cada teste usa ids próprios.
+#[cfg(test)]
+mod vetores_b5 {
+    use super::*;
+    use std::sync::atomic::AtomicU32;
+
+    fn estado(rse: usize, token: [u64; 2], ent: u64, descartada: bool) -> EntidadeEstatica {
+        EntidadeEstatica { rse, registry: 0, token, ent: [ent, 0], registrada: false, descartada }
+    }
+
+    fn com_tag(id: u64, tag: u64) {
+        statent_tags().lock().expect("tags").entry(id).or_default().insert(tag);
+        statent_by_tag().lock().expect("tags").entry(tag).or_default().insert(id);
+    }
+
+    /// `(estado existe, tags do id, id no índice da tag)`.
+    fn rastro(id: u64, tag: u64) -> (bool, bool, Option<bool>) {
+        (
+            STATENT_ESTADOS.lock().expect("estados").contains_key(&id),
+            statent_tags().lock().expect("tags").contains_key(&id),
+            statent_by_tag().lock().expect("tags").get(&tag).map(|s| s.contains(&id)),
+        )
+    }
+
+    /// Callback sem entidade, com falha ou com aborto: o estado e as tags saem e a referência do token que o estado guardava é solta (3 → 2).
+    #[test]
+    fn cb_invoke_sem_entidade_falha_aborto() {
+        for (k, (ent, falhou, abortou)) in [(0u64, 0u8, 0u8), (0x1111, 1, 0), (0x1111, 0, 1)].into_iter().enumerate() {
+            let id = 0xb5_7001 + k as u64;
+            let mut token = [0u8; 0x30];
+            token[0x10..0x18].copy_from_slice(&ent.to_le_bytes());
+            token[0x21] = falhou;
+            token[0x22] = abortou;
+            let bloco = AtomicU32::new(3);
+            let sp = [token.as_ptr() as u64, &bloco as *const AtomicU32 as u64];
+            STATENT_ESTADOS.lock().expect("estados").insert(id, estado(0x99, sp, 0, false));
+            com_tag(id, 0x81);
+            let mut buffer = [0u8; 0x18];
+            buffer[..8].copy_from_slice(&id.to_le_bytes());
+            let mut invocado = sp;
+            unsafe { statent_cb_invoke(buffer.as_mut_ptr(), &mut invocado) };
+            assert_eq!(rastro(id, 0x81), (false, false, Some(false)));
+            assert_eq!(bloco.load(Ordering::Relaxed), 2);
+            assert_eq!(u64::from_le_bytes(token[0x10..0x18].try_into().expect("8 B")), ent, "entidade no token");
+        }
+        let mut buffer = [0u8; 0x18];
+        buffer[..8].copy_from_slice(&0xb5_7fffu64.to_le_bytes());
+        let token = [0u8; 0x30];
+        unsafe {
+            statent_cb_invoke(buffer.as_mut_ptr(), &mut [token.as_ptr() as u64, 0]);
+            statent_cb_invoke(buffer.as_mut_ptr(), std::ptr::null_mut());
+            statent_cb_invoke(buffer.as_mut_ptr(), &mut [0, 0]);
+        }
+    }
+
+    /// `statent_status` e as recusas de `statent_ligar` pelo status (nenhum caso chega ao motor).
+    #[test]
+    fn status_e_ligar() {
+        let mut ent = [0u8; 0x160];
+        let id = 0xb5_7101u64;
+        for s in [ENT_DETACHED, ENT_ATTACHING, ENT_ATTACHED, ENT_DETACHING] {
+            ent[ENT_STATUS_OFF] = s;
+            STATENT_ESTADOS.lock().expect("estados").insert(id, estado(153, [0; 2], ent.as_ptr() as u64, false));
+            assert_eq!(statent_status(id), Some((153, [ent.as_ptr() as u64, 0], s)));
+            match s {
+                ENT_DETACHED | ENT_DETACHING => assert!(!unsafe { statent_ligar(id, false) }),
+                _ => assert!(!unsafe { statent_ligar(id, true) }),
+            }
+        }
+        STATENT_ESTADOS.lock().expect("estados").insert(id, estado(153, [0; 2], ent.as_ptr() as u64, true));
+        assert_eq!(statent_status(id), None, "descartada");
+        assert!(!unsafe { statent_ligar(id, true) } && !unsafe { statent_ligar(id, false) });
+        STATENT_ESTADOS.lock().expect("estados").remove(&id);
+        assert_eq!(statent_status(0xb5_71ff), None);
+        assert!(!unsafe { statent_ligar(0xb5_71ff, true) });
+    }
+
+    #[test]
+    fn despawnar() {
+        let id = 0xb5_7201u64;
+        let bloco = AtomicU32::new(2);
+        STATENT_ESTADOS.lock().expect("estados").insert(id, estado(0x99, [0x7000, &bloco as *const AtomicU32 as u64], 0, false));
+        com_tag(id, 0x82);
+        assert!(unsafe { statent_despawnar(id) }, "sem entidade, com token");
+        assert_eq!((rastro(id, 0x82), bloco.load(Ordering::Relaxed)), ((false, false, Some(false)), 1));
+
+        STATENT_ESTADOS.lock().expect("estados").insert(id, estado(0x99, [0; 2], 0, false));
+        assert!(!unsafe { statent_despawnar(id) }, "sem entidade, sem token");
+        assert!(!STATENT_ESTADOS.lock().expect("estados").contains_key(&id));
+
+        STATENT_ESTADOS.lock().expect("estados").insert(id, estado(0x99, [0; 2], 0x1234, true));
+        assert!(!unsafe { statent_despawnar(id) }, "já descartada");
+        let ficou = STATENT_ESTADOS.lock().expect("estados").get(&id).map(|e| (e.token, e.ent[0] != 0, e.registrada, e.descartada));
+        assert_eq!(ficou, Some(([0, 0], true, false, true)));
+        STATENT_ESTADOS.lock().expect("estados").remove(&id);
+        assert!(!unsafe { statent_despawnar(0xb5_72ff) }, "id desconhecido");
+    }
+
+    /// Os 96 casos do vetor: presença × entidade nula × máscara (0x00, 0x08, 0x10, 0x18, 0x67, 0x7f) × ouvinte (nenhum, Attach, Detach, todos).
+    #[test]
+    fn evento_do_player_todos() {
+        let player = std::ptr::NonNull::<c_void>::dangling().as_ptr();
+        let mut saidas = Vec::new();
+        for presente in [true, false] {
+            for entidade in [std::ptr::null_mut(), player] {
+                for no_ar in [0x00u8, 0x08, 0x10, 0x18, 0x67, 0x7f] {
+                    for ouvinte in ["nenhum", "Attach", "Detach", "todos"] {
+                        let ouve = |ev: &str| ouvinte == "todos" || ev.strip_prefix("Entity/") == Some(ouvinte);
+                        let r = evento_do_player(presente, entidade, no_ar, ouve);
+                        let esperado = match (presente, entidade.is_null(), ouvinte) {
+                            (_, true, _) | (_, _, "nenhum") => None,
+                            (true, false, "Attach" | "todos") if no_ar & 0x08 == 0 => Some("Entity/Attach"),
+                            (false, false, "Detach" | "todos") if no_ar & 0x10 == 0 => Some("Entity/Detach"),
+                            _ => None,
+                        };
+                        assert_eq!(r, esperado, "presente={presente} nula={} no_ar={no_ar:#04x} ouvinte={ouvinte}", entidade.is_null());
+                        saidas.push(r);
+                    }
+                }
+            }
+        }
+        assert_eq!(saidas.len(), 96);
+        assert_eq!((saidas.iter().filter(|r| **r == Some("Entity/Attach")).count(), saidas.iter().filter(|r| **r == Some("Entity/Detach")).count()), (6, 6));
     }
 }

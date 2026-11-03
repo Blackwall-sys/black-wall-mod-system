@@ -1,21 +1,21 @@
-//! ArchiveXL `#53` no Mac (2026-09-11): sub-slots de cabeça e rosto na representação em terceira pessoa.
+//! Sub-slots de cabeça e rosto na representação em terceira pessoa (2026-09-11).
 //!
 //! Um slot com o flat `.parentSlot` apontando pra `AttachmentSlots.Head` ou `AttachmentSlots.Eyes` (declarado
-//! por mod) passa a ser tratado como o slot-base pelo `TPPRepresentationComponent`. Na fonte de referência isso
-//! são dois hooks: depois do `OnAttach` e depois do `IsAffectedSlot(TweakDBID)`. No Mac o `IsAffectedSlot` não
-//! existe como função — está inlinado nos handlers de equip e unequip do listener —, então o equivalente é
-//! hookar os dois handlers e rodar o ramo "afetado" quando o original não o rodou.
+//! por mod) passa a ser tratado como o slot-base pelo `TPPRepresentationComponent`. Isso pede dois pontos: depois
+//! do `OnAttach` e onde o motor decide se um slot é afetado. No Mac essa decisão (`IsAffectedSlot`) não existe
+//! como função — está inlinada nos handlers de equip e unequip do listener —, então os dois handlers são
+//! hookados e o ramo "afetado" roda quando o original não o rodou.
 //!
-//!     OnAttach              0x101e9ff18  (comp, a2)                    depois: register::onattachtpp_compose
+//!     OnAttach              0x101e9ff18  (comp, a2)                    depois: corpo_e_rosto::compor_slots_da_terceira_pessoa
 //!     handler de equip      0x101ea5b54  (comp, itemTDBID, slotTDBID)  depois: RegisterAffectedItem do item do slot
 //!     handler de unequip    0x101ea50bc  (comp, itemTDBID, slotTDBID)  depois: 0x101ea5f80(comp, itemTDBID)
 //!     RegisterAffectedItem  0x101ea0738  (comp, itemTDBID, &Handle<ItemObject>)
 //!
-//! Endereços e argumentos conferidos ao vivo pelo censo (boots 10 e 11). Diferença de ordem: no original o ramo
-//! afetado roda antes do resto do handler; aqui roda depois. O slot-base sai do flat na hora
-//! (`get_flat_tdbid`), em vez do cache que a referência monta no `InitializeSlots`.
+//! Endereços e argumentos conferidos ao vivo pelo censo (boots 10 e 11). O ramo afetado roda depois do resto do
+//! handler. O slot-base sai do flat na hora (`get_flat_tdbid`): o flat que um mod cria depois da carga vale sem
+//! cache para invalidar.
 //!
-//! Gate: `~/.bwms-axl-tpp` (desligado por padrão até a prova ao vivo). Relatório no canal de veredito.
+//! Gate: `~/.bwms-tpp-slots` (desligado por padrão até a prova ao vivo). Relatório no canal de veredito.
 
 use crate::register::rd_u64;
 use bwms_primitives::tweak_db_id_chave;
@@ -28,11 +28,15 @@ const UNEQUIP_VM: u64 = 0x1_01ea_50bc;
 const REGISTER_AFFECTED_VM: u64 = 0x1_01ea_0738;
 const UNREGISTER_AFFECTED_VM: u64 = 0x1_01ea_5f80;
 
-const COMPONENTE_DONO_OFF: usize = 0x50;
+pub(crate) const COMPONENTE_DONO_OFF: usize = 0x50;
 const ITEMOBJECT_ITEMID_OFF: usize = 0x288;
-const ATTACHSLOTS_DADOS_OFF: usize = 0xB0;
-const SLOTDATA_TAM: usize = 0x90;
+pub(crate) const ATTACHSLOTS_DADOS_OFF: usize = 0xB0;
+pub(crate) const SLOTDATA_TAM: usize = 0x90;
 const SLOTDATA_ITEMOBJECT_OFF: usize = 0x08;
+/// `affectedAppearanceSlots: DynArray<TweakDBID>` do `TPPRepresentationComponent`.
+pub(crate) const SLOTS_AFETADOS_OFF: usize = 0xB0;
+/// Gate dos ganchos e dos comandos de teste.
+const MARCADOR: &str = ".bwms-tpp-slots";
 
 static ORIG_ONATTACH: AtomicU64 = AtomicU64::new(0);
 static ORIG_EQUIP: AtomicU64 = AtomicU64::new(0);
@@ -42,7 +46,7 @@ static ULTIMO_COMP: AtomicU64 = AtomicU64::new(0);
 static REGISTRADOS: AtomicU64 = AtomicU64::new(0);
 static DESREGISTRADOS: AtomicU64 = AtomicU64::new(0);
 
-fn slots_afetados() -> (u64, u64) {
+pub(crate) fn slots_afetados() -> (u64, u64) {
     static S: OnceLock<(u64, u64)> = OnceLock::new();
     *S.get_or_init(|| {
         (
@@ -59,11 +63,11 @@ fn eh_afetado_direto(slot: u64, (head, eyes): (u64, u64)) -> bool {
 
 /// O ramo "afetado" roda depois do original só quando o original não o rodou (o slot não é Head nem Eyes) e o
 /// slot-base declarado é um dos dois.
-fn precisa_ramo_afetado(slot: u64, base: Option<u64>, afetados: (u64, u64)) -> bool {
+pub(crate) fn precisa_ramo_afetado(slot: u64, base: Option<u64>, afetados: (u64, u64)) -> bool {
     !eh_afetado_direto(slot, afetados) && matches!(base, Some(b) if eh_afetado_direto(b, afetados))
 }
 
-unsafe fn slot_base(slot: u64) -> Option<u64> {
+pub(crate) unsafe fn slot_base(slot: u64) -> Option<u64> {
     let t = crate::tweakdb::singleton()?;
     crate::tweakdb::get_flat_tdbid(t, bwms_primitives::tweak_db_id_derive(tweak_db_id_chave(slot), ".parentSlot"))
 }
@@ -94,7 +98,7 @@ unsafe fn handle_do_slot(comp: *mut c_void, slot: u64) -> Result<*const c_void, 
 }
 
 /// `RegisterAffectedItem(comp, itemTDBID, &Handle<ItemObject>)` pro item que está no `slot`. Devolve o TweakDBID
-/// do item (o `ItemObject::ItemID.tdbid`, como a referência passa).
+/// do item (o `ItemObject::ItemID.tdbid`, a chave com que o motor guarda o item afetado).
 pub(crate) unsafe fn registrar_item_do_slot(comp: *mut c_void, slot: u64) -> Result<u64, &'static str> {
     let handle = handle_do_slot(comp, slot)?;
     let obj = rd_u64(handle, 0);
@@ -125,7 +129,7 @@ unsafe extern "C" fn onattach(comp: *mut c_void, a2: u64) {
         f(comp, a2);
     }
     if let Some(reg) = crate::rtti::Registry::obtain() {
-        crate::log_veredito(&crate::corpo_e_rosto::onattachtpp_compose(&reg, comp));
+        crate::log_veredito(&crate::corpo_e_rosto::compor_slots_da_terceira_pessoa(&reg, comp));
     }
 }
 
@@ -146,7 +150,7 @@ unsafe extern "C" fn equip(comp: *mut c_void, item: u64, slot: u64) {
     }
     let r = registrar_item_do_slot(comp, slot);
     crate::veredito_dev!(
-        "[axl-tpp] equip slot={slot:#x} base={:#x} item={item:#x} -> RegisterAffectedItem {r:?}",
+        "[tpp-slots] equip slot={slot:#x} base={:#x} item={item:#x} -> RegisterAffectedItem {r:?}",
         base.unwrap_or(0)
     );
 }
@@ -167,19 +171,19 @@ unsafe extern "C" fn unequip(comp: *mut c_void, item: u64, slot: u64) {
     }
     desregistrar_item(comp, item);
     crate::veredito_dev!(
-        "[axl-tpp] unequip slot={slot:#x} base={:#x} item={item:#x} -> desregistrado",
+        "[tpp-slots] unequip slot={slot:#x} base={:#x} item={item:#x} -> desregistrado",
         base.unwrap_or(0)
     );
 }
 
-/// Instala os 3 hooks se `~/.bwms-axl-tpp` existir. Chamado logo depois do hook do executor (`inicio/boot.rs`).
+/// Instala os 3 hooks se `~/.bwms-tpp-slots` existir. Chamado logo depois do hook do executor (`inicio/boot.rs`).
 pub(crate) unsafe fn install() {
-    if !crate::marcador_na_home(".bwms-axl-tpp") {
+    if !crate::marcador_na_home(MARCADOR) {
         return;
     }
     // Dois hooks no mesmo alvo entram em loop no relocador: o probe antigo do OnAttach mora no mesmo endereço.
     if crate::marcador_na_home(".bwms-hook-tpponattachc2") || crate::marcador_na_home(".bwms-hook") {
-        crate::veredito_dev!("[axl-tpp] probe antigo do OnAttach ligado (~/.bwms-hook-tpponattachc2 ou ~/.bwms-hook): nada instalado");
+        crate::veredito_dev!("[tpp-slots] probe antigo do OnAttach ligado (~/.bwms-hook-tpponattachc2 ou ~/.bwms-hook): nada instalado");
         return;
     }
     let alvos: [(&str, u64, *mut c_void, &AtomicU64); 3] = [
@@ -191,15 +195,15 @@ pub(crate) unsafe fn install() {
     for (nome, vm, repl, orig) in alvos {
         let alvo = crate::rebase(vm);
         if alvo.is_null() || !crate::memoria::is_readable(alvo as *const c_void, 16) {
-            crate::veredito_dev!("[axl-tpp] {nome} {vm:#x}: alvo ilegível");
+            crate::veredito_dev!("[tpp-slots] {nome} {vm:#x}: alvo ilegível");
             continue;
         }
         match crate::ganchos::instalar_com_threads_paradas(alvo, repl, Some(orig)) {
             Some(_) => ok += 1,
-            None => crate::veredito_dev!("[axl-tpp] {nome} {vm:#x}: replace recusou"),
+            None => crate::veredito_dev!("[tpp-slots] {nome} {vm:#x}: replace recusou"),
         }
     }
-    crate::veredito_dev!("[axl-tpp] {ok}/3 hooks instalados (gate ~/.bwms-axl-tpp)");
+    crate::veredito_dev!("[tpp-slots] {ok}/3 hooks instalados (gate ~/.bwms-tpp-slots)");
 }
 
 /// Comando `tppafetados`: tamanho dos arrays do componente e contadores.
@@ -207,7 +211,7 @@ pub(crate) unsafe fn install() {
 pub(crate) unsafe fn relatorio() {
     let comp = ULTIMO_COMP.load(Ordering::Relaxed) as *const c_void;
     if comp.is_null() || !crate::memoria::is_readable(comp, 0x150) {
-        crate::veredito_dev!("[axl-tpp] nenhum componente visto no handler de equip");
+        crate::veredito_dev!("[tpp-slots] nenhum componente visto no handler de equip");
         return;
     }
     let n = |off: usize| ((comp as *const u8).add(off) as *const u32).read_unaligned();
@@ -215,7 +219,7 @@ pub(crate) unsafe fn relatorio() {
     // O RegisterAffectedItem insere {TweakDBID, Handle} no contêiner de +0x128 (via 0x1035a652c, sob o mutex de
     // +0x120..+0x127) — é ali que a ida-e-volta tem que aparecer.
     crate::veredito_dev!(
-        "[axl-tpp] comp={comp:p} tamanhos: +0x90={} +0xa0={} affectedAppearanceSlots(+0xb0)={} +0x110={} | +0x128=[{:#x} {:#x} {:#x}] n(+0x134)={} | registrados={} desregistrados={}",
+        "[tpp-slots] comp={comp:p} tamanhos: +0x90={} +0xa0={} affectedAppearanceSlots(+0xb0)={} +0x110={} | +0x128=[{:#x} {:#x} {:#x}] n(+0x134)={} | registrados={} desregistrados={}",
         n(0x9c),
         n(0xac),
         n(0xbc),
@@ -232,19 +236,19 @@ pub(crate) unsafe fn relatorio() {
     let quantos = (n(0xbc) as usize).min(32);
     if !lista.is_null() && crate::memoria::is_readable(lista as *const c_void, quantos * 8) {
         let ids: Vec<String> = (0..quantos).map(|i| format!("{:#x}", tweak_db_id_chave(lista.add(i).read_unaligned()))).collect();
-        crate::veredito_dev!("[axl-tpp] affectedAppearanceSlots=[{}]", ids.join(" "));
+        crate::veredito_dev!("[tpp-slots] affectedAppearanceSlots=[{}]", ids.join(" "));
     }
 }
 
 #[cfg(feature = "devtools")]
 fn comp_para_teste(cmd: &str) -> Option<*mut c_void> {
-    if !crate::marcador_na_home(".bwms-axl-tpp") {
-        crate::veredito_dev!("[axl-tpp] {cmd}: gate ~/.bwms-axl-tpp desligado");
+    if !crate::marcador_na_home(MARCADOR) {
+        crate::veredito_dev!("[tpp-slots] {cmd}: gate ~/.bwms-tpp-slots desligado");
         return None;
     }
     let comp = ULTIMO_COMP.load(Ordering::Relaxed) as *mut c_void;
     if comp.is_null() {
-        crate::veredito_dev!("[axl-tpp] {cmd}: nenhum componente visto no handler de equip");
+        crate::veredito_dev!("[tpp-slots] {cmd}: nenhum componente visto no handler de equip");
         return None;
     }
     Some(comp)
@@ -259,7 +263,7 @@ pub(crate) unsafe fn registrar_teste(slot_nome: &str) {
     relatorio();
     let slot = bwms_primitives::tweak_db_id(slot_nome);
     let r = registrar_item_do_slot(comp, slot);
-    crate::veredito_dev!("[axl-tpp] tppregteste {slot_nome} ({slot:#x}) -> {r:?}");
+    crate::veredito_dev!("[tpp-slots] tppregteste {slot_nome} ({slot:#x}) -> {r:?}");
     relatorio();
 }
 
@@ -272,24 +276,24 @@ pub(crate) unsafe fn desregistrar_teste(slot_nome: &str) {
         Ok(h) => {
             let obj = rd_u64(h, 0);
             if obj == 0 || !crate::memoria::is_readable(obj as *const c_void, ITEMOBJECT_ITEMID_OFF + 8) {
-                crate::veredito_dev!("[axl-tpp] tppdesregteste {slot_nome}: slot sem item");
+                crate::veredito_dev!("[tpp-slots] tppdesregteste {slot_nome}: slot sem item");
                 return;
             }
             rd_u64(obj as *const c_void, ITEMOBJECT_ITEMID_OFF)
         }
         Err(motivo) => {
-            crate::veredito_dev!("[axl-tpp] tppdesregteste {slot_nome}: {motivo}");
+            crate::veredito_dev!("[tpp-slots] tppdesregteste {slot_nome}: {motivo}");
             return;
         }
     };
     desregistrar_item(comp, item);
-    crate::veredito_dev!("[axl-tpp] tppdesregteste {slot_nome} item={item:#x} -> desregistrado");
+    crate::veredito_dev!("[tpp-slots] tppdesregteste {slot_nome} item={item:#x} -> desregistrado");
     relatorio();
 }
 
 /// Comandos `tppequipteste <slot>` / `tppunequipteste <slot>`: chamam os handlers de equip/unequip do listener pelo
 /// endereço hookado, com o item que está no slot. Passa pelo handler original, pela busca do `.parentSlot` e pelo ramo
-/// "afetado" do port — o caminho inteiro do `IsAffectedSlot` inlinado, sem precisar re-equipar pelo jogo. Com o flat
+/// "afetado" deste módulo — o caminho inteiro do `IsAffectedSlot` inlinado, sem precisar re-equipar pelo jogo. Com o flat
 /// criado antes (`mkflatnovo AttachmentSlots.X.parentSlot ...`), o contêiner de `+0x128` tem que subir e voltar.
 #[cfg(feature = "devtools")]
 pub(crate) unsafe fn handler_teste(slot_nome: &str, equipar: bool) {
@@ -300,13 +304,13 @@ pub(crate) unsafe fn handler_teste(slot_nome: &str, equipar: bool) {
         Ok(h) => {
             let obj = rd_u64(h, 0);
             if obj == 0 || !crate::memoria::is_readable(obj as *const c_void, ITEMOBJECT_ITEMID_OFF + 8) {
-                crate::veredito_dev!("[axl-tpp] {cmd} {slot_nome}: slot sem item");
+                crate::veredito_dev!("[tpp-slots] {cmd} {slot_nome}: slot sem item");
                 return;
             }
             rd_u64(obj as *const c_void, ITEMOBJECT_ITEMID_OFF)
         }
         Err(motivo) => {
-            crate::veredito_dev!("[axl-tpp] {cmd} {slot_nome}: {motivo}");
+            crate::veredito_dev!("[tpp-slots] {cmd} {slot_nome}: {motivo}");
             return;
         }
     };
@@ -316,7 +320,7 @@ pub(crate) unsafe fn handler_teste(slot_nome: &str, equipar: bool) {
     let f: unsafe extern "C" fn(*mut c_void, u64, u64) = std::mem::transmute(alvo);
     f(comp, item, slot);
     crate::veredito_dev!(
-        "[axl-tpp] {cmd} {slot_nome} ({slot:#x}) item={item:#x} base={:#x} precisa_ramo={}",
+        "[tpp-slots] {cmd} {slot_nome} ({slot:#x}) item={item:#x} base={:#x} precisa_ramo={}",
         base.unwrap_or(0),
         precisa_ramo_afetado(slot, base, slots_afetados())
     );
@@ -331,8 +335,8 @@ pub(crate) unsafe fn anexar_teste() {
     let Some(comp) = comp_para_teste("tppanexarteste") else { return };
     relatorio();
     match crate::rtti::Registry::obtain() {
-        Some(reg) => crate::log_veredito(&crate::corpo_e_rosto::onattachtpp_compose(&reg, comp)),
-        None => crate::veredito_dev!("[axl-tpp] tppanexarteste: registry indisponível"),
+        Some(reg) => crate::log_veredito(&crate::corpo_e_rosto::compor_slots_da_terceira_pessoa(&reg, comp)),
+        None => crate::veredito_dev!("[tpp-slots] tppanexarteste: registry indisponível"),
     }
     relatorio();
 }
@@ -341,7 +345,7 @@ pub(crate) unsafe fn anexar_teste() {
 mod tests {
     use super::*;
 
-    // Valores do init estático do binário (`proofs/20260911-archivexl-53-...`, seção 5).
+    // Valores do init estático do binário (`proofs/20260911-*-53-...`, seção 5).
     const HEAD: u64 = 0x14_ee68_aa23;
     const EYES: u64 = 0x14_ee81_6829;
     const SUB: u64 = 0x1c_1234_5678;

@@ -1,12 +1,11 @@
 // -----------------------------------------------------------------------------
-// Codeware.World.StaticEntitySystem — item `#75` do catálogo exaustivo
+// StaticEntitySystem
 // -----------------------------------------------------------------------------
 //
-// O `StaticEntitySystem` do Codeware (`enablers/Codeware/scripts/World/StaticEntitySystem.reds`), irmão do `DynamicEntitySystem`
-// (`#73`) com registro de tags PRÓPRIO (Static e Dynamic são estados independentes na fonte, nunca compartilhados). As tags são
-// bookkeeping do Rust (`Map<EntityID, Set<CName>>` e o espelho inverso, como o C++ do Codeware); o spawn é pelo `EntitySpawner` do
-// motor. A API do Codeware não tem `IsRestored` nem `DeleteTagged` (o `StaticEntitySystem.hpp`
-// não declara), e eles não são inventados aqui. Os getters indexados (`Count()`+`ByIndex(i)`) são do BWMS, além dos arrays.
+// O `StaticEntitySystem`, irmão do `DynamicEntitySystem`
+// com registro de tags PRÓPRIO (Static e Dynamic são estados independentes, nunca compartilhados). As tags são
+// bookkeeping do Rust (`Map<EntityID, Set<CName>>` e o espelho inverso); o spawn é pelo `EntitySpawner` do
+// motor. A API não tem `IsRestored` nem `DeleteTagged`, e eles não são inventados aqui. Os getters indexados (`Count()`+`ByIndex(i)`) são do BWMS, além dos arrays.
 
 public native class StaticEntitySystem extends IGameSystem {
     public native func IsReady() -> Bool
@@ -18,7 +17,7 @@ public native class StaticEntitySystem extends IGameSystem {
     public native func AssignTag(id: EntityID, tag: CName) -> Void
     public native func UnassignTag(id: EntityID, tag: CName) -> Void
 
-    // Getters indexados do BWMS, além dos arrays do Codeware abaixo.
+    // Getters indexados do BWMS, além dos arrays abaixo.
     public native func GetTaggedID(tag: CName) -> EntityID
     public native func GetTaggedCount(tag: CName) -> Int32
     public native func GetTaggedIDByIndex(tag: CName, index: Int32) -> EntityID

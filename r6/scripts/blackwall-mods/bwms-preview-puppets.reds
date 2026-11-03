@@ -1,4 +1,4 @@
-// bwms-preview-puppets.reds — os bonecos de pré-visualização do V (catálogo Codeware #45).
+// bwms-preview-puppets.reds — os bonecos de pré-visualização do V.
 //
 // Toda tela que mostra o personagem cria um `gamePuppet` próprio, separado do V: o do inventário (paperdoll), o da criação de personagem e
 // do espelho, e o do modo foto. É nele que um mod de roupa, pose ou câmera precisa mexer pra o efeito aparecer na tela; mas quem guarda o

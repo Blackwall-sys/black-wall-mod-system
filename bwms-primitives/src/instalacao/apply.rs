@@ -138,22 +138,22 @@ pub struct TabelasDosXl {
     pub secoes_sem_efeito: Vec<(PathBuf, String)>,
     /// Linhas de par `resource.link`/`resource.copy` em `bwms-reslink.txt`, já sem cadeia e sem ciclo. Ver `write_reslink_table`.
     pub reslink_pairs: usize,
-    /// Linhas de `bwms-streaming.txt` (`streaming.sectors`, ArchiveXL `#49`).
+    /// Linhas de `bwms-streaming.txt` (`streaming.sectors`, `#49`).
     pub streaming_lines: usize,
-    /// Linhas de `bwms-questphase.txt` (`quest.phases`, ArchiveXL `#35`).
+    /// Linhas de `bwms-questphase.txt` (`quest.phases`, `#35`).
     pub questphase_lines: usize,
-    /// Linhas de `bwms-journal.txt` (`journal`, ArchiveXL `#44`).
+    /// Linhas de `bwms-journal.txt` (`journal`, `#44`).
     pub journal_lines: usize,
-    /// Linhas de `bwms-resource-patch.txt` (`resource.patch` de todos os `.xl`, ArchiveXL `#17`). Ver `write_tabela_de_todos_os_xl`.
+    /// Linhas de `bwms-resource-patch.txt` (`resource.patch` de todos os `.xl`, `#17`). Ver `write_tabela_de_todos_os_xl`.
     pub resource_patch_lines: usize,
-    /// Linhas de `bwms-resfixes.txt` (`resource.fix`, ArchiveXL `#51` 51i).
+    /// Linhas de `bwms-resfixes.txt` (`resource.fix`, `#51` 51i).
     pub resfix_lines: usize,
-    /// Linhas de `bwms-resscopes.txt` (`resource.scope` de todos os `.xl`, ArchiveXL `#20` 20e-2). Ver `write_tabela_de_todos_os_xl`.
+    /// Linhas de `bwms-resscopes.txt` (`resource.scope` de todos os `.xl`, `#20` 20e-2). Ver `write_tabela_de_todos_os_xl`.
     pub resscope_lines: usize,
-    /// Linhas de `bwms-customizations.txt` (`customizations`, ArchiveXL `#47`).
+    /// Linhas de `bwms-customizations.txt` (`customizations`, `#47`).
     pub customization_lines: usize,
     /// `resource.link` e `resource.scope` que caem num ciclo, uma mensagem por caminho (`PlanoDeRedirecionamento.cyclic_links` e o 2º valor
-    /// de `tabelas_de_runtime::resource_scope_listas`): o link sai da tabela, como o `Link "…" is cyclic` da referência, e o escopo fica só
+    /// de `tabelas_de_runtime::resource_scope_listas`): o link sai da tabela com um aviso de ciclo, e o escopo fica só
     /// com os alvos fora do ciclo.
     pub ciclos: Vec<String>,
     /// O que o jogo aplica dos `.xl` da `Mods/` (`xl_no_jogo::planejar`).
@@ -215,10 +215,10 @@ fn gravar_tabelas_dos_xl(
             0
         })
     };
-    // Os escopos do `resource.scope` valem entre mods (a referência junta os de todas as configs): saem de todos os `.xl` primeiro, porque o
+    // Os escopos do `resource.scope` valem entre mods (os de todas as configs se juntam): saem de todos os `.xl` primeiro, porque o
     // plano de link/copy expande o pedido e a cópia por eles, e o `resource.patch` de cada `.xl` expande os alvos.
     let (scopes, escopos_em_ciclo) = crate::instalacao::tabelas_de_runtime::resource_scope_listas(&xls_lidos);
-    // `resource.link`/`resource.copy` valem entre mods: um plano só, como a referência junta as configs antes de resolver cadeia e ciclo.
+    // `resource.link`/`resource.copy` valem entre mods: um plano só, com as configs juntas antes de resolver cadeia e ciclo.
     let plano = crate::instalacao::tabelas_de_runtime::build_apply_plan_combinado(&xls_lidos, &scopes);
     avisos.extend(plano.avisos.iter().cloned());
     let reslink_pairs = tabela(write_reslink_table(game, &plano));
@@ -479,7 +479,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&g);
     }
 
-    /// ArchiveXL `#44`/`#35`/`#49`/`#17`: o boot grava as tabelas que saem de emissor por `.xl` e, com o mod fora da `Mods/`, apaga as que ele
+    /// `#44`/`#35`/`#49`/`#17`: o boot grava as tabelas que saem de emissor por `.xl` e, com o mod fora da `Mods/`, apaga as que ele
     /// gerou; tabela posta à mão fica.
     #[test]
     fn xl_com_journal_fase_e_setor_gera_tabelas_de_runtime() {
@@ -794,7 +794,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&fora);
     }
 
-    /// A referência junta os links de todas as configs antes de resolver cadeia e ciclo: `a: b` de um mod e `b: c` de outro dão `a | c`.
+    /// Os links de todas as configs se juntam antes de resolver cadeia e ciclo: `a: b` de um mod e `b: c` de outro dão `a | c`.
     #[test]
     fn link_em_cadeia_e_em_ciclo_entre_xl_de_mods_diferentes_resolve_junto() {
         let g = jogo("reslink-entre-xl");
@@ -897,7 +897,7 @@ mod tests {
         "Confira a permissão de escrita da pasta red4ext/ e abra o jogo de novo (o BWMS regrava as tabelas a cada abertura); até lá o jogo carrega as tabelas antigas.";
 
     #[test]
-    fn tabela_que_nao_grava_nem_sai_de_red4ext_vira_erro_com_o_caminho() {
+    fn tabela_que_nao_grava_nem_sai_da_pasta_de_tabelas_vira_erro_com_o_caminho() {
         let g = jogo("so-leitura");
         mod_com_quatro_tabelas(&g);
         let red4 = g.join("red4ext");

@@ -1,4 +1,4 @@
-//! O que o leitor do BWMS tira de arquivos `.xl` do ArchiveXL, sem o jogo: `cargo run --example xl_do_arquivo -- <arquivo.xl>...`.
+//! O que o leitor do BWMS tira de arquivos `.xl`, sem o jogo: `cargo run --example xl_do_arquivo -- <arquivo.xl>...`.
 use bwms_primitives::instalacao::xl::parse_xl;
 
 fn main() {

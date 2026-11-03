@@ -1,116 +1,103 @@
-//! Writer RDAR (`.archive`) — porte fiel do `ArchiveWriter` do WolvenKit p/ empacotar recursos CR2W
-//! **SEM COMPRESSÃO** (zsize==size), sem precisar de Kraken *encode*. Alvo #1: mod de TRADUÇÃO —
-//! dropar o `onscreens`/`subtitles` editado (por `cr2w::repack_localization_edit`) num `.archive`
-//! que o jogo carrega pelo Path A (glob nativo, já provado). Fecha o pipeline ler→editar→empacotar.
-//!
-//! Layout (idêntico ao ArchiveWriter): header 40B + 132B pad (=0xAC) + payload dos recursos (cada
-//! CR2W cru como 1 segmento) + pad-de-página + índice (crc64) + pad-de-página. Header/customDataLength
-//! reescritos por último. Recursos COM buffers (`buffersEnd>objectsEnd`) ficam fora do escopo —
-//! localização não tem buffer; buffers exigiriam split em segmentos + Kraken encode.
+//! Escritor RDAR (`.archive`) sem compressão: empacota recursos CR2W já prontos, cada um como um segmento cru (zsize == size).
+//! Alvo: mod de tradução (`bwms archive pack`/`packdir` e a saída do `locedit`). Recurso com buffers fica fora do escopo.
 
-use crate::archive::archive::{crc64, sha1, RDAR_MAGIC};
+use crate::archive::archive::{crc64, sha1, EXTENDED_SIZE, RDAR_MAGIC};
+use crate::archive::cr2w::parse_cr2w_index;
 
-const HEADER_REGION: usize = 0xAC; // 40 (header) + 132 (pad) — payload começa aqui (WolvenKit)
-const PAGE: usize = 4096;
-const RDAR_VERSION: u32 = 12; // v12 = CP2077 2.x (confirmado nos archives reais)
-
-fn pad_to_page(v: &mut Vec<u8>) {
-    let rem = v.len() % PAGE;
-    if rem != 0 {
-        v.resize(v.len() + (PAGE - rem), 0);
-    }
-}
+const VERSAO_RDAR: u32 = 12;
+/// Os `.archive` do jogo alinham o índice e o fim do arquivo em 4096.
+const ALINHAMENTO: usize = 4096;
+/// Deslocamento da tabela de recursos dentro do índice (o que vem antes do `file_table_size`).
+const DESLOCAMENTO_DA_TABELA: u32 = 8;
 
 /// Empacota recursos (`name_hash` = FNV-1a64 do path REDengine, bytes CR2W já finais) num `.archive`
-/// RDAR v12, cada um como UM segmento não-comprimido. Recusa CR2W com buffers. Ordena por hash (como
-/// o WolvenKit). Devolve os bytes do `.archive` completo, prontos p/ gravar em disco.
+/// RDAR v12, cada um como UM segmento não-comprimido. Recusa CR2W com buffers. Ordena por hash.
+/// Devolve os bytes do `.archive` completo, prontos p/ gravar em disco.
 pub fn pack_uncompressed(resources: &[(u64, Vec<u8>)]) -> Result<Vec<u8>, String> {
     if resources.is_empty() {
         return Err("nada a empacotar".into());
     }
-    // WolvenKit ordena o fileDict por Key (hash) ascendente.
-    let mut res: Vec<&(u64, Vec<u8>)> = resources.iter().collect();
-    res.sort_by_key(|(h, _)| *h);
-    // hash duplicado = erro (o WolvenKit aborta).
-    for w in res.windows(2) {
-        if w[0].0 == w[1].0 {
-            return Err(format!("hash duplicado: {:#018x}", w[0].0));
+    let mut ordem: Vec<&(u64, Vec<u8>)> = resources.iter().collect();
+    ordem.sort_by_key(|(hash, _)| *hash);
+    for par in ordem.windows(2) {
+        if par[0].0 == par[1].0 {
+            return Err(format!("hash duplicado: {:#018x}", par[0].0));
         }
     }
-
-    let mut out = vec![0u8; HEADER_REGION]; // header + pad (preenchido no fim)
-    let mut entries: Vec<u8> = Vec::with_capacity(res.len() * 56);
-    let mut segments: Vec<u8> = Vec::with_capacity(res.len() * 16);
-
-    for (i, (hash, cr2w)) in res.iter().enumerate() {
-        // valida: recurso sem buffers (objectsEnd == buffersEnd == tamanho). Só assim 1 segmento basta.
-        let idx = crate::archive::cr2w::parse_cr2w_index(cr2w)?;
-        if idx.header.objects_end as usize != cr2w.len()
-            || idx.header.buffers_end != idx.header.objects_end
-        {
+    for (i, (hash, bytes)) in ordem.iter().enumerate() {
+        let h = parse_cr2w_index(bytes)?.header;
+        // Segmento cru único: o recurso inteiro tem de ser objetos; buffer pediria segmento próprio.
+        if h.objects_end != h.buffers_end || h.objects_end as usize != bytes.len() {
             return Err(format!(
-                "recurso {i} ({hash:#018x}): tem buffers (objectsEnd={} buffersEnd={} len={}) — fora do escopo do writer não-comprimido",
-                idx.header.objects_end, idx.header.buffers_end, cr2w.len()
+                "recurso {i} ({hash:#018x}): tem buffers (objectsEnd={} buffersEnd={} len={}) — o empacotador sem compressão não grava buffer",
+                h.objects_end,
+                h.buffers_end,
+                bytes.len()
             ));
         }
-        let offset = out.len() as u64;
-        out.extend_from_slice(cr2w); // segmento cru (não-comprimido)
-        let size = cr2w.len() as u32;
-
-        // FileSegment (16B): offset(u64) zsize(u32) size(u32) — zsize==size (sem compressão)
-        segments.extend_from_slice(&offset.to_le_bytes());
-        segments.extend_from_slice(&size.to_le_bytes());
-        segments.extend_from_slice(&size.to_le_bytes());
-
-        // FileEntry (56B): nameHash(u64) timestamp(i64) numInlineBuf(u32) segStart(u32) segEnd(u32)
-        //                  depStart(u32) depEnd(u32) sha1(20)
-        entries.extend_from_slice(&hash.to_le_bytes());
-        entries.extend_from_slice(&0i64.to_le_bytes()); // timestamp 0 = determinístico (o jogo não valida)
-        entries.extend_from_slice(&0u32.to_le_bytes()); // numInlineBufferSegments = 0 (sem buffer)
-        entries.extend_from_slice(&(i as u32).to_le_bytes()); // segments_start
-        entries.extend_from_slice(&(i as u32 + 1).to_le_bytes()); // segments_end
-        entries.extend_from_slice(&0u32.to_le_bytes()); // deps_start
-        entries.extend_from_slice(&0u32.to_le_bytes()); // deps_end
-        entries.extend_from_slice(&sha1(cr2w)); // sha1 do recurso inteiro
     }
 
-    // pad até a página, depois o índice.
-    pad_to_page(&mut out);
-    let table_offset = out.len();
+    let mut saida = vec![0u8; EXTENDED_SIZE as usize];
+    let mut segmentos: Vec<(u64, u32)> = Vec::new();
+    for (_, bytes) in &ordem {
+        // O CR2W validado acima tem tamanho = objectsEnd (u32), então cabe no u32 do segmento.
+        segmentos.push((saida.len() as u64, bytes.len() as u32));
+        saida.extend_from_slice(bytes);
+    }
+    alinhar(&mut saida);
 
-    // corpo do índice (o "ms" do WolvenKit): counts + entries + segments (+ deps, aqui 0).
-    let mut ms = Vec::with_capacity(12 + entries.len() + segments.len());
-    ms.extend_from_slice(&(res.len() as u32).to_le_bytes()); // FileEntryCount
-    ms.extend_from_slice(&(res.len() as u32).to_le_bytes()); // FileSegmentCount
-    ms.extend_from_slice(&0u32.to_le_bytes()); // ResourceDependencyCount
-    ms.extend_from_slice(&entries);
-    ms.extend_from_slice(&segments);
+    let n = ordem.len() as u32;
+    let mut corpo = Vec::new();
+    corpo.extend_from_slice(&n.to_le_bytes());
+    corpo.extend_from_slice(&n.to_le_bytes());
+    corpo.extend_from_slice(&0u32.to_le_bytes());
+    for (i, (hash, bytes)) in ordem.iter().enumerate() {
+        let i = i as u32;
+        corpo.extend_from_slice(&hash.to_le_bytes());
+        corpo.extend_from_slice(&0i64.to_le_bytes());
+        corpo.extend_from_slice(&0u32.to_le_bytes());
+        corpo.extend_from_slice(&i.to_le_bytes());
+        corpo.extend_from_slice(&(i + 1).to_le_bytes());
+        corpo.extend_from_slice(&0u32.to_le_bytes());
+        corpo.extend_from_slice(&0u32.to_le_bytes());
+        corpo.extend_from_slice(&sha1(bytes));
+    }
+    for (offset, tamanho) in &segmentos {
+        corpo.extend_from_slice(&offset.to_le_bytes());
+        corpo.extend_from_slice(&tamanho.to_le_bytes());
+        corpo.extend_from_slice(&tamanho.to_le_bytes());
+    }
 
-    // índice em disco: file_table_offset(=8) + file_table_size(=ms+8) + crc64(ms) + ms
-    out.extend_from_slice(&8u32.to_le_bytes());
-    out.extend_from_slice(&(ms.len() as u32 + 8).to_le_bytes());
-    out.extend_from_slice(&crc64(&ms).to_le_bytes());
-    out.extend_from_slice(&ms);
-    let index_size = (out.len() - table_offset) as u32;
+    let posicao_do_indice = saida.len() as u64;
+    // Índice = deslocamento (u32) + tamanho da tabela (u32) + crc (u64) + corpo.
+    let tamanho_do_indice = u32::try_from(corpo.len() + 16).map_err(|_| "índice maior que 4 GiB".to_string())?;
+    let tamanho_da_tabela = tamanho_do_indice - DESLOCAMENTO_DA_TABELA;
+    saida.extend_from_slice(&DESLOCAMENTO_DA_TABELA.to_le_bytes());
+    saida.extend_from_slice(&tamanho_da_tabela.to_le_bytes());
+    saida.extend_from_slice(&crc64(&corpo).to_le_bytes());
+    saida.extend_from_slice(&corpo);
+    alinhar(&mut saida);
 
-    // pad até a página → filesize.
-    pad_to_page(&mut out);
-    let filesize = out.len() as u64;
+    let tamanho_total = saida.len() as u64;
+    let mut cabecalho = Vec::with_capacity(44);
+    cabecalho.extend_from_slice(&RDAR_MAGIC.to_le_bytes());
+    cabecalho.extend_from_slice(&VERSAO_RDAR.to_le_bytes());
+    cabecalho.extend_from_slice(&posicao_do_indice.to_le_bytes());
+    cabecalho.extend_from_slice(&tamanho_do_indice.to_le_bytes());
+    cabecalho.extend_from_slice(&0u64.to_le_bytes());
+    cabecalho.extend_from_slice(&0u32.to_le_bytes());
+    cabecalho.extend_from_slice(&tamanho_total.to_le_bytes());
+    cabecalho.extend_from_slice(&0u32.to_le_bytes());
+    saida[..cabecalho.len()].copy_from_slice(&cabecalho);
+    Ok(saida)
+}
 
-    // header (40B) em [0..40): magic version indexPos indexSize debugPos debugSize filesize.
-    let mut h = Vec::with_capacity(40);
-    h.extend_from_slice(&RDAR_MAGIC.to_le_bytes());
-    h.extend_from_slice(&RDAR_VERSION.to_le_bytes());
-    h.extend_from_slice(&(table_offset as u64).to_le_bytes());
-    h.extend_from_slice(&index_size.to_le_bytes());
-    h.extend_from_slice(&0u64.to_le_bytes()); // debugPosition
-    h.extend_from_slice(&0u32.to_le_bytes()); // debugSize
-    h.extend_from_slice(&filesize.to_le_bytes());
-    out[..40].copy_from_slice(&h);
-    // customDataLength (u32) @ 0x28 = [40..44): 0 (sem LxrsFooter).
-    out[40..44].copy_from_slice(&0u32.to_le_bytes());
-
-    Ok(out)
+/// Zeros até o próximo múltiplo de [`ALINHAMENTO`] (nada se já estiver alinhado).
+fn alinhar(buf: &mut Vec<u8>) {
+    let resto = buf.len() % ALINHAMENTO;
+    if resto != 0 {
+        buf.resize(buf.len() + ALINHAMENTO - resto, 0);
+    }
 }
 
 #[cfg(test)]

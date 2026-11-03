@@ -97,10 +97,10 @@ pub(crate) unsafe extern "C" fn tramp_soundbank_add(_c: *mut c_void, frame: *mut
 }
 
 
-/// Codeware `#122` (áudio): os bancos da edição do `Resource/Load` dos soundbanks — `(nome, residente, hash do caminho)` —, só durante o despacho.
+/// Áudio: os bancos da edição do `Resource/Load` dos soundbanks — `(nome, residente, hash do caminho)` —, só durante o despacho.
 pub(crate) static SOUNDBANKS_EDICAO: Mutex<Option<Vec<(u64, bool, u64)>>> = Mutex::new(None);
 
-/// Codeware `#122` (áudio): `Resource/Load` dos soundbanks com um `BwmsSoundBanks` (classe de script do `bwms-soundbanks.reds`) no `GetResource`; os
+/// Áudio: `Resource/Load` dos soundbanks com um `BwmsSoundBanks` (classe de script do `bwms-soundbanks.reds`) no `GetResource`; os
 /// ouvintes editam [`SOUNDBANKS_EDICAO`] pelos métodos dele. 0 sem a classe ou sem ouvinte.
 pub unsafe fn disparar_soundbanks(caminho: u64) -> usize {
     let Some(reg) = rtti::Registry::obtain() else {
@@ -140,12 +140,12 @@ pub unsafe fn disparar_soundbanks(caminho: u64) -> usize {
 pub(crate) static BANCOS_DE_SOM_REENVIO_PENDENTE: AtomicBool = AtomicBool::new(false);
 
 
-// ===== Reenvio dos soundbanks (Codeware `#122`): sonda do `ReadSoundBanksJson` e o tick que despacha `Resource/Load` dos soundbanks. =====
+// ===== Reenvio dos soundbanks: sonda do `ReadSoundBanksJson` e o tick que despacha `Resource/Load` dos soundbanks. =====
 use std::sync::atomic::{AtomicU64, Ordering};
 use crate::ganchos::{instalar_conferindo_prologo, original_publicado};
 use crate::marcador_individual;
 
-// Codeware `#122`, sonda de áudio (`~/.bwms-hook-c122som-teste`): `ReadSoundBanksJson` (`0x1051d4f30`) só observando, instalado no `on_load` — quando roda em
+// Sonda de áudio (`~/.bwms-hook-c122som-teste`): `ReadSoundBanksJson` (`0x1051d4f30`) só observando, instalado no `on_load` — quando roda em
 // relação à carga da dylib, se já havia ouvinte de `Resource/Load` e quantos bancos o `RegisteredBanks` (`+0x68`, tamanho `+0x70`) tem antes e depois.
 // Decide se um ouvinte registrado por script alcança o despacho dos soundbanks.
 const READ_SOUNDBANKS_JSON_VM: u64 = 0x1_051d_4f30;
@@ -211,7 +211,7 @@ pub(crate) fn c122som_teste_tick() {
     );
 }
 
-// Codeware `#122` (áudio): reenvio dos soundbanks. A leitura roda ~3 s depois da carga da dylib, antes de qualquer script (boot 185), então cada
+// Áudio: reenvio dos soundbanks. A leitura roda ~3 s depois da carga da dylib, antes de qualquer script (boot 185), então cada
 // `RegisterCallback` de `Resource/Load` pede um reenvio. No tick, com o manager visto na leitura e ouvinte, os bancos do `RegisteredBanks` viram a edição
 // do `BwmsSoundBanks`, o `Resource/Load` sai com o hash do `soundbanks.json`, e o que os ouvintes mudaram volta pro mapa: banco existente recebe residente e
 // caminho; nome novo entra pela inserção do motor (`0x1051d71dc`), com a entrada de 0x18 B no `PoolAudioSystems` e o bloco de contagem no `PoolRefCount`
@@ -299,40 +299,38 @@ pub(crate) fn bancos_de_som_tick() {
     }
 }
 
+/// Despacha os soundbanks do `manager` aos ouvintes de `Resource/Load` e grava de volta o que eles mudaram.
 unsafe fn reenviar_bancos_de_som(manager: u64) {
     let mapa = mapa_de_bancos_de_som(manager);
     if mapa.is_empty() {
         return;
     }
-    let bancos: Vec<(u64, bool, u64)> = mapa.iter().map(|(n, e, _)| campos_do_banco_de_som(*e).map_or((*n, false, 0), |(r, c)| (*n, r, c))).collect();
-    match crate::som::SOUNDBANKS_EDICAO.lock() {
-        Ok(mut edicao) => *edicao = Some(bancos),
+    let edicao: Vec<(u64, bool, u64)> =
+        mapa.iter().map(|&(nome, entrada, _)| campos_do_banco_de_som(entrada).map_or((nome, false, 0), |(residente, caminho)| (nome, residente, caminho))).collect();
+    match SOUNDBANKS_EDICAO.lock() {
+        Ok(mut e) => *e = Some(edicao),
         Err(_) => return,
     }
-    let enviados = crate::som::disparar_soundbanks(bwms_primitives::resource_path_hash(SOUNDBANKS_JSON_CAMINHO));
-    let editados = crate::som::SOUNDBANKS_EDICAO.lock().ok().and_then(|mut e| e.take()).unwrap_or_default();
+    let enviados = disparar_soundbanks(bwms_primitives::resource_path_hash(SOUNDBANKS_JSON_CAMINHO));
+    let editados = SOUNDBANKS_EDICAO.lock().ok().and_then(|mut e| e.take()).unwrap_or_default();
     BANCOS_DE_SOM_REENVIOS.fetch_add(1, Ordering::Relaxed);
     if enviados == 0 {
         return;
     }
-    let (mut mudados, mut inseridos) = (0, 0);
+    let (mut mudados, mut inseridos) = (0u64, 0u64);
     for (nome, residente, caminho) in editados {
-        match mapa.iter().find(|(n, ..)| *n == nome) {
-            Some((_, entrada, _)) => {
-                if campos_do_banco_de_som(*entrada).is_some_and(|atual| atual != (residente, caminho)) {
+        match mapa.iter().find(|b| b.0 == nome) {
+            Some(&(_, entrada, _)) => {
+                if campos_do_banco_de_som(entrada).is_some_and(|atual| atual != (residente, caminho)) {
                     ((entrada + 8) as *mut u8).write(residente as u8);
                     ((entrada + 0x10) as *mut u64).write_unaligned(caminho);
                     mudados += 1;
                 }
             }
-            None => {
-                if inserir_banco_de_som(manager, CName::lido_do_motor(nome), residente, ResourcePathHash::lido_do_motor(caminho)) {
-                    inseridos += 1;
-                }
-            }
+            None => inseridos += inserir_banco_de_som(manager, CName::lido_do_motor(nome), residente, ResourcePathHash::lido_do_motor(caminho)) as u64,
         }
     }
     BANCOS_DE_SOM_INSERIDOS.fetch_add(inseridos, Ordering::Relaxed);
-    crate::log_dev!("[c122som] soundbanks reenviados a {enviados} ouvinte(s): {} bancos, {mudados} mudados, {inseridos} novos", mapa.len());
+    crate::log_dev!("[c122som] soundbanks reenviados a {enviados} ouvinte(s): {} banco(s) no mapa, {mudados} mudado(s), {inseridos} inserido(s)", mapa.len());
 }
 

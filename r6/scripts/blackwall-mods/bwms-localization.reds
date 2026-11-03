@@ -1,5 +1,4 @@
-// bwms-localization.reds — localização de mod com variante por gênero (catálogo Codeware
-// #34/#35/#36/#38/#40). Cinco itens do catálogo dependem só deste arquivo.
+// bwms-localization.reds — localização de mod com variante por gênero.
 //
 // Os objetos ficam em `array<wref<T>>` no `ScriptableSystem`, nunca `array<ref<T>>`: com `ref`, o motor trata os objetos como posse
 // do sistema e, ao destruí-lo no world-swap do autocontinue (`phase=-1`), tenta liberá-los — crash em `red::memory::Free<PoolEngine>`,
@@ -58,8 +57,8 @@ public abstract class BwmsLocProvider extends IScriptable {
     // só sabe responder por chave (o contrato mínimo acima) continua válido e simplesmente não
     // contribui para a exportação em lote — melhor do que forçar todo provider a enumerar.
     //
-    // Existe por causa do `GetOnScreenEntries` abaixo. O Codeware resolve isso enumerando as
-    // entradas de um "package"; o BWMS não tem package, tem provider que responde por chave. Sem
+    // Existe por causa do `GetOnScreenEntries` abaixo. O BWMS não enumera entradas de um
+    // "package": tem provider que responde por chave. Sem
     // um jeito de LISTAR, não há como montar a tabela on-screen — esta é a peça que faltava.
     public func GetKeys() -> array<CName> {
         let vazio: array<CName>;
@@ -166,7 +165,7 @@ public class BwmsLocalization extends ScriptableSystem {
                     let chave: CName = chaves[k];
                     let e: localizationPersistenceOnScreenEntry;
                     // `primaryKey` é 0 no caminho de mod — o jogo usa esse campo para as entradas
-                    // COOKED dele. É o mesmo valor que o Codeware escreve.
+                    // COOKED dele.
                     e.primaryKey = 0ul;
                     e.secondaryKey = NameToString(chave);
                     e.femaleVariant = p.GetTextForGender(chave, n"Female");

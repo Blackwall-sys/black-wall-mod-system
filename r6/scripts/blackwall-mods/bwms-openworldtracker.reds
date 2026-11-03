@@ -1,8 +1,8 @@
-// bwms-openworldtracker.reds — Codeware `#142` (`OpenWorldTracker`).
+// bwms-openworldtracker.reds — `OpenWorldTracker`.
 //
 // Quando um ponto de interesse chega na fase `CompletedPhase`, o hook do Rust em `PointOfInterestMappin::SetPhase` (`0x1042eaf14`) guarda o
 // hash de journal do PoI (`GetJournalQuestPathHash`) e o tick do jogo chama esta função: a entrada passa por Inactive e volta a Active,
-// sem notificação — o que o Codeware faz, nessa ordem e sem condição.
+// sem notificação, nessa ordem e sem condição.
 // Devolve os 3 estados como `antes*100 + meio*10 + depois` (valores de `gameJournalEntryState`), ou negativo sem entrada.
 // `game` vem do Rust (`PlayerPuppet.GetGame`): dentro de uma chamada crua, `GetGameInstance()` devolve instância morta.
 // Liga com `openworldtracker = true` no `red4ext/bwms.toml`; desligado por padrão porque o estado da entrada de journal vai pro save.

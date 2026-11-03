@@ -1,8 +1,7 @@
 //! `bwms input` — merge de keybinds do Cyberpunk 2077 no macOS, 100% Rust nativo.
 //!
-//! Reimplementa o cyberpunk2077-input-loader (RED4ext, Windows) como merge
-//! offline. No macOS não há RED4ext rodando pra honrar um `input_loader.ini`;
-//! então mesclamos os mods DIRETO nos arquivos loose que o engine lê em
+//! Merge offline das binds de mods. No macOS não há carregador de binds rodando
+//! pra honrar um `input_loader.ini`; então mesclamos os mods DIRETO nos arquivos loose que o engine lê em
 //! `r6/config/` (com backup do pristino, reversível e idempotente).
 //!
 //! Mods põem suas binds em `r6/input/*.xml` (cada um um `<bindings>` com filhos
@@ -69,12 +68,12 @@ fn despachar(args: &[String]) -> Result<(), String> {
 }
 
 const USAGE: &str = "\
-input-loader — merge de keybinds (.xml) do Cyberpunk 2077 no macOS
+bwms input — merge de keybinds (.xml) do Cyberpunk 2077 no macOS
 
 USO:
-    input-loader merge   [--game <dir>]   mescla r6/input/*.xml nos config base
-    input-loader restore [--game <dir>]   volta os config ao pristino
-    input-loader status  [--game <dir>]   mostra estado + mods detectados
+    bwms input merge   [--game <dir>]   mescla r6/input/*.xml nos config base
+    bwms input restore [--game <dir>]   volta os config ao pristino
+    bwms input status  [--game <dir>]   mostra estado + mods detectados
 
 Mods vão em <game>/r6/input/*.xml. O merge é idempotente (sempre parte do
 pristino .orig) e reversível. Sem <dir>, usa CP77_DIR ou o caminho padrão.
@@ -198,7 +197,7 @@ fn cmd_restore(game: &Path) -> Result<(), String> {
 
 fn cmd_status(game: &Path) -> Result<(), String> {
     let mods = mod_files(game)?;
-    println!("# input-loader — {}", game.display());
+    println!("# bwms input — {}", game.display());
     println!("mods em r6/input: {}", mods.len());
     for m in &mods {
         println!("  {}", m.file_name().unwrap_or_default().to_string_lossy());

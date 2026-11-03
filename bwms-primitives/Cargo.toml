@@ -2,9 +2,9 @@
 # save-parser do bwms-dev): a mesma semântica dos dois lados, sem duplicar. Zero-dep. Hashes do Cyberpunk 2077
 # (TweakDBID/CRC32, murmur3 type-key, FNV-1a 32/64, ResourcePath, NodeRef, CRC-64, SHA-1, CRC-16); endereço do jogo por
 # assinatura ARM64 (`enderecos`), Mach-O (`macho`), cabeçalho do `.archive` (`rdar`) e `DynArray` do motor (`dynarray`);
-# núcleos puros de itens Codeware/ArchiveXL (`editor_texto`, `garment_ctx`, `override_state`, `regex`, `restarget`, `targets`).
-# O parser do TweakXL (`tweakxl`, com as ops canônicas em `operacoes`) mora aqui pelo mesmo motivo, com o leitor YAML
-# (`tweakxl::yaml`) que também lê o `.xl`, e o motor de instalação de mods (`instalacao`, com o formato das tabelas
+# núcleos puros (`editor_texto`, `garment_ctx`, `override_state`, `regex`, `restarget`, `targets`).
+# O parser de tweak (`tweaks`, com as ops canônicas em `operacoes`) mora aqui pelo mesmo motivo, com o leitor YAML
+# (`tweaks::yaml`) que também lê o `.xl`, e o motor de instalação de mods (`instalacao`, com o formato das tabelas
 # `red4ext/bwms-*.txt` em `tabelas` e o JSON estrito em `json`) também: a CLI instala com ele e o toggle da aba Mods no
 # jogo tem de aplicar o mesmo plano.
 [package]
@@ -12,7 +12,7 @@ name = "bwms-primitives"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.74"
-description = "Fonte única do runtime e das ferramentas do BWMS, zero-dep: hashes do Cyberpunk 2077 (TweakDBID/CRC32, murmur3, FNV-1a, ResourcePath, NodeRef, CRC-64, SHA-1, CRC-16), endereço do jogo por assinatura ARM64, Mach-O, cabeçalho RDAR, DynArray, parser do TweakXL e operações de tweak, motor de instalação de mods e suas tabelas, JSON estrito e núcleos puros de itens Codeware/ArchiveXL."
+description = "Fonte única do runtime e das ferramentas do BWMS, zero-dep: hashes do Cyberpunk 2077 (TweakDBID/CRC32, murmur3, FNV-1a, ResourcePath, NodeRef, CRC-64, SHA-1, CRC-16), endereço do jogo por assinatura ARM64, Mach-O, cabeçalho RDAR, DynArray, parser e operações de tweak, motor de instalação de mods e suas tabelas, JSON estrito e núcleos puros."
 license = "MIT OR Apache-2.0"
 
 [lib]

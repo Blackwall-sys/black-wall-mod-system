@@ -200,7 +200,7 @@ impl<'a> Lexer<'a> {
         Ok(v)
     }
 
-    /// `1ULL`/`1LL` dos `.lua` feitos para o LuaJIT valem o número.
+    /// `1ULL`/`1LL` que aparecem nos `.lua` de mods valem o número.
     fn pular_sufixo_inteiro(&mut self) {
         while matches!(self.olhar(0), b'U' | b'u' | b'L' | b'l') {
             self.i += 1;

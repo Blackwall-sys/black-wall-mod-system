@@ -1,4 +1,4 @@
-//! Os endereços do jogo em qualquer build (RED4ext `#447`, sobreviver a patch do jogo). Os endereços do código são do Steam 2.5.0; a
+//! Os endereços do jogo em qualquer build (sobreviver a patch do jogo). Os endereços do código são do Steam 2.5.0; a
 //! tabela `dados/enderecos-steam-2.5.0*.bin` (gerada pelo example `gerar_enderecos` do bwms-primitives a partir do binário Steam e dos endereços citados no fonte)
 //! guarda, pra cada um, o símbolo ou a assinatura das instruções em volta. Num build que não é o Steam (o GOG, ou um patch), o `rebase`
 //! traduz pelo resultado de uma passada no `__text` da própria imagem na memória: símbolo pelo `LC_SYMTAB`, código pela assinatura, dado

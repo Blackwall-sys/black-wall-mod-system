@@ -1,7 +1,7 @@
-// ponte-mappinsystem.reds — Codeware `World/MappinSystem.reds` (item #78, `MappinSystem.GetAllMappins()`) e a fase de ponto de
-// interesse (`#142`/`#232`).
+// ponte-mappinsystem.reds — `MappinSystem.GetAllMappins()` e a fase de ponto de
+// interesse.
 //
-// `GetAllMappins()`: o Codeware lê os campos C++ privados `MappinsLock@0x198`/`MappinsData@0x1A0` (`SortedArray<MappinData>`), mas o
+// `GetAllMappins()`: os campos C++ privados `MappinsLock@0x198`/`MappinsData@0x1A0` (`SortedArray<MappinData>`) não são lidos, porque o
 // layout do elemento do `SortedArray` no Mac nunca foi conferido. Aqui são 3 chamadas ao `MappinSystem.GetMappins(targetType, out
 // mappins)` vanilla (`cp77-symbols/redscript-src/orphans.script`), uma por valor de `gamemappinsMappinTargetType` (`World`/`Minimap`/
 // `Map`), fundidas sem repetir handle (`ArrayContains`): todos os mappins ativos, sem campo cru nem endereço nativo.
@@ -32,14 +32,10 @@ public func GetAllMappins() -> array<ref<IMappin>> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Codeware `#142`/`#232` — `MappinSystem.hpp`:
+// Fase de ponto de interesse no `MappinSystem`:
 //
-//   namespace Raw::MappinSystem {
-//   constexpr auto SetPoiMappinPhase = Core::RawVFunc</* addr = */ 0x1D0,
-//       void(const uint32_t aJournalPath, const gamedataMappinPhase aMappinPhase)>();
-//   constexpr auto GetPoiMappinPhase = Core::RawVFunc</* addr = */ 0x3C8,
-//       gamedataMappinPhase(const uint32_t aJournalPath)>();
-//   }
+//   SetPoiMappinPhase  slot 0x1D0  void(uint32_t journalPath, gamedataMappinPhase phase)
+//   GetPoiMappinPhase  slot 0x3C8  gamedataMappinPhase(uint32_t journalPath)
 //
 // São slots de VTABLE (offset Windows em bytes). No Mac os slots NÃO saem de "Windows + 0x08": foram medidos na vtable real do
 // `MappinSystem` (`MAPPIN_SET/GET_POI_PHASE_SLOT`, missoes_e_mapa/mod.rs) — `0x3D0` é o setter e `0x3D8` o getter, os dois sobre o
@@ -57,7 +53,7 @@ public func SetPoiMappinPhase(journalPath: Uint32, phase: gamedataMappinPhase) -
     BwmsMappinSystemSetPoiPhase(this, journalPath, EnumInt(phase));
 }
 
-// Só leitura: o byte cru de flags da entrada, convertido pro enum — não é a fase do Codeware. 0 quando a entrada não existe.
+// Só leitura: o byte cru de flags da entrada, convertido pro enum — não é uma fase de verdade. 0 quando a entrada não existe.
 @addMethod(MappinSystem)
 public func GetPoiMappinPhase(journalPath: Uint32) -> gamedataMappinPhase {
     return IntEnum<gamedataMappinPhase>(BwmsMappinSystemGetPoiPhase(this, journalPath));

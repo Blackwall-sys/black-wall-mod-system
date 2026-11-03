@@ -13,7 +13,7 @@ use std::sync::Mutex;
 use crate::rtti::{self, Registry};
 use crate::register::*;
 
-// ===== Codeware `#204` — `BwmsJobQueue` (`bwms-job-queue.reds`) =====
+// ===== `BwmsJobQueue` (`bwms-job-queue.reds`) =====
 //
 // O `Handle` de um objeto de script vira job no pool do motor pela fila (`JobQueue`) do 48b: descritor {corpo, alvo, família} no despachante
 // `0x104ddf514`, e o corpo recebe o grupo do job. Sem tamanho, um job; com tamanho, um job por lote cobrindo [0, size) e, depois do `SyncWait` da fila,
@@ -231,7 +231,7 @@ pub(crate) unsafe fn jobhandle_soltar(job: &mut u64) {
     }
 }
 
-// ===== `JobQueue` — Codeware `#23`: fachada estática, atalho SÍNCRONO =====
+// ===== `JobQueue` — fachada estática, atalho SÍNCRONO =====
 //
 // `JobQueue.DispatchJob(job)` resolve `Handle` no objeto e chama sem argumento, na hora, dentro da própria chamada (`rtti::call_func`); `true` se achou
 // e chamou. A fila real do motor é o `BwmsJobQueue` acima: pool de threads, lotes `Handle(de, até)` + `Finish`, `Wait`, `Finalize` com o JobHandle e

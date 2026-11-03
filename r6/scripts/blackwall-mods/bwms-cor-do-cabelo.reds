@@ -1,6 +1,5 @@
 // bwms-cor-do-cabelo.reds — a cor de cabelo ativa pelas opções de customização da cabeça. Helper do
-// BWMS: no ArchiveXL, o `CharacterCustomizationHelper::GetHairColor` é interno e só alimenta a aparência dinâmica (no BWMS, o estado
-// dinâmico da entidade calcula a cor por conta própria).
+// BWMS, à parte da aparência dinâmica (o estado dinâmico da entidade calcula a cor por conta própria).
 //
 // Cadeia só de script vanilla: `GameInstance.GetCharacterCustomizationSystem(game).GetHeadOptions()` dá as opções; a de cor é a do slot
 // `hair_color` — o `GetSlotName` vanilla agrupa estilo e cor sob `"UI_Hairs"` só pro enquadramento da câmera, então esse rótulo não

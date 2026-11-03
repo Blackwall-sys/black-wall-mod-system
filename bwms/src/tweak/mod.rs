@@ -12,17 +12,16 @@
 //! O `tweakdb.bin` do jogo vem embutido (este Mac); override por `CP77_DIR`.
 //! `ep1` seleciona o `tweakdb_ep1.bin` (Phantom Liberty).
 
-// Uma cópia só do decodificador, a do `bwms archive`; o `names` o alcança por `super::kraken`.
-use crate::archive::kraken;
 mod names;
 mod tweakdb;
 mod ui;
 mod writer;
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::process::ExitCode;
 
-use bwms_primitives::tweakxl::{self, registro, template, toml, tweak_source, yaml};
+use bwms_primitives::tweaks::{self, registro, template, toml, tweak_source, yaml};
 
 use names::NameDb;
 use tweakdb::TweakDb;
@@ -57,8 +56,10 @@ USO:
     tweakdb-tool roundtrip [<file|ep1>]
 
 Sem <file>, usa o tweakdb.bin do jogo (embutido; override CP77_DIR). `ep1` usa
-o tweakdb_ep1.bin (Phantom Liberty). Os nomes (TweakDBID → texto) vêm da
-tweakdbstr.kark do projeto (embutida); `--no-names` desliga.
+o tweakdb_ep1.bin (Phantom Liberty). O tweakdb.bin só guarda o hash de cada
+nome; para ver nomes, passe uma lista sua com `--nomes <arquivo>` (em qualquer
+comando) ou na variável BWMS_NOMES: texto, um nome de record/flat por linha,
+`#` comenta. Sem lista, os ids aparecem pelo hash; `--no-names` desliga.
 
 COMANDOS:
     info       Resumo de uma linha (versões, contagens).
@@ -90,7 +91,7 @@ COMANDOS:
     check      Valida um changeset SEM gravar nada (dry-run): confere se cada flat
                existe, se o tipo é editável e se o valor parseia (faixa/sintaxe).
                Sai com erro se houver qualquer problema — use antes de instalar.
-    apply-yaml Aplica um tweak no formato declarativo do TweakXL (.yaml): flats
+    apply-yaml Aplica um tweak no formato declarativo (.yaml): flats
                escalar/array/struct, `$base` (clone+overrides), `$type` (cria de
                amostra), tags de array (!append/!prepend/-once/!remove), records
                INLINE (mapa com $type/$base num flat), !append-from/!merge/
@@ -99,7 +100,7 @@ COMANDOS:
     apply-toml Igual ao apply-yaml, mas em TOML (front-end nativo, zero-dep). Record
                = [Items.MeuItem]; flat = `chave = valor`; `'$base' = '...'`; op de
                array = item `{ '!append' = 'X' }` num array. Mesma engine/saida.
-    apply-tweak Formato-texto NATIVO `.tweak` do TweakXL (3ª via de autoria, distinta
+    apply-tweak Formato-texto NATIVO `.tweak` (3ª via de autoria, distinta
                de YAML/TOML): `package Nome` opcional, `using A, B` opcional,
                `Items.Novo : Items.Base { int dano = 50; tags += \"X\"; }` (grupos com
                herança opcional, flats tipados `=`/`+=`/`-=`). Fora do escopo: valor
@@ -134,6 +135,18 @@ pub fn run(args: &[String]) -> ExitCode {
 }
 
 fn despachar(args: &[String]) -> Result<(), String> {
+    let mut resto: Vec<String> = Vec::with_capacity(args.len());
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        if a == "--nomes" {
+            let caminho = it.next().ok_or("--nomes exige um arquivo")?;
+            // Um processo da CLI roda um comando só: o caminho é fixado uma vez, antes do despacho.
+            let _ = CAMINHO_DOS_NOMES.set(PathBuf::from(caminho));
+        } else {
+            resto.push(a.clone());
+        }
+    }
+    let args: &[String] = &resto;
     let Some(first) = args.first() else {
         print!("{USAGE}");
         return Ok(());
@@ -199,44 +212,29 @@ fn game_root() -> PathBuf {
         .unwrap_or_else(|| candidates.first().cloned().unwrap_or_else(|| PathBuf::from(".")))
 }
 
-/// Caminho da lista de nomes (tweakdbstr.kark). Ordem: `TWEAKDB_NAMES` → ao lado
-/// do executável (binário shipado leva a .kark junto) → o path compilado (dev).
-fn default_names_path() -> PathBuf {
-    if let Some(p) = std::env::var_os("TWEAKDB_NAMES") {
-        return PathBuf::from(p);
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let beside = dir.join("tweakdbstr.kark");
-            if beside.is_file() {
-                return beside;
-            }
-        }
-    }
-    // sem env! (não embute o caminho do projeto no binário). Sem o arquivo ao lado do
-    // exe nem TWEAKDB_NAMES, segue sem nomes (não-fatal).
-    PathBuf::from("tweakdbstr.kark")
+/// Lista de nomes dada por `--nomes <arquivo>` (o `despachar` tira a opção dos argumentos do comando).
+static CAMINHO_DOS_NOMES: OnceLock<PathBuf> = OnceLock::new();
+
+/// O que dizer quando um comando precisa de nomes e o usuário não deu a lista.
+const SEM_LISTA_DE_NOMES: &str = "passe a lista de nomes com --nomes <arquivo> ou BWMS_NOMES (um nome de record/flat por linha)";
+
+/// Caminho da lista de nomes: `--nomes` → `BWMS_NOMES`. Sem nenhum, segue sem nomes.
+fn names_path() -> Option<PathBuf> {
+    CAMINHO_DOS_NOMES
+        .get()
+        .cloned()
+        .or_else(|| std::env::var_os("BWMS_NOMES").map(PathBuf::from))
 }
 
-/// Carrega os nomes (se não desligado e o arquivo existir). Erros não são fatais.
+/// Carrega os nomes (se não desligado e houver lista). Erros não são fatais.
 fn load_names(no_names: bool) -> Option<NameDb> {
     if no_names {
         return None;
     }
-    let path = default_names_path();
-    if !path.is_file() {
-        return None;
-    }
+    let path = names_path()?;
     match NameDb::load(&path) {
         Ok(db) => {
-            eprintln!(
-                "nomes: {} ({} records, {} flats, {} queries) de {}",
-                db.len(),
-                db.records,
-                db.flats,
-                db.queries,
-                path.display()
-            );
+            eprintln!("nomes: {} de {}", db.len(), path.display());
             Some(db)
         }
         Err(e) => {
@@ -421,7 +419,7 @@ fn cmd_find(args: &[String]) -> Result<(), String> {
         }
     }
     let needle = needle.ok_or("find exige <texto>")?;
-    let names = load_names(false).ok_or("lista de nomes indisponível (precisa da tweakdbstr.kark)")?;
+    let names = load_names(false).ok_or_else(|| format!("find procura pelo nome: {SEM_LISTA_DE_NOMES}"))?;
     let db = open(file)?;
 
     // Constrói o índice nome→valor: lê todos os flats resolvidos uma vez.
@@ -536,7 +534,7 @@ fn cmd_dump(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// Emite um binário compacto só com os flats ESCALARES que o CET lê
+/// Emite um binário compacto só com os flats ESCALARES que a camada Lua lê
 /// (Float/Int/Bool/CName/TweakDBID), ordenado por TweakDBID p/ busca binária.
 /// Formato: "BWTDB01\0" (8) + count u64 LE (8) + N×{id u64 LE, val u64 LE, tag u8}.
 /// tag: 1=Float (val=f32 bits), 2=Int (val=i64), 3=Bool, 4=CName (val=FNV1a64 da
@@ -682,7 +680,7 @@ fn cmd_list_areas(args: &[String]) -> Result<(), String> {
             pos.push(a);
         }
     }
-    let names = load_names(false).ok_or("list-areas precisa da lista de nomes (tweakdbstr.kark)")?;
+    let names = load_names(false).ok_or_else(|| format!("list-areas agrupa pelo nome: {SEM_LISTA_DE_NOMES}"))?;
     let db = open(pos.first().copied())?;
     let mut areas: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
     let (mut total, mut resolved) = (0u64, 0u64);
@@ -720,7 +718,7 @@ fn cmd_record(args: &[String]) -> Result<(), String> {
         }
     }
     let record = *pos.first().ok_or("record exige <Record.Name>")?;
-    let names = load_names(false).ok_or("record precisa da lista de nomes (tweakdbstr.kark)")?;
+    let names = load_names(false).ok_or_else(|| format!("record acha os flats pelo nome: {SEM_LISTA_DE_NOMES}"))?;
     let db = open(pos.get(1).copied())?;
 
     let prefix = format!("{record}.");
@@ -774,7 +772,8 @@ fn cmd_records(args: &[String]) -> Result<(), String> {
             other => return Err(format!("opção desconhecida em records: '{other}'")),
         }
     }
-    let names = load_names(false).ok_or("records precisa da lista de nomes (tweakdbstr.kark)")?;
+    // Sem lista, os records contam como "sem nome resolvido" e o type_key segue em hex.
+    let names = load_names(false).unwrap_or_else(NameDb::vazia);
     let db = open(pos.first().copied())?;
 
     // --like / --class / --key escolhem um type_key e listam os records dele.
@@ -875,7 +874,7 @@ fn cmd_create(args: &[String]) -> Result<(), String> {
         .ok_or("create exige --class <ClasseRED> (ex.: Clothing, gamedataWeaponItem_Record)")?;
     let file = pos.get(1).copied();
 
-    let names = load_names(false).ok_or("create precisa da lista de nomes (tweakdbstr.kark)")?;
+    let names = load_names(false).ok_or_else(|| format!("create acha a amostra da classe pelo nome: {SEM_LISTA_DE_NOMES}"))?;
     let in_path = resolve_file(file);
     let db = open(file)?;
     let mut model = Model::from_db(&db).map_err(|e| format!("modelo: {e}"))?;
@@ -911,7 +910,7 @@ fn cmd_clone(args: &[String]) -> Result<(), String> {
     let dst = *pos.get(1).ok_or("clone exige <Dst.Record>")?;
     let file = pos.get(2).copied();
 
-    let names = load_names(false).ok_or("clone precisa da lista de nomes (tweakdbstr.kark)")?;
+    let names = load_names(false).ok_or_else(|| format!("clone acha os flats do record pelo nome: {SEM_LISTA_DE_NOMES}"))?;
     let in_path = resolve_file(file);
     let db = open(file)?;
     let mut model = Model::from_db(&db).map_err(|e| format!("modelo: {e}"))?;
@@ -1199,7 +1198,7 @@ fn cmd_apply_toml(args: &[String]) -> Result<(), String> {
     apply_decl(args, "apply-toml", toml::parse)
 }
 
-/// `apply-tweak <arquivo.tweak> [db] [-o out] [--check]` — TweakXL `#48`, a 3ª via de autoria
+/// `apply-tweak <arquivo.tweak> [db] [-o out] [--check]` — a 3ª via de autoria
 /// (formato-texto nativo, distinto de YAML/TOML). Ao contrário de `apply_decl`, não passa pelo
 /// `Node`/`template::expand` (o `.tweak` não tem `$instances`, e `tweak_source::parse` já produz
 /// `Vec<Op>` direto) — o resto (abrir DB, aplicar, reportar, gravar) é idêntico, por isso
@@ -1265,7 +1264,7 @@ fn apply_decl(
     let text = std::fs::read_to_string(src_path).map_err(|e| format!("lendo {src_path}: {e}"))?;
     let root = parse(&text)?;
     let root = template::expand(&root)?; // $instances → records concretos
-    let ops = tweakxl::interpret_from(&root, src_path)?;
+    let ops = tweaks::interpret_from(&root, src_path)?;
     if ops.is_empty() {
         return Err(format!("{src_path} não produziu nenhuma operação"));
     }
@@ -1290,7 +1289,11 @@ fn apply_ops_and_report(
         ),
         None => None,
     };
-    let names = load_names(false).ok_or_else(|| format!("{cmd} precisa da lista de nomes (tweakdbstr.kark)"))?;
+    // Sem lista, só `$base`/`$type` falham (acham os flats pelo nome); o resto do tweak aplica.
+    let names = load_names(false).unwrap_or_else(|| {
+        eprintln!("{cmd}: sem lista de nomes, `$base`/`$type` não acham flats ({SEM_LISTA_DE_NOMES}).");
+        NameDb::vazia()
+    });
     let in_path = resolve_file(file);
     let db = open(file)?;
     let mut model = Model::from_db(&db).map_err(|e| format!("modelo: {e}"))?;
@@ -1598,7 +1601,7 @@ fn cmd_heranca(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// `registro <arquivo.yaml|toml> [db]` — TweakXL `#7`/`#38`/`#39`/`#40`.
+/// `registro <arquivo.yaml|toml> [db]`.
 ///
 /// Responde "o que este mod toca de verdade?" sem aplicar nada: quais records ele afeta, quais
 /// records ele passa a referenciar (chave estrangeira), quais recursos ele passa a puxar, e
@@ -1627,7 +1630,7 @@ fn cmd_registro(args: &[String]) -> Result<(), String> {
             yaml::parse(&text)?
         };
         let root = template::expand(&root)?;
-        tweakxl::interpret_from(&root, src_path)?
+        tweaks::interpret_from(&root, src_path)?
     };
 
     // hash do flat → espécie, direto dos grupos de tipo do DB real.

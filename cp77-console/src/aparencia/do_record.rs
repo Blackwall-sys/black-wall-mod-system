@@ -1,9 +1,8 @@
-//! Aparência do record no spawn (ArchiveXL `#63`/`#101`, o `EntitySpawnerPatch`). Os três caminhos da interface do `EntitySpawner` (slots
+//! Aparência do record no spawn. Os três caminhos da interface do `EntitySpawner` (slots
 //! `+0x10`, `+0x18` e `+0x20` da vtable `0x1078c9dd0`) montam um pedido interno e convergem em `0x1019f8d60` (caminho do template `x0`,
 //! pedido `x1`, saída por sret `x8`), o spawn por template. Nesse pedido o record vai em `+0xE0` e a aparência em `+0xC0`; no caminho com
 //! record (slot `+0x18`) a aparência nasce vazia, e um record de mod com `appearanceName` saía com a aparência padrão do template. Com record e
-//! aparência vazia ou "default" (`pedida_livre`), entra a do flat `<record>.appearanceName` quando ele tem nome (`nome_lido_do_record`), a
-//! regra do `EntitySpawnerPatch.cpp:17-23` da referência.
+//! aparência vazia ou "default" (`pedida_livre`), entra a do flat `<record>.appearanceName` quando ele tem nome (`nome_lido_do_record`).
 
 use core::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -145,7 +144,7 @@ unsafe extern "C" fn shim() {
     )
 }
 
-/// Gancho sempre ligado (como o patch da referência), posto no `on_load`.
+/// Gancho sempre ligado, posto no `on_load`: sem registro o gancho só repassa.
 pub(crate) unsafe fn instalar() {
     if ORIG.load(Ordering::Relaxed) != 0 {
         return;

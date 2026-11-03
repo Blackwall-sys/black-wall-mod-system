@@ -1,4 +1,4 @@
-// ArchiveXL #47 (`CustomizationExtension`) — os 3 eventos nativos de customização do jogo
+// Os 3 eventos nativos de customização do jogo
 // (`gameuiCharacterCustomizationSystem_On{AppearanceApplied,AppearanceSwitched,OptionUpdated}Event`, usados pelo vanilla em
 // `characterCreationBodyMorphMenu.script`) encaminhados pro CallbackSystem do BWMS por `@wrapMethod` na classe vanilla
 // `characterCreationBodyMorphMenu`. Essa tela é a da criação de personagem e também a do espelho do mundo
@@ -10,7 +10,7 @@
 // `kind`: 0 = AppearanceApplied, 1 = AppearanceSwitched, 2 = OptionUpdated; os eventos se distinguem pelo nome de despacho
 // (`Customization/AppearanceApplied` etc.), não por campo do objeto.
 //
-// O resto da customização em runtime do ArchiveXL (aparência dinâmica, opções de mod) vive em outros arquivos e no Rust. O disparo
+// O resto da customização em runtime (aparência dinâmica, opções de mod) vive em outros arquivos e no Rust. O disparo
 // destes 3 eventos pela tela não tem prova ao vivo: a tela só abre navegando a UI de customização.
 
 public native class CustomizationEvent extends CallbackSystemEvent {}

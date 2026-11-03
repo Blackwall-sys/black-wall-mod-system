@@ -1,11 +1,11 @@
-// bwms-ui-popup.reds — diálogo modal de mod (catálogo Codeware #102/#103/#105/#106/#108/#111). Seis itens do catálogo saem deste arquivo.
+// bwms-ui-popup.reds — diálogo modal de mod.
 //
 // Os objetos ficam em `array<wref<T>>` no `ScriptableSystem`, nunca `array<ref<T>>`: com `ref`, o motor trata os objetos como posse
 // do sistema e, ao destruí-lo no world-swap do autocontinue (`phase=-1`), tenta liberá-los — crash em `red::memory::Free<PoolEngine>`,
 // null deref na GameThread. Com `wref` o sistema só observa; quem criou o objeto continua dono dele.
 //
-// A ESTRUTURA, e por que é uma só: o Codeware tem um tipo por combinação (popup de
-// jogo, popup de menu, conteúdo, cabeçalho, rodapé...). Isso multiplica arquivo sem multiplicar
+// A ESTRUTURA, e por que é uma só: um tipo por combinação (popup de
+// jogo, popup de menu, conteúdo, cabeçalho, rodapé...) multiplica arquivo sem multiplicar
 // capacidade — as diferenças reais entre eles são o texto e quais botões aparecem. Aqui é UM
 // popup com três faixas (cabeçalho, corpo, rodapé) e uma pilha que sabe qual está por cima.
 //

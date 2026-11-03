@@ -1,4 +1,4 @@
-//! Expansão de templates `$instances` do TweakXL — pré-processamento puro da AST
+//! Expansão de templates `$instances` — pré-processamento puro da AST
 //! ([`yaml::Node`]), rodado ANTES do `interpret`. Não toca no jogo nem no .bin.
 //!
 //! Um template é um nó (top-level ou item de array) com a chave `$instances`: uma
@@ -8,121 +8,92 @@
 //!
 //! Placeholder: `$(nome)` ou `${nome}`. Quando o escalar é SÓ o placeholder, ele é
 //! trocado pelo valor inteiro do dado (pode ser não-escalar); embutido numa string,
-//! faz substituição textual. Dado ausente/não-escalar embutido → removido (igual ao
-//! `FormatString` do TweakXL).
+//! faz substituição textual. Dado ausente/não-escalar embutido → removido.
 
 use std::collections::HashMap;
 
-use crate::tweakxl::yaml::{Kind, Node};
+use crate::tweaks::yaml::{Kind, Node};
 
 type Data = HashMap<String, Node>;
 
 /// Expande os `$instances` do documento. Idempotente em docs sem templates.
 pub fn expand(root: &Node) -> Result<Node, String> {
-    let Kind::Map(entries) = &root.kind else {
+    let Kind::Map(entradas) = &root.kind else {
         return Ok(root.clone());
     };
-    let empty = Data::new();
-    let mut out: Vec<(String, Node)> = Vec::new();
-    for (key, node) in entries {
-        match node.get("$instances") {
-            Some(inst) => {
-                let Kind::Seq(items) = &inst.kind else {
-                    return Err(format!("'{key}': $instances precisa ser uma lista"));
+    let sem_dados = Data::new();
+    let mut saida = Vec::with_capacity(entradas.len());
+    for (chave, valor) in entradas {
+        let Some(instancias) = valor.get("$instances") else {
+            saida.push((chave.clone(), substituir(valor, &sem_dados)));
+            continue;
+        };
+        let itens = instancias
+            .as_seq()
+            .ok_or_else(|| format!("'{chave}': $instances precisa ser uma lista de mapas (`- {{ nome: valor }}`)"))?;
+        let corpo = sem_instances(valor);
+        for item in itens {
+            let campos = item
+                .as_map()
+                .ok_or_else(|| format!("'{chave}': cada item de $instances precisa ser um mapa (`- {{ nome: valor }}`)"))?;
+            let dados: Data = campos.iter().cloned().collect();
+            saida.push((format_string(chave, &dados), substituir(&corpo, &dados)));
+        }
+    }
+    Ok(Node { aspas: root.aspas, tag: root.tag.clone(), kind: Kind::Map(saida) })
+}
+
+/// O mapa sem a chave `$instances`, com a mesma tag.
+fn sem_instances(node: &Node) -> Node {
+    let entradas = node.as_map().unwrap_or(&[]).iter().filter(|(k, _)| k != "$instances").cloned().collect();
+    Node { aspas: node.aspas, tag: node.tag.clone(), kind: Kind::Map(entradas) }
+}
+
+/// O nó com os placeholders trocados pelos `dados`. Só item de array expande `$instances`: no mapa a chave fica e os itens são valor.
+fn substituir(node: &Node, dados: &Data) -> Node {
+    match &node.kind {
+        Kind::Scalar(s) if !s.contains('$') => node.clone(),
+        Kind::Scalar(s) => match whole_placeholder(s).and_then(|nome| dados.get(nome)) {
+            Some(dado) => {
+                let mut copia = dado.clone();
+                if copia.tag.is_none() {
+                    copia.tag = node.tag.clone();
+                }
+                copia
+            }
+            None => Node { aspas: node.aspas, tag: node.tag.clone(), kind: Kind::Scalar(format_string(s, dados)) },
+        },
+        Kind::Map(entradas) => Node {
+            aspas: node.aspas,
+            tag: node.tag.clone(),
+            kind: Kind::Map(entradas.iter().map(|(k, v)| (k.clone(), substituir(v, dados))).collect()),
+        },
+        Kind::Seq(itens) => {
+            let mut saida = Vec::with_capacity(itens.len());
+            for item in itens {
+                let Some(instancias) = item.get("$instances").and_then(Node::as_seq) else {
+                    saida.push(substituir(item, dados));
+                    continue;
                 };
-                let body = strip_key(node, "$instances");
-                for it in items {
-                    let data = prepare(it, &empty)?;
-                    let name = format_string(key, &data);
-                    let mut n = body.clone();
-                    process(&mut n, &data);
-                    out.push((name, n));
-                }
-            }
-            None => {
-                // Sem template no topo: ainda processa placeholders/$instances aninhados.
-                let mut n = node.clone();
-                process(&mut n, &empty);
-                out.push((key.clone(), n));
-            }
-        }
-    }
-    Ok(Node { aspas: false, tag: root.tag.clone(), kind: Kind::Map(out) })
-}
-
-/// Constrói o mapa de dados de um item de `$instances` (herda os dados externos).
-fn prepare(node: &Node, outer: &Data) -> Result<Data, String> {
-    let Kind::Map(entries) = &node.kind else {
-        return Err("cada item de $instances precisa ser um mapa de dados".into());
-    };
-    let mut d = outer.clone();
-    for (k, v) in entries {
-        d.insert(k.clone(), v.clone());
-    }
-    Ok(d)
-}
-
-/// Substitui placeholders no nó (recursivo), expandindo `$instances` aninhados em
-/// arrays.
-fn process(node: &mut Node, data: &Data) {
-    match &mut node.kind {
-        Kind::Scalar(s) => {
-            if !s.contains('$') {
-                return;
-            }
-            if let Some(key) = whole_placeholder(s) {
-                if let Some(v) = data.get(key) {
-                    let tag = node.tag.take();
-                    *node = v.clone();
-                    if node.tag.is_none() {
-                        node.tag = tag;
-                    }
-                    return;
-                }
-            }
-            *s = format_string(s, data);
-        }
-        Kind::Map(entries) => {
-            for (_, v) in entries.iter_mut() {
-                process(v, data);
-            }
-        }
-        Kind::Seq(items) => {
-            let mut expanded: Vec<Node> = Vec::with_capacity(items.len());
-            for it in items.iter() {
-                match it.get("$instances") {
-                    Some(inst) if matches!(inst.kind, Kind::Seq(_)) => {
-                        let Kind::Seq(insts) = &inst.kind else { unreachable!() };
-                        let body = strip_key(it, "$instances");
-                        for inst_item in insts {
-                            let d = match prepare(inst_item, data) {
-                                Ok(d) => d,
-                                Err(_) => continue,
-                            };
-                            let mut n = body.clone();
-                            process(&mut n, &d);
-                            // `$value` (não-mapa) → o item vira só esse valor.
-                            if let Some(val) = n.get("$value").cloned() {
-                                if !matches!(val.kind, Kind::Map(_)) {
-                                    let mut vn = val;
-                                    if vn.tag.is_none() {
-                                        vn.tag = it.tag.clone();
-                                    }
-                                    expanded.push(vn);
-                                    continue;
-                                }
+                let corpo = sem_instances(item);
+                // Elemento que não é mapa não traz dado nenhum: é pulado.
+                for campos in instancias.iter().filter_map(Node::as_map) {
+                    let mut dados_do_item = dados.clone();
+                    dados_do_item.extend(campos.iter().cloned());
+                    let gerado = substituir(&corpo, &dados_do_item);
+                    match gerado.get("$value") {
+                        Some(valor) if !matches!(valor.kind, Kind::Map(_)) => {
+                            let mut v = valor.clone();
+                            if v.tag.is_none() {
+                                v.tag = item.tag.clone();
                             }
-                            expanded.push(n);
+                            saida.push(v);
                         }
-                    }
-                    _ => {
-                        let mut it2 = it.clone();
-                        process(&mut it2, data);
-                        expanded.push(it2);
+                        _ => saida.push(gerado),
                     }
                 }
             }
-            *items = expanded;
+            Node { aspas: node.aspas, tag: node.tag.clone(), kind: Kind::Seq(saida) }
         }
     }
 }
@@ -150,7 +121,7 @@ fn whole_placeholder(s: &str) -> Option<&str> {
 }
 
 /// Substituição textual de placeholders `$(nome)`/`${nome}` numa string. Dado
-/// ausente ou não-escalar → o placeholder é removido (igual ao TweakXL).
+/// ausente ou não-escalar → o placeholder é removido.
 fn format_string(input: &str, data: &Data) -> String {
     let mut out = String::new();
     let mut rest = input;
@@ -187,20 +158,10 @@ fn format_string(input: &str, data: &Data) -> String {
     out
 }
 
-/// Clona o nó (mapa) sem uma chave.
-fn strip_key(node: &Node, key: &str) -> Node {
-    if let Kind::Map(entries) = &node.kind {
-        let kept = entries.iter().filter(|(k, _)| k != key).cloned().collect();
-        Node { aspas: false, tag: node.tag.clone(), kind: Kind::Map(kept) }
-    } else {
-        node.clone()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tweakxl::yaml;
+    use crate::tweaks::yaml;
 
     fn top(node: &Node) -> Vec<(String, Node)> {
         match &node.kind {
